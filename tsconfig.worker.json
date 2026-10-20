@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "types": ["./worker-configuration.d.ts", "vite/client"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "lib": ["ES2023", "DOM"],
+    "paths": {
+      "react": ["./node_modules/preact/compat/"],
+      "react/jsx-runtime": ["./node_modules/preact/jsx-runtime/"],
+      "react/jsx-dev-runtime": ["./node_modules/preact/jsx-dev-runtime/"],
+      "react-dom": ["./node_modules/preact/compat/"],
+      "server-only": ["./worker/shims/server-only.ts"]
+    }
+  },
+  "include": ["worker"],
+  "exclude": ["worker/**/*.test.ts", "worker/**/*.test.tsx"]
+}

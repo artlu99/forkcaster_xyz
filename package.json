@@ -1,0 +1,28 @@
+{
+	"name": "forkcaster",
+	"version": "0.0.1",
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.15",
+		"@cloudflare/vite-plugin": "^1.63.1",
+		"@preact/preset-vite": "^2.10.6",
+		"@types/node": "^26.6.5",
+		"vite": "^8.3.4",
+		"wrangler": "^4.149.0"
+	},
+	"private": true,
+	"scripts": {
+		"build": "vite build",
+		"typecheck": "bun check",
+		"lint": "biome lint .",
+		"deploy": "bun run build && wrangler deploy",
+		"cf-typegen": "wrangler types"
+	},
+	"type": "module",
+	"dependencies": {
+		"hono": "^4.13.13",
+		"preact": "^11.0.1",
+		"preact-render-to-string": "^6.8.0",
+		"react-farcaster-embed": "^1.11.0",
+		"simple-icons": "^16.35.0"
+	}
+}
