@@ -87,6 +87,16 @@ export const CLIENTS: ClientDefinition[] = [
 		// documented anywhere; web-only until one surfaces.
 		web: "https://firefly.social/post/farcaster/{fullHash}",
 	},
+	// Per-cast format verified against the open-source client
+	// (github.com/backmeupplz/quilcast, server/index.mjs): the /c/ route
+	// matches /(?:0x)?([0-9a-f]{40})/ — {fullHash} required, the route
+	// hash can be shorter. Live-checked against a real cast.
+	{
+		id: "quilcast",
+		title: "Quilcast",
+		logoUrl: "/logos/quilcast.svg",
+		web: "https://quilcast.com/c/{fullHash}",
+	},
 	// Per-cast format verified against fc-clients-cast-action
 	// (github.com/artlu99/fc-clients-cast-action, src/lib/deeplink.ts):
 	// frame castId hashes are always full-form, hence {fullHash}.

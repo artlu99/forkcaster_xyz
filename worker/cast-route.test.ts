@@ -275,9 +275,11 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	expect(body).toContain('data-client="farcaster"');
 	expect(body).toContain('data-client="firefly"');
 	expect(body).toContain('data-client="neynar"');
+	expect(body).toContain('data-client="quilcast"');
 	expect(body).toContain("/logos/farcaster.svg");
 	expect(body).toContain("/logos/firefly.png");
 	expect(body).toContain("/logos/neynar.png");
+	expect(body).toContain("/logos/quilcast.svg");
 	// Per-cast templates interpolate.
 	expect(body).toContain(`href="https://farcaster.xyz/zoo/${SHORT_HASH}"`);
 	expect(body).toContain(
@@ -285,6 +287,11 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	);
 	// Format verified against fc-clients-cast-action: full-hash based.
 	expect(body).toContain(`href="https://explorer.neynar.com/${FULL_HASH}"`);
+	// Format verified against backmeupplz/quilcast: /c/ requires 40 hex
+	// (optional 0x) — the full hash.
+	expect(body).toContain(
+		`href="https://quilcast.com/c/${FULL_HASH}"`,
+	);
 	// Farcaster ships the only native scheme — verified against the
 	// open-source app (farcasterxyz/client): scheme paths mirror the web
 	// path, /{username}/{fullHash}. Web href stays canonical; scheme +

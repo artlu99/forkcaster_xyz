@@ -75,8 +75,8 @@ describe("clientsForPage", () => {
 			(c) => c.id,
 		);
 		// Every registry client today has a satisfiable template —
-		// farcaster/firefly/neynar stay.
-		expect(offered).toEqual(["farcaster", "firefly", "neynar"]);
+		// farcaster/firefly/quilcast/neynar stay.
+		expect(offered).toEqual(["farcaster", "firefly", "quilcast", "neynar"]);
 	});
 
 	test("hides requiresSigned clients only on a known signed:false", () => {
@@ -92,6 +92,7 @@ describe("clientsForPage", () => {
 		expect(CLIENTS.map((c) => c.id)).toEqual([
 			"farcaster",
 			"firefly",
+			"quilcast",
 			"neynar",
 		]);
 		for (const client of CLIENTS) {
