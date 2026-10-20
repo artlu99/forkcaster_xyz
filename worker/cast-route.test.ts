@@ -187,11 +187,15 @@ test("GET /:username/:hash hides the farcaster link when the author has not sign
 	);
 	// URL embed unfurl failed (no mock) — hostname fallback still renders.
 	expect(body).toContain("example.com");
-	// ...but the farcaster.xyz footer link is suppressed.
-	expect(body).not.toContain("Open on Farcaster");
+	// ...but the registry's requiresSigned clients (farcaster) are suppressed.
+	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).not.toContain(
 		"https://farcaster.xyz/decent-artlu/0xbb54368f",
 	);
+	// With farcaster gone, no rendered client has a native scheme — the
+	// mobile deeplink script doesn't ship on this page at all.
+	expect(body).not.toContain("data-scheme");
+	expect(body).not.toContain("pointer: coarse");
 	expect(body).toContain("social smart contract");
 });
 
@@ -200,7 +204,7 @@ test("GET /:username/:hash fails open when the signed-check is unavailable", asy
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	expect(body).toContain("Open on Farcaster");
+	expect(body).toContain('data-client="farcaster"');
 	expect(body).toContain("https://farcaster.xyz/zoo/0x11111111");
 	expect(body).not.toContain("social smart contract");
 });
@@ -218,7 +222,7 @@ test("GET /:username/:hash renders quote+url embed casts without crashing", asyn
 	// Quote embed hydrated via Shim /h.
 	expect(body).toContain("the original quoted take");
 	expect(body).toContain("Quoted User");
-	expect(body).toContain("Open on Farcaster");
+	expect(body).toContain("https://farcaster.xyz/zoo/0x79794547");
 });
 
 test("GET /:username/:hash footer shows the GitHub mark and MIT license", async () => {
@@ -232,6 +236,9 @@ test("GET /:username/:hash footer shows the GitHub mark and MIT license", async 
 	expect(footer).toContain("<svg");
 	expect(footer).toContain("MIT");
 	expect(footer).not.toContain(">source<");
+	// Next to it: the contributing guide, with its own GitHub Sponsors mark.
+	expect(footer).toContain("CONTRIBUTING.md");
+	expect(footer).toContain("Contributing");
 });
 
 test("GET /:username/:hash returns 404 when Shim reports no such cast", async () => {
@@ -250,6 +257,89 @@ test("GET /:username/:hash falls back to a link-only page when Shim is unreachab
 	const body = await res.text();
 	expect(body).toContain("https://farcaster.xyz/zoo/0x00000000");
 	expect(body).not.toContain(CAST_TEXT);
+});
+
+// --- Client registry (action row, last-used cookie, logos) ------------------
+//
+// The action row is rendered from worker/clients.ts: one pill per
+// registry client with its own logo, the pill matching the fc_client
+// cookie carrying a "last used" badge. Unknown cookie ids render
+// nothing (registry whitelist).
+
+test("GET /:username/:hash renders the registry-driven client action row", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// One pill per registry client, each with its own logo mark.
+	expect(body).toContain('data-client="farcaster"');
+	expect(body).toContain('data-client="firefly"');
+	expect(body).toContain('data-client="neynar"');
+	expect(body).toContain("/logos/farcaster.svg");
+	expect(body).toContain("/logos/firefly.png");
+	expect(body).toContain("/logos/neynar.png");
+	// Per-cast templates interpolate.
+	expect(body).toContain(`href="https://farcaster.xyz/zoo/${SHORT_HASH}"`);
+	expect(body).toContain(
+		`href="https://firefly.social/post/farcaster/${FULL_HASH}"`,
+	);
+	// Format verified against fc-clients-cast-action: full-hash based.
+	expect(body).toContain(`href="https://explorer.neynar.com/${FULL_HASH}"`);
+	// Farcaster ships the only native scheme — verified against the
+	// open-source app (farcasterxyz/client): scheme paths mirror the web
+	// path, /{username}/{fullHash}. Web href stays canonical; scheme +
+	// intent ride as data attributes.
+	expect(body).toContain(
+		'data-scheme="farcaster://zoo/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(body).toContain('data-intent="intent://zoo/0x895ecc74');
+	expect(body).toContain("package=com.farcaster.mobile");
+	expect(body).toContain("S.browser_fallback_url=");
+	expect(body).toContain("pointer: coarse");
+	// The click-to-remember script ships on the page; no cookie, no badge.
+	expect(body).toContain("fc_client=");
+	expect(body).not.toContain('class="pill-badge"');
+});
+
+test("GET /:username/:hash badges the cookie's last-used client", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { Cookie: "fc_client=firefly" },
+	});
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// Exactly one badged pill, and it is firefly's.
+	expect((body.match(/class="pill-badge"/g) ?? []).length).toBe(1);
+	const start = body.indexOf('data-client="firefly"');
+	const pill = body.slice(start, body.indexOf("</a>", start));
+	expect(pill).toContain('class="pill-badge"');
+	expect(pill).toContain("last used");
+});
+
+test("unknown fc_client cookie values render no badge", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { Cookie: "fc_client=not-a-client" },
+	});
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The registry whitelist ignores unknown ids — no badge, no injection.
+	expect(body).not.toContain('class="pill-badge"');
+	expect(body).toContain('data-client="farcaster"');
+});
+
+test("the badge follows suppression: no badge for a hidden client", async () => {
+	// decent-artlu hasn't signed: farcaster is suppressed, so a last-used
+	// cookie naming farcaster badges nothing. Firefly still renders.
+	const res = await app.request("/decent-artlu/0xbb54368f", {
+		headers: { Cookie: "fc_client=farcaster" },
+	});
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	expect(body).not.toContain('data-client="farcaster"');
+	expect(body).not.toContain('class="pill-badge"');
+	expect(body).toContain('data-client="firefly"');
 });
 
 // --- Agent JSON variant (?format=json) --------------------------------------

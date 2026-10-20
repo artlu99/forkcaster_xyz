@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
+import { LAST_CLIENT_COOKIE } from "./clients.ts";
 import { renderCastHtml, renderCastJson, resolveCast } from "./cast-page.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -28,7 +30,14 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 			retryAfter ? { "retry-after": retryAfter } : undefined,
 		);
 	}
-	const { status, html } = await renderCastHtml(resolved, username, hash);
+	// The last-used client cookie badges the visitor's preferred pill.
+	const lastClientId = getCookie(c, LAST_CLIENT_COOKIE);
+	const { status, html } = await renderCastHtml(
+		resolved,
+		username,
+		hash,
+		lastClientId,
+	);
 	return c.html(html, status);
 });
 

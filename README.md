@@ -52,8 +52,10 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ├── vite.config.ts             # preact + cloudflare + react→preact aliases
 ├── wrangler.jsonc             # main=worker/index.ts; not_found_handling=none
 ├── public/farcaster-embed.css # linked from SSR HTML
+├── public/logos/              # per-client marks for the action row
 ├── worker/
 │   ├── index.ts               # Hono app; export { app }; default { fetch }
+│   ├── clients.ts             # client registry (schema, URLs, logos, cookie)
 │   ├── cast-page.tsx          # Shim fetch → CastData mapping → SSR / 404 / link fallback
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
 │   └── shims/server-only.ts   # empty stub for Next.js marker package
@@ -66,7 +68,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | --- | --- | --- |
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
-| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = author handle, description = cast text, image = first image embed or avatar) + farcaster.xyz link + Firefly link (full hash); unsigned author (`/signed/{fid}` false): Firefly link only; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
+| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = author handle, description = cast text, image = first image embed or avatar) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
 
@@ -92,6 +94,17 @@ Decisions:
 - **Discoverability**: HTML pages emit `<link rel="alternate" type="application/json" href="?format=json">`.
 - **Deferred**: UA-allowlist morphing (GPTBot, ClaudeBot, …) as a later progressive enhancement. Must stay an allowlist — Telegram/Discord/iMessage preview bots must keep receiving HTML + OG meta.
 - No page-level caching today (Shim is the cache); if edge caching is ever added, the variant must join the cache key.
+
+## Client registry (action row, last-used badge)
+
+The cast page's "Open in …" pills are rendered from a data registry, `worker/clients.ts` — adding a client is a data change only.
+
+- **Schema** (`ClientDefinition`): `id` (stable slug, cookie value), `title`, `logoUrl` (served from `public/logos/`), `web` (per-cast https template), `deeplink` (**reserved** — custom-scheme per-cast formats are still unverified; not rendered), `requiresSigned` (suppressed only on a known `signed:false`; unknown fails open).
+- **Templates** interpolate `{username}`, `{hash}` (route-form, short or full) and `{fullHash}` (Shim-resolved). The engine also supports an optional `{fid}` placeholder with a `missingVars` gate (a client needing it is skipped when the value is absent) — reserved for future entries. Values are percent-encoded at resolution and HTML-escaped at render.
+- **Mobile deeplinks vs web targets**: one pill per client; the `href` is always the `web` URL. Universal links already open installed apps on mobile — verified per client: Farcaster's AASA claims all farcaster.xyz paths, Firefly's AASA explicitly claims `/post/*` (Android: `com.farcaster.mobile` and `io.dimension.firefly` confirmed via assetlinks.json). A structured `deeplink: { scheme, androidPackage? }` adds a native attempt for mobile only: the pill gains `data-scheme` + `data-intent` (the intent:// form carries `S.browser_fallback_url` = the web URL), and a conditional script intercepts clicks on coarse-pointer devices — Android uses the intent (Chrome-native fallback), everything else attempts the scheme and falls back to the web href if the app didn't open (~1.8s, visibility-aware). The script ships only when a rendered client actually has a `deeplink`. **Farcaster currently ships `farcaster://{username}/{fullHash}` — verified against the open-source app** ([farcasterxyz/client](https://github.com/farcasterxyz/client)): the app rewrites `farcaster://` to `https://farcaster.xyz/` and routes the rest as a web path, where cast URLs are `/{username}/{hash}` accepting full or short (≥8 hex) hashes; the legacy `/casts/:fname/:hash` route is gone. **Firefly ships no scheme** — none is documented anywhere; its web URL is already app-linked on both platforms.
+- **Roster — all three clients have verified per-cast URLs**: farcaster (`/{username}/{hash}`), firefly and neynar (full-hash based; neynar verified against `fc-clients-cast-action`, `src/lib/deeplink.ts`).
+- **Last-used cookie**: any click on a `data-client` pill writes `fc_client=<id>` (1 year, `SameSite=Lax`) via `CLIENT_SCRIPT`; on the next request the worker reads it and SSRs a small "last used" badge onto that client's pill. Unknown cookie values render nothing (registry whitelist). No cookie ⇒ no badge; no JS ⇒ links still work, the badge just doesn't move. Cookie-conditional HTML: if an edge cache is ever added, the badge must join the cache key.
+- **Logos**: self-hosted in `public/logos/`, one file per client — farcaster is the official simple-icons mark (`siFarcaster`); firefly and neynar are official favicons.
 
 ## Shim → CastData mapping
 

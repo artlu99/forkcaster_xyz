@@ -1,6 +1,16 @@
 import { FarcasterEmbed } from "react-farcaster-embed";
 import { renderToString } from "preact-render-to-string";
-import { siGithub } from "simple-icons";
+import { siGithub, siGithubsponsors } from "simple-icons";
+import {
+	type ClientDefinition,
+	type TemplateVars,
+	LAST_CLIENT_COOKIE,
+	LAST_CLIENT_MAX_AGE,
+	clientsForPage,
+	deeplinkTargets,
+	findClient,
+	resolveTemplate,
+} from "./clients.ts";
 
 type CastData = NonNullable<Parameters<typeof FarcasterEmbed>[0]["castData"]>;
 
@@ -269,6 +279,107 @@ const LIVE_STATS_SCRIPT = `<script>
 })();
 </script>`;
 
+// Remembers the visitor's client choice: a delegated click listener
+// writes the last-used client id into a year-long cookie, which the
+// worker reads on the next request to badge that client's pill.
+// Without JS nothing breaks — links work, the badge just stays where
+// the server last rendered it.
+const CLIENT_SCRIPT = `<script>
+(function () {
+  document.addEventListener("click", function (e) {
+    var el = e.target;
+    while (el && el !== document) {
+      var id = el.getAttribute && el.getAttribute("data-client");
+      if (id) {
+        document.cookie = "${LAST_CLIENT_COOKIE}=" + encodeURIComponent(id) +
+          ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax";
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+})();
+</script>`;
+
+// Native-target handling for mobile: on coarse-pointer devices, a click
+// on a pill that carries a native target attempts the app first and
+// falls back to the pill's web href if the page is still visible after
+// the attempt (app opened ⇒ page hidden ⇒ no fallback). Android prefers
+// data-intent (Chrome handles the fallback natively); everything else
+// uses data-scheme. Desktop and no-JS visitors just follow the web
+// href; the SSR HTML is byte-identical for every device — no UA
+// sniffing on the server, only a client-side transport choice. Emitted
+// only when at least one rendered client has a native target.
+const DEEPLINK_SCRIPT = `<script>
+(function () {
+  if (!window.matchMedia("(pointer: coarse)").matches) return;
+  var android = /android/i.test(navigator.userAgent);
+  document.addEventListener("click", function (e) {
+    var el = e.target;
+    while (el && el !== document) {
+      var intent = android ? el.getAttribute && el.getAttribute("data-intent") : null;
+      var target = intent || (el.getAttribute && el.getAttribute("data-scheme"));
+      if (target) {
+        e.preventDefault();
+        var opened = false;
+        var hide = function () { opened = true; };
+        document.addEventListener("visibilitychange", hide, { once: true });
+        window.addEventListener("pagehide", hide, { once: true });
+        window.location.href = target;
+        setTimeout(function () {
+          if (!opened && !document.hidden) window.location.href = el.getAttribute("href");
+        }, 1800);
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+})();
+</script>`;
+
+// Exported for clients.test.ts (pill markup with/without native targets).
+export function clientPill(
+	client: ClientDefinition,
+	vars: TemplateVars,
+	isLast: boolean,
+): string {
+	const href = resolveTemplate(client.web as string, vars);
+	const targets = deeplinkTargets(client, vars);
+	const native =
+		(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
+		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "");
+	return (
+		`<a class="pill client-pill" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${native}>` +
+		`<img class="pill-logo" src="${escapeHtml(client.logoUrl)}" alt="" width="16" height="16" />` +
+		`${escapeHtml(client.title)}` +
+		(isLast ? `<span class="pill-badge">last used</span>` : "") +
+		`</a>`
+	);
+}
+
+// The "Open in …" action row, rendered from the client registry. One
+// pill per client; the pill whose id matches the last-used cookie
+// carries the badge. Suppression (signed rule, unsatisfied placeholders
+// like {fid}) is decided by clientsForPage; here signed is already
+// reduced to pass/fail-open.
+function clientActionsHtml(
+	vars: TemplateVars,
+	signed: boolean,
+	lastClientId: string | undefined,
+): string {
+	const last = findClient(lastClientId);
+	const offered = clientsForPage(signed, vars);
+	const pills = offered
+		.map((client) => clientPill(client, vars, last !== undefined && client.id === last.id))
+		.join("\n");
+	// The mobile deeplink script ships only when a rendered client
+	// actually has a native target — zero bytes otherwise.
+	const hasNative = offered.some((client) =>
+		Object.keys(deeplinkTargets(client, vars)).length > 0,
+	);
+	return `<p class="actions">${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
+}
+
 function shell(
 	title: string,
 	bodyHtml: string,
@@ -375,21 +486,41 @@ main { padding-bottom: 8px; }
   color: var(--accent);
   background: transparent;
 }
-.pill.primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--bg);
+.client-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
-.pill.primary:hover, .pill.primary:focus-visible {
+.pill-logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex: none;
+}
+.pill-badge {
+  position: absolute;
+  top: -8px;
+  right: 10px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  padding: 0 6px;
+  border-radius: 999px;
   background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  color: var(--bg);
+  pointer-events: none;
 }
 .site-footer {
   margin-top: 20px;
   padding-top: 14px;
   padding-bottom: 32px;
   border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 .site-footer a {
   display: inline-flex;
@@ -416,6 +547,7 @@ ${bodyHtml}
 </main>
 <footer class="site-footer">
   <a href="https://github.com/artlu99/forkcaster_xyz">${siGithub.svg}MIT license</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz/CONTRIBUTING.md">${siGithubsponsors.svg}Contributing</a>
 </footer>
 ${clientScript ?? ""}
 </body>
@@ -423,9 +555,7 @@ ${clientScript ?? ""}
 }
 
 function castPage(
-	username: string,
-	hash: string,
-	fullHash: string,
+	vars: TemplateVars,
 	cardHtml: string,
 	signed: boolean,
 	og: {
@@ -434,32 +564,43 @@ function castPage(
 		image?: string;
 		largeImage?: boolean;
 	},
+	lastClientId?: string,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
-	// farcaster.xyz, so only the Firefly link is shown. The embed itself
-	// still renders for everyone.
-	const fcLink =
+	// farcaster.xyz, so the registry's requiresSigned clients (farcaster)
+	// are suppressed. The embed itself still renders for everyone.
+	const notice =
 		signed === false
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
-			: `<p class="actions"><a class="pill primary" href="https://farcaster.xyz/${username}/${hash}">Open on Farcaster</a></p>`;
+			: "";
+	const actions = clientActionsHtml(vars, signed, lastClientId);
 	return shell(
-		`${username}/${hash} · forkcaster`,
-		`${cardHtml}${fcLink}
-<p class="actions"><a class="pill${signed === false ? " primary" : ""}" href="https://firefly.social/post/farcaster/${fullHash}">Open on Firefly</a></p>`,
+		`${vars.username}/${vars.hash} · forkcaster`,
+		`${cardHtml}${notice}${actions}`,
 		og,
-		LIVE_STATS_SCRIPT,
+		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}`,
 	);
 }
 
-function linkOnlyPage(username: string, hash: string): string {
+function linkOnlyPage(
+	username: string,
+	hash: string,
+	lastClientId?: string,
+): string {
+	// Shim unreachable: signed state is unknown, which fails open — every
+	// registry client is offered. The route hash is used as-is (it may be
+	// short-form); the {fullHash} slot degrades to it. No fid is known, so
+	// any future fid-gated client would be skipped here.
 	return shell(
 		`${username}/${hash} · forkcaster`,
-		`<p class="notice">Cast data is temporarily unavailable.</p>
-<p class="actions">
-<a class="pill primary" href="https://farcaster.xyz/${username}/${hash}">Open on Farcaster</a>
-<a class="pill" href="https://firefly.social/post/farcaster/${hash}">Open on Firefly</a>
-</p>`,
+		`<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
+			{ username, hash, fullHash: hash },
+			true,
+			lastClientId,
+		)}`,
+		undefined,
+		CLIENT_SCRIPT,
 	);
 }
 
@@ -593,16 +734,19 @@ export async function resolveCast(
 
 // HTML renderer: full SSR card + OG meta when found. Lenient statuses —
 // unreachable still 200s as a link-only page so unfurlers never error.
+// lastClientId (from the fc_client cookie) badges the visitor's
+// last-used client; unknown ids are ignored by the registry.
 export async function renderCastHtml(
 	resolved: ResolvedCast,
 	username: string,
 	hash: string,
+	lastClientId?: string,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, hash) };
 	}
 	if (resolved.kind === "unreachable") {
-		return { status: 200, html: linkOnlyPage(username, hash) };
+		return { status: 200, html: linkOnlyPage(username, hash, lastClientId) };
 	}
 	const { cast, unfurlMap, quotes, signed } = resolved;
 	try {
@@ -631,17 +775,18 @@ export async function renderCastHtml(
 			image: firstImage ?? cast.user?.pfpUrl,
 			largeImage: firstImage !== undefined,
 		};
+		const vars: TemplateVars = {
+			username,
+			hash,
+			fullHash: cast.hash,
+			// Same fallback the signed check uses; undefined on fid-less
+			// casts, which gates any fid-requiring client template.
+			fid: cast.fid ?? cast.user?.fid,
+		};
 		return {
 			status: 200,
 			// signed === false is the only hide trigger; unknown fails open.
-			html: castPage(
-				username,
-				hash,
-				cast.hash,
-				cardHtml,
-				signed !== false,
-				og,
-			),
+			html: castPage(vars, cardHtml, signed !== false, og, lastClientId),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.

@@ -12,6 +12,7 @@
 	"private": true,
 	"scripts": {
 		"build": "vite build",
+		"dev": "wrangler dev",
 		"typecheck": "bun check",
 		"lint": "biome lint .",
 		"deploy": "bun run build && wrangler deploy",
