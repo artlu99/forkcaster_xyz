@@ -3,6 +3,11 @@
 	"name": "forkcaster",
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-10-06",
+	"routes": [
+		{ "pattern": "forkcaster.xyz", "custom_domain": true },
+		{ "pattern": "warpcats.com", "custom_domain": true }
+	],
+	"vars": { "PRIMARY_ORIGIN": "https://forkcaster.xyz" },
 	"assets": { "not_found_handling": "none" },
 	"observability": { "enabled": true },
 	"analytics_engine_datasets": [{ "binding": "RACE_STATS" }],

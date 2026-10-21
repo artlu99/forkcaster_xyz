@@ -401,10 +401,17 @@ function shell(
 		largeImage?: boolean;
 	},
 	clientScript?: string,
+	canonicalUrl?: string,
 ): string {
+	const canonicalMeta = canonicalUrl
+		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
+		: "";
 	const meta = og
 		? [
 				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
+				...(canonicalUrl
+					? [`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`]
+					: []),
 				`<meta name="twitter:card" content="${og.largeImage && og.image ? "summary_large_image" : "summary"}" />`,
 				`<meta name="twitter:title" content="${escapeHtml(og.ogTitle)}" />`,
 				og.description
@@ -429,6 +436,7 @@ function shell(
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${title}</title>
+${canonicalMeta}
 ${meta}
 <link rel="alternate" type="application/json" href="?format=json" />
 <link rel="stylesheet" href="/farcaster-embed.css" />
@@ -577,6 +585,7 @@ function castPage(
 	},
 	lastClientId?: string,
 	partial = false,
+	primaryOrigin?: string,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -587,11 +596,17 @@ function castPage(
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
 			: "";
 	const actions = clientActionsHtml(vars, signed, lastClientId);
+	// Dual-serve canonicalization: every host renders the same page, but
+	// points at the primary origin so link equity and unfurlers agree.
+	const canonicalUrl = primaryOrigin
+		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.hash}`
+		: undefined;
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${cardHtml}${notice}${actions}`,
 		og,
 		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}`,
+		canonicalUrl,
 	);
 }
 
@@ -780,6 +795,7 @@ export async function renderCastHtml(
 	username: string,
 	hash: string,
 	lastClientId?: string,
+	primaryOrigin?: string,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, hash) };
@@ -825,7 +841,15 @@ export async function renderCastHtml(
 		return {
 			status: 200,
 			// signed === false is the only hide trigger; unknown fails open.
-			html: castPage(vars, cardHtml, signed !== false, og, lastClientId, partial),
+			html: castPage(
+				vars,
+				cardHtml,
+				signed !== false,
+				og,
+				lastClientId,
+				partial,
+				primaryOrigin,
+			),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.

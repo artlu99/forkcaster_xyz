@@ -74,6 +74,8 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
 
+**Multi-domain (dual-serve):** the same worker serves `forkcaster.xyz` and `warpcats.com` (custom-domain routes in `wrangler.jsonc`). All code is host-agnostic (per-request origin, same-origin fill script, host-only cookie), and every page canonicalizes to the primary: cast pages emit `<link rel="canonical">` + `og:url` from the `PRIMARY_ORIGIN` var (absent when unset — bare workers.dev keeps the pre-dual-serve output), the landing's canonical is baked into `index.html`. Race telemetry carries the request host as a blob for per-domain breakdown. Cookies/badges are per-domain by design.
+
 ## Agent JSON variant (`?format=json`)
 
 **Shipped.** Resolve once (Shim fetch + unfurl + quote hydration + signed check → `resolveCast()`), render twice — `renderCastHtml()` / `renderCastJson()` in `worker/cast-page.tsx`. The return type morphs on the asker.

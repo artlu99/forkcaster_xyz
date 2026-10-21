@@ -543,3 +543,24 @@ test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
 	const res = await app.request("/zoo/0xdeadbeef?embeds=quotes");
 	expect(res.status).toBe(404);
 });
+
+test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {
+	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
+		PRIMARY_ORIGIN: "https://forkcaster.xyz",
+	});
+	expect(canonicalRes.status).toBe(200);
+	const canonicalBody = await canonicalRes.text();
+	expect(canonicalBody).toContain(
+		'<link rel="canonical" href="https://forkcaster.xyz/zoo/0x895ecc74" />',
+	);
+	expect(canonicalBody).toContain(
+		'<meta property="og:url" content="https://forkcaster.xyz/zoo/0x895ecc74" />',
+	);
+
+	// No var (tests / bare workers.dev deploys): neither tag ships, byte
+	// compatibility with the pre-dual-serve output.
+	const plainRes = await app.request(`/zoo/${SHORT_HASH}`);
+	const plainBody = await plainRes.text();
+	expect(plainBody).not.toContain("canonical");
+	expect(plainBody).not.toContain("og:url");
+});

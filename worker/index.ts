@@ -53,6 +53,8 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 								.map((t) => `${t.provider}:${t.kind}:${t.ms}`)
 								.join(","),
 							wantsJson ? "json" : "html",
+							// Dual-serve: attribute the datapoint to the host.
+							new URL(c.req.url).hostname,
 						],
 						doubles: [
 							resolved.elapsedMs,
@@ -86,6 +88,8 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		username,
 		hash,
 		lastClientId,
+		// app.request()-style callers may pass no env at all.
+		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 	);
 	return c.html(html, status);
 });
