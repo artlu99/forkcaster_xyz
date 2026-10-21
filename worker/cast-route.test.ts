@@ -242,7 +242,7 @@ test("GET /:username/:hash footer shows the GitHub mark and MIT license", async 
 	expect(footer).toContain("MIT");
 	expect(footer).not.toContain(">source<");
 	// Next to it: the contributing guide, with its own GitHub Sponsors mark.
-	expect(footer).toContain("CONTRIBUTING.md");
+	expect(footer).toContain("tab=contributing-ov-file");
 	expect(footer).toContain("Contributing");
 });
 

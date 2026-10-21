@@ -557,7 +557,7 @@ ${bodyHtml}
 </main>
 <footer class="site-footer">
   <a href="https://github.com/artlu99/forkcaster_xyz">${siGithub.svg}MIT license</a>
-  <a href="https://github.com/artlu99/forkcaster_xyz/CONTRIBUTING.md">${siGithubsponsors.svg}Contributing</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${siGithubsponsors.svg}Contributing</a>
 </footer>
 ${clientScript ?? ""}
 </body>
