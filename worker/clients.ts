@@ -8,9 +8,13 @@
 // Templates are first-party constants; interpolated values are
 // percent-encoded here and HTML-escaped at render time.
 //
-// `deeplink` is a reserved field for app-scheme/universal-link formats —
-// the alt-client deeplink reference is still under review; formats land
-// here as template strings in a follow-up pass and are not rendered yet.
+// `deeplink` is an optional native mobile target: a verified per-cast
+// custom scheme (plus optional Android package id, which switches Android
+// to the intent:// form with a Chrome-native fallback). When a rendered
+// client has one, the pill gains data-scheme/data-intent attributes and
+// DEEPLINK_SCRIPT (cast-page.tsx) attempts the app at click time on
+// coarse-pointer devices, falling back to the pill's web href. Absent ⇒
+// web-only.
 
 /** Cookie that remembers the visitor's last-used client. */
 export const LAST_CLIENT_COOKIE = "fc_client";

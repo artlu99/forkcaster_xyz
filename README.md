@@ -8,9 +8,9 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 
 - Pattern: `/{username}/{castHash}` where `castHash` matches `0x[0-9a-fA-F]+` — short or full form
 - Examples: `/zoo/0x895ecc74` and `/decent-artlu/0xbb54368f` → SSR cast card + links
-- Data: Shim (`https://shim.artlu.xyz/wc/{username}/{hash}`) — an owner-run cached reader for the Farcaster Snapchain. One call returns the full cast, full hash included.
-- Missing cast (Shim reports none) → 404 page; Shim unreachable → link-only page (200)
-- Banned accounts: embeds render for everyone — but farcaster.xyz hides unsigned authors. Since Oct 15, 2026 (Network School takeover), accounts must accept the "social smart contract" (Network Code); acceptance is an on-chain access NFT. Shim exposes it: `GET https://shim.artlu.xyz/signed/{fid}` → `{"signed":true|false}`. Unsigned authors: the farcaster.xyz footer link is suppressed and only the Firefly link is shown (the check fails open — unknown state shows the link).
+- Data: Shim (`https://shim.artlu.xyz/wc/{username}/{hash}`) — an owner-run cached reader for the Farcaster Snapchain. One call returns the full cast, full hash included. A keep-warm cron prevents Render scale-to-zero cold starts. Alternative public node (Hypersnap/Quilcast `haatz.quilibrium.com/v2/farcaster/*`) evaluated and rejected (Oct 2026): no `/signed` equivalent, no short-hash resolution, third-party volunteer infra.
+- Missing cast (Shim reports none) → 404 page; Shim unreachable → link-only page (200). Strict statuses are the JSON variant's job (see below)
+- Banned accounts: embeds render for everyone — but some clients hide unsigned authors. Since Oct 15, 2026 (Network School takeover), accounts must accept the "social smart contract" (Network Code); acceptance is an on-chain access NFT. Shim exposes it: `GET https://shim.artlu.xyz/signed/{fid}` → `{"signed":true|false}`. Unsigned authors: registry clients with `requiresSigned` (currently farcaster) are suppressed from the action row; the check fails open — unknown state suppresses nothing
 - farcaster.tv is deliberately not used for cast data: unofficial third party, rules unknown. react-farcaster-embed's own default endpoint is farcaster.tv — always pass `castData` so it never fetches. Sole exception: the live stats row (replies/recasts/likes) is fetched **client-side** from farcaster.tv — it sends `access-control-allow-origin: *` and answers for unsigned authors too; any failure just leaves the row absent
 
 ## Stack
@@ -28,19 +28,18 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 | Bundler | Vite 8 | `@preact/preset-vite` + `@cloudflare/vite-plugin` |
 | Lint | Biome | `bun run lint` |
 | Typecheck | `bun check` | tsc-compatible, built into Bun; no `typescript` pkg |
-| Tests | bun:test | `bun test worker/cast-route.test.ts` |
+| Tests | bun:test | `bun test` (cast route + client registry) |
 
 ## Commands
 
 ```sh
 bun install
-bun run dev          # vite (CF plugin; local worker + assets)
+bun run dev          # wrangler dev (local worker + assets)
 bun run build        # vite build → dist/
 bun run typecheck    # bun check (tsc-compatible; reads tsconfig*.json)
-bun run preview      # build + vite preview
 bun run deploy       # build + wrangler deploy
 bun run lint         # biome lint .
-bun test             # integration tests (cast route)
+bun test             # worker tests (cast route + client registry)
 bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ```
 
@@ -58,6 +57,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── clients.ts             # client registry (schema, URLs, logos, cookie)
 │   ├── cast-page.tsx          # Shim fetch → CastData mapping → SSR / 404 / link fallback
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
+│   ├── clients.test.ts        # registry unit tests: templates, gating, signed rule, deeplinks
 │   └── shims/server-only.ts   # empty stub for Next.js marker package
 └── src/                       # landing only (App.tsx)
 ```
@@ -68,7 +68,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | --- | --- | --- |
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
-| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = author handle, description = cast text, image = first image embed or avatar) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
+| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
 
@@ -90,7 +90,7 @@ Decisions:
 - **Strict statuses on JSON, lenient on HTML** (deliberate divergence): JSON → 404 when Shim reports no such cast, 503 + `Retry-After: 60` when Shim is unreachable. HTML keeps its 404 page / 200 link-only page. Agents handle status codes better than rendered fallbacks.
 - **Availability-gated payload** — a field appears only when its data exists: author, ISO 8601 timestamp, text, image embed URLs, URL embeds (unfurl title appended when unfurl succeeded, bare URL otherwise), quote embeds, canonical farcaster.xyz + Firefly links.
 - **Quotes are pointers, never dropped**: hydrated quote → forkcaster URL (requires the username from the hydrated cast); hydration failure → Firefly full-hash URL (quote embeds carry `{fid, hash}`, no username). HTML's rendering constraints (unguarded `author.pfp.url`) don't apply to JSON — failed hydration degrades to a URL the agent can fetch.
-- **Ban signal**: `signed: false` emits a short note field; unknown/failed check fails open silently (same semantics as the HTML footer link).
+- **Ban signal**: `signed: false` emits a short note field; unknown/failed check fails open silently (same fail-open semantics as the HTML action row).
 - **Discoverability**: HTML pages emit `<link rel="alternate" type="application/json" href="?format=json">`.
 - **Deferred**: UA-allowlist morphing (GPTBot, ClaudeBot, …) as a later progressive enhancement. Must stay an allowlist — Telegram/Discord/iMessage preview bots must keep receiving HTML + OG meta.
 - No page-level caching today (Shim is the cache); if edge caching is ever added, the variant must join the cache key.
@@ -99,12 +99,12 @@ Decisions:
 
 The cast page's "Open in …" pills are rendered from a data registry, `worker/clients.ts` — adding a client is a data change only.
 
-- **Schema** (`ClientDefinition`): `id` (stable slug, cookie value), `title`, `logoUrl` (served from `public/logos/`), `web` (per-cast https template), `deeplink` (**reserved** — custom-scheme per-cast formats are still unverified; not rendered), `requiresSigned` (suppressed only on a known `signed:false`; unknown fails open).
+- **Schema** (`ClientDefinition`): `id` (stable slug, cookie value), `title`, `logoUrl` (served from `public/logos/`), `web` (per-cast https template), `deeplink` (optional native mobile target — activates the click-time scheme attempt described below; absent ⇒ web-only), `requiresSigned` (suppressed only on a known `signed:false`; unknown fails open).
 - **Templates** interpolate `{username}`, `{hash}` (route-form, short or full) and `{fullHash}` (Shim-resolved). The engine also supports an optional `{fid}` placeholder with a `missingVars` gate (a client needing it is skipped when the value is absent) — reserved for future entries. Values are percent-encoded at resolution and HTML-escaped at render.
 - **Mobile deeplinks vs web targets**: one pill per client; the `href` is always the `web` URL. Universal links already open installed apps on mobile — verified per client: Farcaster's AASA claims all farcaster.xyz paths, Firefly's AASA explicitly claims `/post/*` (Android: `com.farcaster.mobile` and `io.dimension.firefly` confirmed via assetlinks.json). A structured `deeplink: { scheme, androidPackage? }` adds a native attempt for mobile only: the pill gains `data-scheme` + `data-intent` (the intent:// form carries `S.browser_fallback_url` = the web URL), and a conditional script intercepts clicks on coarse-pointer devices — Android uses the intent (Chrome-native fallback), everything else attempts the scheme and falls back to the web href if the app didn't open (~1.8s, visibility-aware). The script ships only when a rendered client actually has a `deeplink`. **Farcaster currently ships `farcaster://{username}/{fullHash}` — verified against the open-source app** ([farcasterxyz/client](https://github.com/farcasterxyz/client)): the app rewrites `farcaster://` to `https://farcaster.xyz/` and routes the rest as a web path, where cast URLs are `/{username}/{hash}` accepting full or short (≥8 hex) hashes; the legacy `/casts/:fname/:hash` route is gone. **Firefly ships no scheme** — none is documented anywhere; its web URL is already app-linked on both platforms.
 - **Roster — all four clients have verified per-cast URLs**: farcaster (`/{username}/{hash}`), firefly, neynar and quilcast (full-hash based; neynar verified against `fc-clients-cast-action` `src/lib/deeplink.ts`; quilcast against backmeupplz/quilcast `server/index.mjs` — `/c/{fullHash}`, 40 hex with optional `0x`, live-checked; browser-only client, no native app).
 - **Last-used cookie**: any click on a `data-client` pill writes `fc_client=<id>` (1 year, `SameSite=Lax`) via `CLIENT_SCRIPT`; on the next request the worker reads it and SSRs a small "last used" badge onto that client's pill. Unknown cookie values render nothing (registry whitelist). No cookie ⇒ no badge; no JS ⇒ links still work, the badge just doesn't move. Cookie-conditional HTML: if an edge cache is ever added, the badge must join the cache key.
-- **Logos**: self-hosted in `public/logos/`, one file per client — farcaster is the official simple-icons mark (`siFarcaster`); firefly and neynar are official favicons; quilcast is the client's own `favicon.svg`.
+- **Logos**: self-hosted in `public/logos/`, one static file per client — farcaster and quilcast as SVG, firefly and neynar as favicon PNGs. The pill's `<img>` renders `logoUrl` uniformly; no per-client code paths.
 
 ## Shim → CastData mapping
 
@@ -128,6 +128,7 @@ Shim returns raw Snapchain message data; `toCastData()` in `worker/cast-page.tsx
 | Task | Touch |
 | --- | --- |
 | Shim fetch / mapping / SSR fallbacks | `worker/cast-page.tsx` |
+| Client roster / action row data | `worker/clients.ts` |
 | Routes | `worker/index.ts` |
 | Aliases | `vite.config.ts`, `tsconfig.worker.json` paths |
 | Landing | `src/App.tsx` |
@@ -135,4 +136,4 @@ Shim returns raw Snapchain message data; `toCastData()` in `worker/cast-page.tsx
 
 ## Status
 
-Shim-only SSR data path; live stats fetched client-side from farcaster.tv (the sole farcaster.tv touchpoint). Agent JSON variant (`?format=json`) shipped. Optional: deploy.
+Shim-only SSR data path; live stats fetched client-side from farcaster.tv (the sole farcaster.tv touchpoint). Agent JSON variant (`?format=json`) shipped. Registry-driven action row shipped: last-used badge, Farcaster native deeplink (`farcaster://`, verified), four verified per-cast client URLs. Optional: deploy.

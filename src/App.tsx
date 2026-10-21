@@ -22,9 +22,9 @@ function App() {
           </a>
         </div>
         <p className="lede footnote">
-          Pages link to farcaster.xyz and Firefly. Authors who haven't signed
-          Farcaster's social smart contract are read-only there, so their
-          pages link to Firefly only.
+          Pages link to various Farcaster clients. Authors who haven't signed
+          Farcaster's social smart contract are read-only in some of them,
+          so their pages skip any app that requires signing.
         </p>
         <p className="repo-link">
           <a href="https://github.com/artlu99/forkcaster_xyz">
