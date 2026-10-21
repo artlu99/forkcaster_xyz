@@ -664,7 +664,13 @@ export async function resolveCast(
 	let reached = false;
 	let cast: ShimCast | null = null;
 	try {
-		const res = await fetch(`https://shim.artlu.xyz/wc/${username}/${hash}`);
+		// Capped at 5s like every other Shim call: a cold sharded lookup can
+		// otherwise hang for 15s+ (measured on a missing cast). Timing out
+		// counts as unreachable — HTML degrades to the link-only page, JSON
+		// answers 503 + Retry-After.
+		const res = await fetch(`https://shim.artlu.xyz/wc/${username}/${hash}`, {
+			signal: AbortSignal.timeout(5000),
+		});
 		if (res.ok) {
 			reached = true;
 			const data = (await res.json().catch(() => ({}))) as {
@@ -701,7 +707,9 @@ export async function resolveCast(
 		const fid = foundCast.fid ?? foundCast.user?.fid;
 		if (fid !== undefined) {
 			try {
-				const res = await fetch(`https://shim.artlu.xyz/signed/${fid}`);
+				const res = await fetch(`https://shim.artlu.xyz/signed/${fid}`, {
+					signal: AbortSignal.timeout(5000),
+				});
 				if (res.ok) {
 					const data = (await res.json().catch(() => ({}))) as {
 						signed?: boolean;
