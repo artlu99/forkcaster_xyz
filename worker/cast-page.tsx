@@ -170,20 +170,61 @@ function toCastData(
 	};
 }
 
+// Mini App universal links (https://farcaster.xyz/miniapps/<app-id>/
+// <app-slug>/...) render client-side with zero server meta tags, so unfurl
+// comes back empty and the card would be a bare "farcaster.xyz" hostname.
+// Build a clean preview locally from the link structure instead: the slug
+// is a kebab-case version of the app name per the universal-links spec
+// (miniapps.farcaster.xyz/docs/guides/urls). Legacy warpcast.com
+// /~/miniapps/<token> links carry an opaque token — generic title.
+function miniAppUniversalLink(url: string): { title: string } | undefined {
+	try {
+		const parsed = new URL(url);
+		const host = parsed.hostname.replace(/^www\./, "");
+		if (host === "farcaster.xyz") {
+			const match = parsed.pathname.match(/^\/miniapps\/[^/]+\/([a-z0-9-]+)/i);
+			if (match) {
+				const pretty = match[1]
+					.split("-")
+					.filter(Boolean)
+					.map((word) => word[0].toUpperCase() + word.slice(1))
+					.join(" ");
+				return { title: pretty };
+			}
+		}
+		if (host === "warpcast.com" && parsed.pathname.startsWith("/~/miniapps/")) {
+			return { title: "Mini app" };
+		}
+	} catch {
+		// Unparseable URL — not a mini app link.
+	}
+	return undefined;
+}
+
 function openGraphFor(
 	url: string,
 	data?: UnfurlResult,
 ): Record<string, string | boolean> {
-	const title = data?.ogTitle ?? data?.twitterTitle ?? urlOpenGraph(url).title;
+	const mini = miniAppUniversalLink(url);
+	// The embed bundle nulls any card whose domain is farcaster.xyz or
+	// warpcast.com (it strips self-referential links) — so mini app cards
+	// carry a category-style domain label instead, which renders.
+	const domain = mini
+		? `mini app · ${urlOpenGraph(url).domain}`
+		: urlOpenGraph(url).domain;
+	const title = data?.ogTitle ?? data?.twitterTitle ??
+		(mini ? mini.title : urlOpenGraph(url).title);
 	const description = data?.ogDescription ?? data?.twitterDescription;
 	const first = data?.ogImage?.[0];
 	const image = typeof first === "string" ? first : first?.url;
 	return {
 		url,
-		domain: urlOpenGraph(url).domain,
+		domain,
 		title,
+		// Mini app cards stay compact — no image, one-line subtitle.
+		...(mini && !description ? { description: "Farcaster mini app" } : {}),
 		...(description ? { description } : {}),
-		...(image ? { image, useLargeImage: true } : {}),
+		...(image && !mini ? { image, useLargeImage: true } : {}),
 	};
 }
 
@@ -402,6 +443,7 @@ function shell(
 	},
 	clientScript?: string,
 	canonicalUrl?: string,
+	extraMeta?: string,
 ): string {
 	const canonicalMeta = canonicalUrl
 		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
@@ -438,6 +480,7 @@ function shell(
 <title>${title}</title>
 ${canonicalMeta}
 ${meta}
+${extraMeta ?? ""}
 <link rel="alternate" type="application/json" href="?format=json" />
 <link rel="stylesheet" href="/farcaster-embed.css" />
 <style>
@@ -601,12 +644,43 @@ function castPage(
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.hash}`
 		: undefined;
+	// Mini App embed meta (miniapps.farcaster.xyz/docs/guides/sharing):
+	// when a forkcaster link is shared in a Farcaster client, the client
+	// fetches this HTML and renders the image + button as a rich card —
+	// our equivalent of the Telegram/Discord OG card. Needs an image, so
+	// it ships only when og.image exists (cast embed image or avatar).
+	let miniAppMeta: string | undefined;
+	if (primaryOrigin && canonicalUrl && og.image) {
+		const miniAppEmbed = {
+			version: "1",
+			imageUrl: og.image,
+			button: {
+				title: "View cast",
+				action: {
+					type: "launch_miniapp",
+					name: "forkcaster",
+					url: canonicalUrl,
+				},
+			},
+		};
+		const legacyFrameEmbed = {
+			...miniAppEmbed,
+			button: {
+				...miniAppEmbed.button,
+				action: { ...miniAppEmbed.button.action, type: "launch_frame" },
+			},
+		};
+		miniAppMeta =
+			`<meta name="fc:miniapp" content="${escapeHtml(JSON.stringify(miniAppEmbed))}" />\n` +
+			`<meta name="fc:frame" content="${escapeHtml(JSON.stringify(legacyFrameEmbed))}" />`;
+	}
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${cardHtml}${notice}${actions}`,
 		og,
 		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}`,
 		canonicalUrl,
+		miniAppMeta,
 	);
 }
 

@@ -544,8 +544,41 @@ test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
 	expect(res.status).toBe(404);
 });
 
-test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {
-	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
+// A mini app universal link as the cast's URL embed: the page renders
+// client-side with no server meta, unfurl has no mock (fails), and the
+// card must still be a clean preview built from the link structure.
+const MINIAPP_CAST = {
+	...SHIM_CAST,
+	hash: "0x3c3c3c3c11aa22bb33cc44dd55ee66ff77889900",
+	embeds: [{ url: "https://farcaster.xyz/miniapps/A2SFoJHW7Y9B/neynart" }],
+};
+
+test("mini app universal links render clean previews without unfurl", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/wc/zoo/0x3c3c3c3c") {
+			return Response.json({ success: true, cast: MINIAPP_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/signed/10215") {
+			return Response.json({ success: true, signed: true });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request("/zoo/0x3c3c3c3c");
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// Slug-derived title + category domain label, instead of a bare
+	// hostname card (the bundle nulls farcaster.xyz/warpcast.com domains).
+	expect(body).toContain("Neynart");
+	expect(body).toContain("Farcaster mini app");
+	expect(body).toContain("mini app · farcaster.xyz");
+	expect(body).toContain(
+		'href="https://farcaster.xyz/miniapps/A2SFoJHW7Y9B/neynart"',
+	);
+});
+
+test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
 	expect(canonicalRes.status).toBe(200);
@@ -556,6 +589,20 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(canonicalBody).toContain(
 		'<meta property="og:url" content="https://forkcaster.xyz/zoo/0x895ecc74" />',
 	);
+	// Mini App embed meta (Farcaster's OG equivalent), with the cast image
+	// and a launch action pinned to the canonical URL. The JSON is
+	// HTML-escaped inside the content attribute (&quot;), which parsers
+	// unescape before reading.
+	expect(canonicalBody).toContain('name="fc:miniapp"');
+	expect(canonicalBody).toContain('name="fc:frame"');
+	expect(canonicalBody).toContain("&quot;version&quot;:&quot;1&quot;");
+	expect(canonicalBody).toContain("&quot;type&quot;:&quot;launch_miniapp&quot;");
+	expect(canonicalBody).toContain(
+		"&quot;url&quot;:&quot;https://forkcaster.xyz/zoo/0x895ecc74&quot;",
+	);
+	expect(canonicalBody).toContain(
+		"&quot;imageUrl&quot;:&quot;https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/0eeef320/original&quot;",
+	);
 
 	// No var (tests / bare workers.dev deploys): neither tag ships, byte
 	// compatibility with the pre-dual-serve output.
@@ -563,4 +610,5 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	const plainBody = await plainRes.text();
 	expect(plainBody).not.toContain("canonical");
 	expect(plainBody).not.toContain("og:url");
+	expect(plainBody).not.toContain("fc:miniapp");
 });
