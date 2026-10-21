@@ -28,7 +28,7 @@ const PROVIDERS = [
 const REPO = "https://github.com/artlu99/forkcaster_xyz";
 
 function statsTable(rows: Array<string[]>): string {
-	const head = ["provider", "wins", "p50", "p95", "errors"]
+	const head = ["id", "wins", "p50", "p95", "errors", "host"]
 		.map((h) => `<th>${h}</th>`)
 		.join("");
 	const body = rows
