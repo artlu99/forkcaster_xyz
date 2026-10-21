@@ -47,9 +47,13 @@ const originalFetch = globalThis.fetch;
 
 // decent-artlu's cast: same data, but fid 3319217 has NOT signed, and its
 // URL embed has no unfurl mock — hostname fallback must still render.
+// The hash matches its route: the race's central validation rejects any
+// found cast that doesn't resolve the requested hash.
+const ARTLU_HASH = "0xbb54368fa1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
 const ARTLU_CAST = {
 	...SHIM_CAST,
 	fid: 3319217,
+	hash: ARTLU_HASH,
 	embeds: [{ url: "https://example.com/article" }],
 };
 // fid with no /signed mock: its signed-check fetch throws (fail-open path).
@@ -57,6 +61,7 @@ const ARTLU_CAST = {
 const UNKNOWN_SIGNED_CAST = {
 	...SHIM_CAST,
 	fid: 7777777,
+	hash: "0x11111111deadbeefdeadbeefdeadbeefdeadbeef",
 	embeds: [{ castId: { fid: 3854, hash: "0x11111111deadbeef" } }],
 };
 // The cast quoted by /zoo/0x79794547 (hydration via /h/{fullHash}).
@@ -183,7 +188,7 @@ test("GET /:username/:hash hides the farcaster link when the author has not sign
 	// The embed still renders for unsigned authors...
 	expect(body).toContain(CAST_TEXT);
 	expect(body).toContain(
-		`https://firefly.social/post/farcaster/${FULL_HASH}`,
+		`https://firefly.social/post/farcaster/${ARTLU_HASH}`,
 	);
 	// URL embed unfurl failed (no mock) — hostname fallback still renders.
 	expect(body).toContain("example.com");
@@ -477,4 +482,64 @@ test("HTML pages advertise the JSON variant", async () => {
 	expect(body).toContain(
 		'<link rel="alternate" type="application/json" href="?format=json" />',
 	);
+});
+
+// A partial (quote-blind) win: no shim mock for this URL — shim errors,
+// farcaster.tv resolves the cast, and the page ships with the quote
+// fill-in script instead of quote cards.
+const FCTV_ONLY_HASH = "0xbeefdead";
+const FCTV_ONLY_FULL = "0xbeefdead0123456789abcdef0123456789abcdef";
+const FCTV_ONLY_CAST = {
+	result: {
+		casts: [
+			{
+				hash: FCTV_ONLY_FULL,
+				text: "rendered from farcaster.tv",
+				timestamp: 1_792_425_174_000,
+				author: {
+					fid: 10215,
+					username: "zoo",
+					displayName: "zoo",
+					pfp: { url: "https://img.test/fctv.png" },
+				},
+				embeds: { images: [], urls: [] },
+			},
+		],
+	},
+};
+
+test("a quote-blind win ships the fill-in script and no quote cards", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://farcaster.tv/zoo/${FCTV_ONLY_HASH}`) {
+			return Response.json(FCTV_ONLY_CAST);
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/zoo/${FCTV_ONLY_HASH}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The cast renders from the partial source...
+	expect(body).toContain("rendered from farcaster.tv");
+	// ...with the quote fill-in script pointing at the fragment endpoint,
+	expect(body).toContain('?embeds=quotes"');
+	// but no server-rendered quote cards on this page.
+	expect(body).not.toContain("quote-embeds");
+});
+
+test("GET ?embeds=quotes serves the shim-resolved quote-card fragment", async () => {
+	const res = await app.request("/zoo/0x79794547?embeds=quotes");
+	expect(res.status).toBe(200);
+	expect(res.headers.get("cache-control")).toBe("no-store");
+
+	const body = await res.text();
+	expect(body).toContain("quote-embeds");
+	// Quote hydrated through Shim /h.
+	expect(body).toContain("the original quoted take");
+});
+
+test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
+	const res = await app.request("/zoo/0xdeadbeef?embeds=quotes");
+	expect(res.status).toBe(404);
 });

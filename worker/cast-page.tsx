@@ -11,29 +11,20 @@ import {
 	findClient,
 	resolveTemplate,
 } from "./clients.ts";
+import {
+	type ProviderId,
+	type ShimCast,
+	raceCast,
+	shimProvider,
+} from "./cast-source.ts";
 
 type CastData = NonNullable<Parameters<typeof FarcasterEmbed>[0]["castData"]>;
 
-// Shim (shim.artlu.xyz) is the sole cast data source: an owner-run caching
-// reader for the Farcaster Snapchain. Snapchain stores casts regardless of
-// app-level bans, so restricted accounts render here too. farcaster.tv is
-// deliberately not used (unofficial, rules unknown).
-type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
-type ShimCast = {
-	fid?: number;
-	hash?: string;
-	text?: string;
-	/** Unix seconds; the embed does new Date(ts), which wants milliseconds. */
-	timestamp?: number;
-	embeds?: ShimEmbed[];
-	user?: {
-		fid?: number;
-		username?: string;
-		displayName?: string;
-		pfpUrl?: string;
-		bio?: string;
-	};
-};
+// Cast data is raced across providers (cast-source.ts — shim, haatz, snap,
+// farcaster.tv); shim remains the ban-signal dependency via /signed. Snapchain
+// stores casts regardless of app-level bans, so restricted accounts render
+// here too. farcaster.tv wins are quote-blind and self-heal client-side
+// (QUOTE_FILL_SCRIPT below).
 
 // Shim embeds are raw message items: {url} or {castId} quotes, untyped.
 // Warpcast-hosted cast images live on imagedelivery.net; external images
@@ -337,6 +328,25 @@ const DEEPLINK_SCRIPT = `<script>
 })();
 </script>`;
 
+// Quote-card fill-in for partial wins: farcaster.tv drops quote embeds,
+// so such pages ship without quote cards and this script pulls the
+// shim-resolved SSR fragment (?embeds=quotes) into the page — the same
+// silent-degradation contract as the live-stats script. Bots and no-JS
+// visitors keep the OG-complete page; no server cache is involved.
+const QUOTE_FILL_SCRIPT = `<script>
+(function () {
+  var slot = document.querySelector(".farcaster-embed");
+  if (!slot) return;
+  fetch(location.pathname + "?embeds=quotes")
+    .then(function (r) { return r.ok ? r.text() : null; })
+    .then(function (html) {
+      if (!html || !html.trim()) return;
+      slot.insertAdjacentHTML("afterend", html);
+    })
+    .catch(function () {});
+})();
+</script>`;
+
 // Exported for clients.test.ts (pill markup with/without native targets).
 export function clientPill(
 	client: ClientDefinition,
@@ -565,6 +575,7 @@ function castPage(
 		largeImage?: boolean;
 	},
 	lastClientId?: string,
+	partial = false,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -579,7 +590,7 @@ function castPage(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${cardHtml}${notice}${actions}`,
 		og,
-		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}`,
+		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}`,
 	);
 }
 
@@ -588,10 +599,10 @@ function linkOnlyPage(
 	hash: string,
 	lastClientId?: string,
 ): string {
-	// Shim unreachable: signed state is unknown, which fails open — every
-	// registry client is offered. The route hash is used as-is (it may be
-	// short-form); the {fullHash} slot degrades to it. No fid is known, so
-	// any future fid-gated client would be skipped here.
+	// No provider resolved the cast: signed state is unknown, which fails
+	// open — every registry client is offered. The route hash is used as-is
+	// (it may be short-form); the {fullHash} slot degrades to it. No fid is
+	// known, so any future fid-gated client would be skipped here.
 	return shell(
 		`${username}/${hash} · forkcaster`,
 		`<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
@@ -643,8 +654,11 @@ function imageUrlsOf(cast: ShimCast): string[] {
 }
 
 // Everything both renderers need, fetched once ("resolve once, render
-// twice"). found = Shim reachable and cast resolved; not-found = Shim
-// reachable but no such cast; unreachable = Shim down or non-OK.
+// twice"). found = a provider resolved the cast; not-found = an
+// authoritative miss from a complete provider; unreachable = everyone
+// failed. opts.boxMs: HTML passes a box (a quote-blind farcaster.tv win
+// is allowed once it expires — the page self-heals quote cards); JSON
+// passes null (shim-only, always complete).
 export type ResolvedCast =
 	| {
 			kind: "found";
@@ -652,6 +666,8 @@ export type ResolvedCast =
 			unfurlMap: Map<string, UnfurlResult | undefined>;
 			quotes: Array<ShimCast | undefined>;
 			signed: boolean | null;
+			provider: ProviderId;
+			partial: boolean;
 	  }
 	| { kind: "not-found" }
 	| { kind: "unreachable" };
@@ -660,52 +676,38 @@ export async function resolveCast(
 	username: string,
 	hash: string,
 	env?: { UNFURL?: Fetcher },
+	opts: { boxMs?: number | null } = {},
 ): Promise<ResolvedCast> {
-	let reached = false;
-	let cast: ShimCast | null = null;
-	try {
-		// Capped at 5s like every other Shim call: a cold sharded lookup can
-		// otherwise hang for 15s+ (measured on a missing cast). Timing out
-		// counts as unreachable — HTML degrades to the link-only page, JSON
-		// answers 503 + Retry-After.
-		const res = await fetch(`https://shim.artlu.xyz/wc/${username}/${hash}`, {
-			signal: AbortSignal.timeout(5000),
-		});
-		if (res.ok) {
-			reached = true;
-			const data = (await res.json().catch(() => ({}))) as {
-				cast?: ShimCast;
-			};
-			cast = data.cast ?? null;
-		}
-	} catch {
-		// Shim unreachable — fall through.
-	}
+	// The race is capped at 5s per provider (cast-source.ts): a cold sharded
+	// lookup can otherwise hang for 15s+ (measured on a missing cast).
+	const race =
+		opts.boxMs === null
+			? await raceCast({ username, hash }, { providers: [shimProvider] })
+			: await raceCast({ username, hash }, { boxMs: opts.boxMs });
+	if (race.kind !== "found") return race;
+	const foundCast: ShimCast & { hash: string } = race.cast;
 
-	if (cast?.hash) {
-		// cast?.hash truthiness narrows `cast` to non-null but keeps
-		// hash: string | undefined — rebuild with the narrowed hash so the
-		// found branch can rely on it (firefly link, hydrated-quote URLs).
-		const foundCast: ShimCast & { hash: string } = {
-			...cast,
-			hash: cast.hash,
-		};
-		// Enrich up to 3 URL embeds with Open Graph data (fails open) and
-		// hydrate up to 3 quote embeds through Shim /h/{fullHash}.
-		const urlEmbeds = urlEmbedsOf(foundCast);
-		const quoteHashes = quoteHashesOf(foundCast);
-		const unfurls = Promise.allSettled(
-			urlEmbeds.map((u) => unfurl(u, env)),
-		);
-		const quoteFetches = Promise.allSettled(
-			quoteHashes.map((h) => fetchQuote(h)),
-		);
+	// Enrich up to 3 URL embeds with Open Graph data (fails open) and
+	// hydrate up to 3 quote embeds through Shim /h/{fullHash}. Partial wins
+	// carry no {castId} embeds, so quotes are naturally empty there — the
+	// page fills them in client-side (QUOTE_FILL_SCRIPT).
+	const urlEmbeds = urlEmbedsOf(foundCast);
+	const quoteHashes = quoteHashesOf(foundCast);
+	const unfurls = Promise.allSettled(
+		urlEmbeds.map((u) => unfurl(u, env)),
+	);
+	const quoteFetches = Promise.allSettled(
+		quoteHashes.map((h) => fetchQuote(h)),
+	);
 
-		// Has the author signed the social smart contract? Unknown (null)
-		// fails open: the farcaster.xyz link is shown unless Shim says no.
-		let signed: boolean | null = null;
-		const fid = foundCast.fid ?? foundCast.user?.fid;
-		if (fid !== undefined) {
+	// Has the author signed the social smart contract? Unknown (null)
+	// fails open: the farcaster.xyz link is shown unless Shim says no.
+	// The check is time-boxed to the HTML box so a slow shim can't stall a
+	// fast partial win; JSON waits fully (strict path).
+	let signed: boolean | null = null;
+	const fid = foundCast.fid ?? foundCast.user?.fid;
+	if (fid !== undefined) {
+		const signedPromise = (async (): Promise<boolean | null> => {
 			try {
 				const res = await fetch(`https://shim.artlu.xyz/signed/${fid}`, {
 					signal: AbortSignal.timeout(5000),
@@ -714,30 +716,46 @@ export async function resolveCast(
 					const data = (await res.json().catch(() => ({}))) as {
 						signed?: boolean;
 					};
-					if (typeof data.signed === "boolean") signed = data.signed;
+					if (typeof data.signed === "boolean") return data.signed;
 				}
 			} catch {
 				// Signed-check unavailable — fail open.
 			}
+			return null;
+		})();
+		if (opts.boxMs === null) {
+			signed = await signedPromise;
+		} else {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			signed = await Promise.race([
+				signedPromise,
+				new Promise<null>((resolve) => {
+					timer = setTimeout(() => resolve(null), opts.boxMs ?? 700);
+				}),
+			]);
+			if (timer !== undefined) clearTimeout(timer);
 		}
+	}
 
-		const unfurlResults = await unfurls;
-		const unfurlMap = new Map<string, UnfurlResult | undefined>();
-		urlEmbeds.forEach((u, i) => {
-			const r = unfurlResults[i];
-			unfurlMap.set(u, r.status === "fulfilled" ? r.value : undefined);
-		});
-		const quoteResults = await quoteFetches;
-		const quotes = quoteResults.map((r) =>
-			r.status === "fulfilled" ? r.value : undefined,
-		);
-		return { kind: "found", cast: foundCast, unfurlMap, quotes, signed };
-	}
-	if (reached) {
-		// Shim answered but has no such cast: genuinely missing or deleted.
-		return { kind: "not-found" };
-	}
-	return { kind: "unreachable" };
+	const unfurlResults = await unfurls;
+	const unfurlMap = new Map<string, UnfurlResult | undefined>();
+	urlEmbeds.forEach((u, i) => {
+		const r = unfurlResults[i];
+		unfurlMap.set(u, r.status === "fulfilled" ? r.value : undefined);
+	});
+	const quoteResults = await quoteFetches;
+	const quotes = quoteResults.map((r) =>
+		r.status === "fulfilled" ? r.value : undefined,
+	);
+	return {
+		kind: "found",
+		cast: foundCast,
+		unfurlMap,
+		quotes,
+		signed,
+		provider: race.provider,
+		partial: race.partial,
+	};
 }
 
 // HTML renderer: full SSR card + OG meta when found. Lenient statuses —
@@ -756,7 +774,7 @@ export async function renderCastHtml(
 	if (resolved.kind === "unreachable") {
 		return { status: 200, html: linkOnlyPage(username, hash, lastClientId) };
 	}
-	const { cast, unfurlMap, quotes, signed } = resolved;
+	const { cast, unfurlMap, quotes, signed, partial } = resolved;
 	try {
 		const cardHtml = renderToString(
 			(await FarcasterEmbed({
@@ -794,12 +812,57 @@ export async function renderCastHtml(
 		return {
 			status: 200,
 			// signed === false is the only hide trigger; unknown fails open.
-			html: castPage(vars, cardHtml, signed !== false, og, lastClientId),
+			html: castPage(vars, cardHtml, signed !== false, og, lastClientId, partial),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.
 		return { status: 200, html: linkOnlyPage(username, hash) };
 	}
+}
+
+// SSR fragment for QUOTE_FILL_SCRIPT: shim-resolved quote cards for a cast
+// that a quote-blind provider won. Served at ?embeds=quotes with
+// no-store; the fetcher is our own script, so any failure just means the
+// quote cards stay absent (same degradation as the live stats row).
+export async function renderQuotesFragment(
+	username: string,
+	hash: string,
+): Promise<{ status: 200 | 404 | 503; html: string }> {
+	const outcome = await shimProvider.fetchCast(
+		{ username, hash },
+		AbortSignal.timeout(5000),
+	);
+	if (outcome.kind === "error") return { status: 503, html: "" };
+	if (outcome.kind === "miss") return { status: 404, html: "" };
+	const quoteHashes = quoteHashesOf(outcome.cast);
+	const quoteFetches = await Promise.allSettled(
+		quoteHashes.map((h) => fetchQuote(h)),
+	);
+	const cards: string[] = [];
+	for (const settled of quoteFetches) {
+		const quote = settled.status === "fulfilled" ? settled.value : undefined;
+		if (!quote?.hash) continue;
+		try {
+			const quoteUsername = quote.user?.username ?? username;
+			const card = renderToString(
+				(await FarcasterEmbed({
+					username: quoteUsername,
+					hash: quote.hash,
+					castData: toCastData(quote),
+				})) as never,
+			)
+				// Quote cards carry no live-stats slot: drop the zero-stub row.
+				.replace(STATS_ROW, "$1");
+			cards.push(card);
+		} catch {
+			// A broken quote card must never take the fragment down.
+		}
+	}
+	if (cards.length === 0) return { status: 200, html: "" };
+	return {
+		status: 200,
+		html: `<div class="quote-embeds">\n${cards.join("\n")}\n</div>`,
+	};
 }
 
 // JSON renderer for AI agents. Deliberately strict where HTML is lenient:

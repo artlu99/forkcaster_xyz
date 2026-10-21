@@ -8,10 +8,10 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 
 - Pattern: `/{username}/{castHash}` where `castHash` matches `0x[0-9a-fA-F]+` — short or full form
 - Examples: `/zoo/0x895ecc74` and `/decent-artlu/0xbb54368f` → SSR cast card + links
-- Data: Shim (`https://shim.artlu.xyz/wc/{username}/{hash}`) — an owner-run cached reader for the Farcaster Snapchain. One call returns the full cast, full hash included. A keep-warm cron prevents Render scale-to-zero cold starts. Alternative public node (Hypersnap/Quilcast `haatz.quilibrium.com/v2/farcaster/*`) evaluated and rejected (Oct 2026): no `/signed` equivalent, no short-hash resolution, third-party volunteer infra.
-- Missing cast (Shim reports none) → 404 page; Shim unreachable → link-only page (200). All Shim calls (`/wc`, `/signed`, `/h`) are capped at 5s (`AbortSignal.timeout`) — a cold sharded lookup can otherwise hang 15s+; timeout ⇒ unreachable. Strict statuses are the JSON variant's job (see below)
+- Data: raced across providers (`worker/cast-source.ts`, rpc-racer pattern) — see "Cast source race" below. **shim** (`https://shim.artlu.xyz/wc/{username}/{hash}`, owner-run Snapchain reader with a keep-warm cron) is the completeness anchor and the sole ban-signal dependency (`/signed/{fid}`); **farcaster.tv** is fast but quote-blind; raw nodes **haatz**/`snap.farcaster.xyz:3381` are complete but need shim `/f/{username}` for the fid and a full hash. All upstream calls are capped at 5s.
+- Missing cast: an authoritative miss from a complete provider (shim, haatz, snap) → 404 page; no provider resolved → link-only page (200). All upstream calls are capped at 5s (`AbortSignal.timeout`) — shim's cold sharded lookups can otherwise hang 15s+; timeout ⇒ unreachable. Strict statuses are the JSON variant's job (see below)
 - Banned accounts: embeds render for everyone — but some clients hide unsigned authors. Since Oct 15, 2026 (Network School takeover), accounts must accept the "social smart contract" (Network Code); acceptance is an on-chain access NFT. Shim exposes it: `GET https://shim.artlu.xyz/signed/{fid}` → `{"signed":true|false}`. Unsigned authors: registry clients with `requiresSigned` (currently farcaster) are suppressed from the action row; the check fails open — unknown state suppresses nothing
-- farcaster.tv is deliberately not used for cast data: unofficial third party, rules unknown. react-farcaster-embed's own default endpoint is farcaster.tv — always pass `castData` so it never fetches. Sole exception: the live stats row (replies/recasts/likes) is fetched **client-side** from farcaster.tv — it sends `access-control-allow-origin: *` and answers for unsigned authors too; any failure just leaves the row absent
+- farcaster.tv as a **cast data** source is quote-blind (it drops `{castId}` embeds) and unofficial — it races as the partial tier only (700ms HTML box, client-side quote fill-in). react-farcaster-embed's own default endpoint is farcaster.tv — always pass `castData` so it never fetches. The live stats row (replies/recasts/likes) is still fetched **client-side** from farcaster.tv — it sends `access-control-allow-origin: *` and answers for unsigned authors too; any failure just leaves the row absent
 
 ## Stack
 
@@ -20,7 +20,7 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 | Runtime / package mgr | Bun | lockfile: `bun.lock`; scripts use `bun run` |
 | UI (landing) | Preact 11 | SPA assets; entry `src/main.tsx` |
 | Cast pages | Hono on Cloudflare Worker | SSR in `worker/` |
-| Cast data | Shim API | `/wc/{username}/{shortHash}` → full cast; see Mapping below |
+| Cast data | Provider race (`cast-source.ts`) | shim ∥ farcaster.tv ∥ haatz ∥ snap — first validated win; completeness box for HTML, shim-only for JSON; see "Cast source race" below |
 | URL embed cards | unfurl.artlu.workers.dev | called via the `UNFURL` **service binding** (workers.dev→workers.dev fetch is blocked, CF error 1042); `GET /?u={url}` → OG title/description/image (cached, fails open to hostname-only) |
 | Cast embed | react-farcaster-embed | rendering only — `castData` always supplied, never fetches |
 | Live stats | client-side script → farcaster.tv | `LIVE_STATS_SCRIPT` in `cast-page.tsx`; fills the SSR-stripped stats slot from the browser; fails silent (row absent); SSR data path stays Shim-only |
@@ -55,9 +55,11 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ├── worker/
 │   ├── index.ts               # Hono app; export { app }; default { fetch }
 │   ├── clients.ts             # client registry (schema, URLs, logos, cookie)
-│   ├── cast-page.tsx          # Shim fetch → CastData mapping → SSR / 404 / link fallback
+│   ├── cast-source.ts         # provider race: shim ∥ haatz ∥ snap ∥ farcaster.tv
+│   ├── cast-page.tsx          # resolve (race) → CastData mapping → SSR / 404 / link fallback
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
 │   ├── clients.test.ts        # registry unit tests: templates, gating, signed rule, deeplinks
+│   ├── cast-source.test.ts    # race unit tests: eligibility, box, miss/error, adapter mapping
 │   └── shims/server-only.ts   # empty stub for Next.js marker package
 └── src/                       # landing only (App.tsx)
 ```
@@ -95,6 +97,29 @@ Decisions:
 - **Deferred**: UA-allowlist morphing (GPTBot, ClaudeBot, …) as a later progressive enhancement. Must stay an allowlist — Telegram/Discord/iMessage preview bots must keep receiving HTML + OG meta.
 - No page-level caching today (Shim is the cache); if edge caching is ever added, the variant must join the cache key.
 
+## Cast source race
+
+Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fan out with per-provider abort + 5s cap, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error).
+
+**Sufficiency matrix** (measured Oct 2026) against the internal `ShimCast` contract (text, hash, unix-seconds ts, raw `{url}`/`{castId}` embeds, inline user data):
+
+| Provider | Resolves (username, hash)? | Quotes ({castId}) | Verdict |
+| --- | --- | --- | --- |
+| shim | ✅ short + full | ✅ | complete — canonical, wins anytime |
+| haatz (`haatz.quilibrium.com/v1`) | ⚠️ full hash only + fid via shim `/f/{username}` | ✅ | complete — full-hash requests |
+| snap (`snap.farcaster.xyz:3381`, official gateway; 443 hangs) | ⚠️ same as haatz | ✅ | complete — full-hash requests |
+| farcaster.tv | ✅ short (prefix-match) | ❌ **silently dropped** | partial — quote-blind |
+
+**HTML path (700ms completeness box):** complete providers win anytime; a quote-blind farcaster.tv win is held until the box expires, then served as a **partial** page — the SWR tradeoff the OG meta is immune to: title/description/image never depend on quotes, so chat-bots' cached embed cards are always complete. The partiality only reaches live browsers, which self-heal: partial pages ship `QUOTE_FILL_SCRIPT`, which fetches `?embeds=quotes` (shim-resolved, quote-hydrated SSR fragment, `no-store`) and injects it — same silent-degradation contract as the live-stats script. **No server-side cache** is introduced: the last-used badge and signed suppression stay cache-key-free.
+
+**JSON path:** shim-only (`boxMs: null`) — always complete, strict statuses (404 / 503 + Retry-After), the never-drop-quotes invariant holds unconditionally.
+
+**Miss semantics:** shim's miss resolves `not-found` immediately (fast 404s); a miss from any complete provider (haatz/snap raw nodes' 400) is authoritative ⇒ 404 even if a partial landed; farcaster.tv 404 alone never produces a 404 (cast might exist). Everything-else-failed ⇒ link-only page (HTML) / 503 (JSON), fail-open as usual.
+
+**Ban signal:** NOT raced — `/signed/{fid}` stays a shim dependency, orthogonal to cast content, time-boxed to the HTML box with the usual fail-open.
+
+Follow-ups: quote hydration could race haatz/snap (`/h/{fullHash}` vs `castById` — the castId embed carries the fid); a `?format=json` consumer willing to trade completeness for latency could opt into the race.
+
 ## Client registry (action row, last-used badge)
 
 The cast page's "Open in …" pills are rendered from a data registry, `worker/clients.ts` — adding a client is a data change only.
@@ -108,7 +133,7 @@ The cast page's "Open in …" pills are rendered from a data registry, `worker/c
 
 ## Shim → CastData mapping
 
-Shim returns raw Snapchain message data; `toCastData()` in `worker/cast-page.tsx` adapts it for react-farcaster-embed:
+Providers return different shapes; `cast-source.ts` normalizes everything onto `ShimCast` (shim's raw Snapchain shape). `toCastData()` in `worker/cast-page.tsx` then adapts it for react-farcaster-embed:
 
 - `timestamp` is unix **seconds** → multiplied by 1000 (the embed does `new Date(ts)`)
 - `embeds` are untyped `{url}` / `{castId}` items → bucketed into `images` / `urls` / `casts`; image heuristic = `imagedelivery.net` host or image extension. **Quotes are hydrated** through Shim `GET /h/{fullHash}` (depth 1) and mapped like any cast; hydration failure (e.g. pruned casts) drops the quote. URL embeds render as link cards via `openGraph` (see unfurl above)
@@ -128,6 +153,7 @@ Shim returns raw Snapchain message data; `toCastData()` in `worker/cast-page.tsx
 | Task | Touch |
 | --- | --- |
 | Shim fetch / mapping / SSR fallbacks | `worker/cast-page.tsx` |
+| Provider race / cast data sources | `worker/cast-source.ts` |
 | Client roster / action row data | `worker/clients.ts` |
 | Routes | `worker/index.ts` |
 | Aliases | `vite.config.ts`, `tsconfig.worker.json` paths |
@@ -136,4 +162,4 @@ Shim returns raw Snapchain message data; `toCastData()` in `worker/cast-page.tsx
 
 ## Status
 
-Shim-only SSR data path; live stats fetched client-side from farcaster.tv (the sole farcaster.tv touchpoint). Agent JSON variant (`?format=json`) shipped. Registry-driven action row shipped: last-used badge, Farcaster native deeplink (`farcaster://`, verified), four verified per-cast client URLs. Optional: deploy.
+Shim-first SSR data path raced across shim / farcaster.tv / haatz / snap (`cast-source.ts`); HTML serves quote-blind wins after a 700ms box and self-heals quotes client-side; JSON stays shim-complete and strict. Live stats still fetched client-side from farcaster.tv. Agent JSON variant (`?format=json`) shipped. Registry-driven action row shipped: last-used badge, Farcaster native deeplink (`farcaster://`, verified), four verified per-cast client URLs.
