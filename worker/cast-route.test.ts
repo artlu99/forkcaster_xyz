@@ -580,8 +580,9 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(await castRes.text()).toContain("not found");
 });
 
-test("auto-open unset: countdown banner; ON: abort overlay; OFF: chip only", async () => {
-	// unset (bare slug): banner + countdown + On chip; no overlay.
+test("auto-open unset: countdown banner; ON: single-Pause arming; OFF: chip", async () => {
+	// unset (bare slug): countdown status link + Pause — ONE choice in the
+	// moment; settings appear only in the calm paused view.
 	const unset = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly" },
 	});
@@ -589,23 +590,29 @@ test("auto-open unset: countdown banner; ON: abort overlay; OFF: chip only", asy
 	const unsetBody = await unset.text();
 	expect(unsetBody).toContain('data-auto="unset"');
 	expect(unsetBody).toContain("in <span class=\"auto-secs\">5</span>s");
-	expect(unsetBody).toContain("Auto-open: On");
+	expect(unsetBody).toContain('data-auto-action="pause"');
+	// Exactly one "Auto-open:" occurrence — the script's chip builder — so
+	// the arming view itself carries no settings chrome.
+	expect((unsetBody.match(/Auto-open:/g) || []).length).toBe(1);
 	expect(unsetBody).not.toContain('data-auto="on"');
 
-	// ON: large abort overlay + redirect to the last-used client; no banner.
+	// ON: large arming overlay + redirect to the last-used client; the
+	// single control is Pause (settings appear after pause).
 	const on = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|auto-on" },
 	});
 	expect(on.status).toBe(200);
 	const onBody = await on.text();
 	expect(onBody).toContain('data-auto="on"');
-	expect(onBody).toContain("Turn off auto-open");
-	expect(onBody).toContain(
+	// The arming overlay carries ONE control (Pause) — no settings chrome.
+	const overlayStart = onBody.indexOf('<div class="auto-overlay"');
+	const overlayEnd = onBody.indexOf("</div>", overlayStart);
+	const overlay = onBody.slice(overlayStart, overlayEnd);
+	expect(overlay).toContain('data-auto-action="pause"');
+	expect(overlay).not.toContain("Turn off auto-open");
+	expect(overlay).toContain(
 		'data-auto-url="https://firefly.social/post/farcaster/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
 	);
-	// No countdown banner/chip markup ships in the ON state.
-	expect(onBody).not.toContain('data-auto="unset"');
-	expect(onBody).not.toContain('data-auto="off"');
 
 	// OFF: status + two-way toggle chip inside the persistent container.
 	const off = await app.request(`/zoo/${SHORT_HASH}`, {

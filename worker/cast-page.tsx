@@ -374,32 +374,35 @@ const AUTO_SCRIPT = `<script>
   var name = box ? box.getAttribute("data-auto-client") : "";
   var url = box ? box.getAttribute("data-auto-url") : "";
   var mode = box ? box.getAttribute("data-auto") : "";
+  var prefOn = mode === "on" || mode === "unset";
   var chip = function (pressed) {
     return '<button class="pill auto-chip" data-auto-toggle aria-pressed="' +
       (pressed ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
       (pressed ? "On" : "Off") + '</button>';
   };
   var settings = '<a class="auto-settings" href="/">settings</a>';
+  // One choice per view: Pause. Settings (Turn off / toggle) appear only
+  // in the calm paused view, never during the redirect window.
   var views = {
     countdown: function () {
       return '<a class="auto-go" href="' + url + '">Opening <strong>' + name +
         '</strong> in <span class="auto-secs">5</span>s \u2192</a>' +
-        '<button class="pill" data-auto-action="pause">Pause</button>' +
-        chip(true) + settings;
+        '<button class="pill" data-auto-action="pause">Pause</button>';
     },
     paused: function () {
-      return '<span class="auto-status">Paused \u2014 pick a client below</span>' +
+      return '<span class="auto-status">Paused \u2014 ' +
+        (prefOn ? "auto-open is on; next casts open in <strong>" + name + "</strong>" : "pick a client below") +
+        '</span>' +
+        (prefOn ? '<button class="pill" data-auto-action="off">Turn off auto-open</button>' : '') +
         '<button class="pill" data-auto-action="resume">Resume</button>' +
-        chip(true) + settings;
+        settings;
     },
     arming: function () {
-      return '<p class="auto-overlay-title">Opening <strong>' + name + '</strong></p>' +
-        '<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button>' +
-        '<button class="pill" data-auto-action="off">Turn off auto-open</button></p>' +
-        chip(true) + settings;
+      return '<p class="auto-overlay-title">Opening <strong>' + name + '</strong>\u2026</p>' +
+        '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p>';
     },
     stayed: function () {
-      return '<span class="auto-status">Auto-open is on \u2014 next casts open in ' + name + '</span>' +
+      return '<span class="auto-status">Auto-open is on \u2014 next casts open in <strong>' + name + '</strong></span>' +
         chip(true) + settings;
     },
     off: function () {
@@ -422,10 +425,6 @@ const AUTO_SCRIPT = `<script>
     fired = true;
     location.replace(url);
   };
-  var arm = function (ms) {
-    cancelAll();
-    timer = setTimeout(function () { fired = true; location.replace(url); }, ms);
-  };
   var secsLeft = 5;
   var startCountdown = function () {
     secsLeft = 5;
@@ -443,17 +442,25 @@ const AUTO_SCRIPT = `<script>
     }, 1000);
   };
   var pause = function () { cancelAll(); apply("paused"); };
-  var resume = function () { apply("countdown"); arm(5000); };
-  var stay = function () { cancelAll(); apply("stayed"); };
-  var turnOff = function () { cancelAll(); post("off").then(function () { apply("off"); }); };
+  var resume = function () {
+    if (mode === "on") { apply("arming"); arm(1500); }
+    else { startCountdown(); }
+  };
+  var turnOff = function () {
+    cancelAll();
+    prefOn = false;
+    if (tick) { clearInterval(tick); tick = null; }
+    post("off").then(function () { apply("off"); });
+  };
   if (box) {
     box.addEventListener("click", function (e) {
-      var chip = e.target && e.target.closest ? e.target.closest("[data-auto-toggle]") : null;
-      if (chip) {
-        var target = chip.getAttribute("aria-pressed") === "true" ? "off" : "on";
+      var t = e.target && e.target.closest ? e.target.closest("[data-auto-toggle]") : null;
+      if (t) {
+        var target = prefOn ? "off" : "on";
         cancelAll();
         post(target).then(function () {
-          apply(target === "on" ? "stayed" : "off");
+          prefOn = target === "on";
+          apply(prefOn ? "stayed" : "off");
         });
         return;
       }
@@ -462,14 +469,13 @@ const AUTO_SCRIPT = `<script>
       var action = a.getAttribute("data-auto-action");
       if (action === "pause") pause();
       else if (action === "resume") resume();
-      else if (action === "stay") stay();
       else if (action === "off") turnOff();
     });
     document.addEventListener("pointerdown", function (e) {
       var n = e.target;
       while (n && n !== document) {
         if (n.classList && n.classList.contains("actions")) {
-          if (box.getAttribute("data-auto") === "unset") pause();
+          if (mode === "unset" || mode === "on") pause();
           return;
         }
         n = n.parentNode;
@@ -501,10 +507,8 @@ function autoOpenUi(
 		return {
 			html:
 				open +
-				`<p class="auto-overlay-title">Opening <strong>${name}</strong></p>` +
-				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button><button class="pill" data-auto-action="off">Turn off auto-open</button></p>` +
-				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Toggle auto-open">Auto-open: On</button>` +
-				`<a class="auto-settings" href="/">settings</a></div>`,
+				`<p class="auto-overlay-title">Opening <strong>${name}</strong>\u2026</p>` +
+				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p></div>`,
 			script: AUTO_SCRIPT,
 		};
 	}
@@ -515,9 +519,7 @@ function autoOpenUi(
 		return {
 			html:
 				banner(`Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s \u2192`, "unset") +
-				`<button class="pill" data-auto-action="pause">Pause</button>` +
-				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Toggle auto-open">Auto-open: On</button>` +
-				`<a class="auto-settings" href="/">settings</a></div>`,
+				`<button class="pill" data-auto-action="pause">Pause</button></div>`,
 			script: AUTO_SCRIPT,
 		};
 	}
