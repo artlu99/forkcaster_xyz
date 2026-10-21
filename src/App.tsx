@@ -1,5 +1,38 @@
 import './App.css'
 import { siGithub, siGithubsponsors } from 'simple-icons'
+import { useEffect, useState } from 'preact/hooks'
+
+function AutoToggle() {
+  const [auto, setAuto] = useState<'on' | 'off' | undefined>(undefined)
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    const m = document.cookie.match(/(?:^|; )fc_client=([^;]*)/)
+    const v = m ? m[1] : ''
+    const sep = v.indexOf('|')
+    const flag = sep === -1 ? '' : v.slice(sep + 1)
+    if (flag === 'auto-on') setAuto('on')
+    if (flag === 'auto-off') setAuto('off')
+  }, [])
+  const set = (next: 'on' | 'off') => {
+    setAuto(next)
+    setSaved(true)
+    fetch('/prefs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ auto: next }),
+    }).catch(() => {})
+  }
+  return (
+    <p className="auto-toggle">
+      <span className="auto-label">auto-open</span>
+      <button type="button" aria-pressed={auto === 'on'} onClick={() => set('on')}>On</button>
+      <button type="button" aria-pressed={auto === 'off'} onClick={() => set('off')}>Off</button>
+      <span className="auto-note">
+        {saved ? 'saved' : 'cast pages open in your last-used app'}
+      </span>
+    </p>
+  )
+}
 
 function App() {
   return (
@@ -26,6 +59,7 @@ function App() {
           Farcaster's social smart contract are read-only in some of them,
           so their pages skip any app that requires signing.
         </p>
+        <AutoToggle />
         <p className="repo-link">
           <a href="https://github.com/artlu99/forkcaster_xyz">
             <span

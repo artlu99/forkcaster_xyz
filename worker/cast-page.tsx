@@ -3,6 +3,7 @@ import { renderToString } from "preact-render-to-string";
 import { siGithub, siGithubsponsors } from "simple-icons";
 import {
 	type ClientDefinition,
+	type ClientPrefs,
 	type TemplateVars,
 	LAST_CLIENT_COOKIE,
 	LAST_CLIENT_MAX_AGE,
@@ -272,10 +273,9 @@ const LIVE_STATS_SCRIPT = `<script>
 </script>`;
 
 // Remembers the visitor's client choice: a delegated click listener
-// writes the last-used client id into a year-long cookie, which the
-// worker reads on the next request to badge that client's pill.
-// Without JS nothing breaks — links work, the badge just stays where
-// the server last rendered it.
+// writes the v2 cookie value — slug + the existing auto-open flag ("|"
+// tail preserved), so pill clicks never clear the preference. The flag
+// itself is written server-side via POST /prefs (ITP-safe).
 const CLIENT_SCRIPT = `<script>
 (function () {
   document.addEventListener("click", function (e) {
@@ -283,7 +283,11 @@ const CLIENT_SCRIPT = `<script>
     while (el && el !== document) {
       var id = el.getAttribute && el.getAttribute("data-client");
       if (id) {
-        document.cookie = "${LAST_CLIENT_COOKIE}=" + encodeURIComponent(id) +
+        var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
+        var cur = m ? m[1] : "";
+        var sep = cur.indexOf("|");
+        var tail = sep === -1 ? "" : cur.slice(sep);
+        document.cookie = "${LAST_CLIENT_COOKIE}=" + id + tail +
           ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax";
         return;
       }
@@ -347,6 +351,123 @@ const QUOTE_FILL_SCRIPT = `<script>
     .catch(function () {});
 })();
 </script>`;
+
+// Auto-open flow (PLAN2): for a returning user with a last-used client.
+// - unset: 5s pausable countdown banner → redirect; "Auto-open: On" chip
+//   doubles as the off switch; settings link to the landing.
+// - on: short-circuit — the page renders under a LARGE abort overlay
+//   (Stay · Turn off auto-open) and location.replace() fires at ~400ms.
+// - off: compact status chip only.
+// No-JS degrades to a static "Opening … →" link; bots never send the
+// cookie and see none of this. Timer cancels on any pill pointerdown.
+const AUTO_SCRIPT = `<script>
+(function () {
+  var el = document.querySelector("[data-auto]");
+  if (!el) return;
+  var url = el.getAttribute("data-auto-url");
+  var limit = el.getAttribute("data-auto") === "on" ? 400 : 5000;
+  var fired = false;
+  var timer = setTimeout(function () {
+    if (fired) return;
+    fired = true;
+    location.replace(url);
+  }, limit);
+  var cancel = function () { clearTimeout(timer); };
+  var pause = function () {
+    cancel();
+    var s = el.querySelector(".auto-secs");
+    if (s) {
+      var note = document.createElement("span");
+      note.className = "auto-paused";
+      note.textContent = " — paused, pick a client below";
+      s.parentNode.replaceChild(note, s);
+    }
+    var p = el.querySelector("[data-auto-action=pause]");
+    if (p) p.remove();
+  };
+  var off = function () {
+    cancel();
+    fetch("/prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ auto: "off" })
+    })
+      .catch(function () {})
+      .then(function () {
+        var chip = document.createElement("a");
+        chip.className = "pill auto-chip";
+        chip.href = "/";
+        chip.textContent = "Auto-open: Off · settings";
+        el.replaceWith(chip);
+      });
+  };
+  var stay = function () { cancel(); el.remove(); };
+  document.addEventListener("pointerdown", function (e) {
+    var n = e.target;
+    while (n && n !== document) {
+      if (n.classList && n.classList.contains("actions")) {
+        if (el.getAttribute("data-auto") !== "on") cancel();
+        return;
+      }
+      n = n.parentNode;
+    }
+  }, true);
+  el.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest("[data-auto-action]") : null;
+    if (!a) return;
+    var action = a.getAttribute("data-auto-action");
+    if (action === "pause") pause();
+    else if (action === "stay") stay();
+    else if (action === "off") off();
+  });
+})();
+</script>`;
+
+// Auto-open UI for a returning user, keyed off the v2 cookie (see
+// clients.ts). Suppressed when the last-used client isn't offered
+// (signed rule) or on ?noredirect=1 — which renders a status chip only.
+function autoOpenUi(
+	prefs: ClientPrefs,
+	signed: boolean,
+	vars: TemplateVars,
+	noredirect: boolean,
+): { html: string; script?: string } {
+	if (!prefs.slug) return { html: "" };
+	const last = clientsForPage(signed, vars).find((c) => c.id === prefs.slug);
+	if (!last?.web) return { html: "" };
+	const url = escapeHtml(resolveTemplate(last.web, vars));
+	const name = escapeHtml(last.title);
+	// Short-circuit: large abort overlay, redirect at ~400ms. The overlay
+	// is the one intentionally loud element — and it only exists while a
+	// redirect is pending.
+	if (!noredirect && prefs.auto === "on") {
+		return {
+			html:
+				`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}">` +
+				`<p class="auto-overlay-title">Opening <strong>${name}</strong></p>` +
+				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button><button class="pill" data-auto-action="off">Turn off auto-open</button></p></div>`,
+			script: AUTO_SCRIPT,
+		};
+	}
+	// Discovery: 5s pausable countdown; the On chip doubles as the off
+	// switch. No-JS: the countdown text is itself the client link.
+	if (!noredirect && prefs.auto === undefined) {
+		return {
+			html:
+				`<div class="auto-banner" data-auto="unset" data-auto-url="${url}">` +
+				`<a class="auto-go" href="${url}">Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s →</a>` +
+				`<button class="pill" data-auto-action="pause">Pause</button>` +
+				`<button class="pill auto-chip" data-auto-action="off" title="Turn off auto-open">Auto-open: On</button>` +
+				`<a class="auto-settings" href="/">settings</a></div>`,
+			script: AUTO_SCRIPT,
+		};
+	}
+	// OFF state, or the ?noredirect escape: status chip + settings link.
+	const label = prefs.auto === "off" ? "Auto-open: Off" : "Auto-open: On";
+	return {
+		html: `<a class="pill auto-chip" href="/">${escapeHtml(label)} · settings</a>`,
+	};
+}
 
 // Exported for clients.test.ts (pill markup with/without native targets).
 export function clientPill(
@@ -560,6 +681,20 @@ main { padding-bottom: 8px; }
   fill: currentColor;
 }
 .site-footer a:hover, .site-footer a:focus-visible { color: var(--ink); }
+.auto-banner, .auto-overlay {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  border: 1px solid var(--accent); background: var(--accent-soft);
+  border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px;
+}
+.auto-banner .auto-go { color: var(--ink); text-decoration: none; }
+.auto-banner .auto-go:hover { color: var(--accent); }
+.auto-banner .auto-settings, .auto-overlay .auto-settings,
+.auto-chip[href="/"] { color: var(--muted); font-size: 12px; text-decoration: none; }
+.auto-overlay { border-width: 2px; border-radius: 12px; padding: 22px; }
+.auto-overlay-title { font-size: 30px; font-weight: 700; margin: 0 0 12px; }
+.auto-overlay-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
+.auto-overlay .pill { font-size: 18px; padding: 10px 22px; }
+.auto-banner .pill, .auto-overlay .pill { cursor: pointer; }
 </style>
 </head>
 <body>
@@ -589,9 +724,10 @@ function castPage(
 		image?: string;
 		largeImage?: boolean;
 	},
-	lastClientId?: string,
+	prefs: ClientPrefs = {},
 	partial = false,
 	primaryOrigin?: string,
+	noredirect = false,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -601,17 +737,18 @@ function castPage(
 		signed === false
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
 			: "";
-	const actions = clientActionsHtml(vars, signed, lastClientId);
+	const actions = clientActionsHtml(vars, signed, prefs.slug);
 	// Dual-serve canonicalization: every host renders the same page, but
 	// points at the primary origin so link equity and unfurlers agree.
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.hash}`
 		: undefined;
+	const auto = autoOpenUi(prefs, signed, vars, noredirect);
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
-		`${cardHtml}${notice}${actions}`,
+		`${auto.html}${cardHtml}${notice}${actions}`,
 		og,
-		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}`,
+		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${auto.script ?? ""}`,
 		canonicalUrl,
 	);
 }
@@ -619,21 +756,26 @@ function castPage(
 function linkOnlyPage(
 	username: string,
 	hash: string,
-	lastClientId?: string,
+	slug?: string,
+	noredirect = false,
 ): string {
 	// No provider resolved the cast: signed state is unknown, which fails
 	// open — every registry client is offered. The route hash is used as-is
 	// (it may be short-form); the {fullHash} slot degrades to it. No fid is
 	// known, so any future fid-gated client would be skipped here.
+	// Auto-open fires here too (the cast lives in the client), with the
+	// {fullHash} slot degraded to the route hash.
+	const prefs: ClientPrefs = { slug };
+	const auto = autoOpenUi(prefs, true, { username, hash, fullHash: hash }, noredirect);
 	return shell(
 		`${username}/${hash} · forkcaster`,
-		`<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
+		`${auto.html}<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
 			{ username, hash, fullHash: hash },
 			true,
-			lastClientId,
+			slug,
 		)}`,
 		undefined,
-		CLIENT_SCRIPT,
+		`${CLIENT_SCRIPT}${auto.script ?? ""}`,
 	);
 }
 
@@ -800,14 +942,18 @@ export async function renderCastHtml(
 	resolved: ResolvedCast,
 	username: string,
 	hash: string,
-	lastClientId?: string,
+	prefs: ClientPrefs = {},
 	primaryOrigin?: string,
+	noredirect = false,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, hash) };
 	}
 	if (resolved.kind === "unreachable") {
-		return { status: 200, html: linkOnlyPage(username, hash, lastClientId) };
+		return {
+			status: 200,
+			html: linkOnlyPage(username, hash, prefs.slug, noredirect),
+		};
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
 	try {
@@ -852,14 +998,18 @@ export async function renderCastHtml(
 				cardHtml,
 				signed !== false,
 				og,
-				lastClientId,
+				prefs,
 				partial,
 				primaryOrigin,
+				noredirect,
 			),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.
-		return { status: 200, html: linkOnlyPage(username, hash) };
+		return {
+			status: 200,
+			html: linkOnlyPage(username, hash, prefs.slug, noredirect),
+		};
 	}
 }
 

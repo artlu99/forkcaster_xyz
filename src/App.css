@@ -122,3 +122,40 @@
   right: 0;
   border-right-color: var(--border);
 }
+
+.auto-toggle {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.auto-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.auto-toggle button {
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 12px;
+  cursor: pointer;
+}
+.auto-toggle button:hover,
+.auto-toggle button:focus-visible {
+  color: var(--text-h);
+  border-color: var(--text-h);
+}
+.auto-toggle button[aria-pressed='true'] {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.auto-note {
+  font-size: 11px;
+}

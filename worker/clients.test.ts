@@ -20,8 +20,11 @@ import {
 	clientsForPage,
 	deeplinkTargets,
 	findClient,
+	mergeClientCookie,
 	missingVars,
+	parseClientCookie,
 	resolveTemplate,
+	serializeClientCookie,
 } from "./clients.ts";
 
 const VARS = {
@@ -66,6 +69,51 @@ describe("missingVars", () => {
 
 	test("passes templates whose placeholders are all satisfied", () => {
 		expect(missingVars("https://x.test/c/{fullHash}", VARS)).toEqual([]);
+	});
+});
+
+describe("client cookie v2", () => {
+	test("parses legacy bare slug as unset", () => {
+		expect(parseClientCookie("firefly")).toEqual({
+			slug: "firefly",
+			auto: undefined,
+		});
+	});
+	test("parses slug + flag, including dot-usernames", () => {
+		expect(parseClientCookie("firefly|auto-on")).toEqual({
+			slug: "firefly",
+			auto: "on",
+		});
+		expect(parseClientCookie("martinvr.eth|auto-off")).toEqual({
+			slug: "martinvr.eth",
+			auto: "off",
+		});
+	});
+	test("parses flag-only values", () => {
+		expect(parseClientCookie("|auto-on")).toEqual({
+			slug: undefined,
+			auto: "on",
+		});
+	});
+	test("empty and garbage values degrade safely", () => {
+		expect(parseClientCookie(undefined)).toEqual({});
+		expect(parseClientCookie("")).toEqual({});
+		expect(parseClientCookie("firefly|garbage")).toEqual({
+			slug: "firefly",
+			auto: undefined,
+		});
+	});
+	test("serializes v2 and round-trips", () => {
+		expect(serializeClientCookie({ slug: "firefly", auto: "on" })).toBe(
+			"firefly|auto-on",
+		);
+		expect(serializeClientCookie({ auto: "off" })).toBe("|auto-off");
+		const v = serializeClientCookie({ slug: "firefly", auto: "on" });
+		expect(parseClientCookie(v)).toEqual({ slug: "firefly", auto: "on" });
+	});
+	test("merge keeps the slug and overwrites the flag", () => {
+		expect(mergeClientCookie("zoo|auto-off", "on")).toBe("zoo|auto-on");
+		expect(mergeClientCookie(undefined, "on")).toBe("|auto-on");
 	});
 });
 

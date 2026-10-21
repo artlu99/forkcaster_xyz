@@ -1,15 +1,42 @@
 import { Hono } from "hono";
-import { getCookie } from "hono/cookie";
-import { LAST_CLIENT_COOKIE } from "./clients.ts";
+import { getCookie, setCookie } from "hono/cookie";
 import {
 	renderCastHtml,
 	renderCastJson,
 	renderQuotesFragment,
 	resolveCast,
 } from "./cast-page.tsx";
+import {
+	LAST_CLIENT_COOKIE,
+	LAST_CLIENT_MAX_AGE,
+	mergeClientCookie,
+	parseClientCookie,
+} from "./clients.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
+
+// Auto-open preference write. Server `Set-Cookie` (not document.cookie)
+// keeps the preference exempt from Safari ITP's ~7-day cap on
+// script-set cookies. Dumb: validate → Set-Cookie → 204.
+app.post("/prefs", async (c) => {
+	const body = (await c.req.json().catch(() => undefined)) as
+		| { auto?: string }
+		| undefined;
+	if (body?.auto !== "on" && body?.auto !== "off") {
+		return c.body(null, 400);
+	}
+	const value = mergeClientCookie(
+		getCookie(c, LAST_CLIENT_COOKIE),
+		body.auto,
+	);
+	setCookie(c, LAST_CLIENT_COOKIE, value, {
+		path: "/",
+		maxAge: LAST_CLIENT_MAX_AGE,
+		sameSite: "Lax",
+	});
+	return c.body(null, 204);
+});
 
 // Reserved single-segment paths (/api/, /transparency) are exact-match and
 // registered before the parametric cast route; cast URLs are always
@@ -102,14 +129,15 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		);
 	}
 	// The last-used client cookie badges the visitor's preferred pill.
-	const lastClientId = getCookie(c, LAST_CLIENT_COOKIE);
+	// Last-used client + auto-open preference from the single cookie.
+	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
 	const { status, html } = await renderCastHtml(
 		resolved,
 		username,
 		hash,
-		lastClientId,
-		// app.request()-style callers may pass no env at all.
+		prefs,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+		c.req.query("noredirect") === "1",
 	);
 	return c.html(html, status);
 });

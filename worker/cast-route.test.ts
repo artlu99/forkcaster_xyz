@@ -552,7 +552,7 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(body).toContain("forkcaster — transparency");
 	expect(body).toContain("first validated answer wins");
 	expect(body).toContain("No cast IDs");
-	expect(body).toContain("coming soon");
+	expect(body).toContain("shim.artlu.xyz"); // provider roster table
 	expect(body).toContain('href="/transparency"'); // footer link present
 
 	const jsonRes = await app.request("/transparency?format=json");
@@ -578,6 +578,97 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	const castRes = await app.request("/transparency/0xdeadbeef");
 	expect(castRes.status).toBe(404);
 	expect(await castRes.text()).toContain("not found");
+});
+
+test("auto-open unset: countdown banner; ON: abort overlay; OFF: chip only", async () => {
+	// unset (bare slug): banner + countdown + On chip; no overlay.
+	const unset = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly" },
+	});
+	expect(unset.status).toBe(200);
+	const unsetBody = await unset.text();
+	expect(unsetBody).toContain('data-auto="unset"');
+	expect(unsetBody).toContain("in <span class=\"auto-secs\">5</span>s");
+	expect(unsetBody).toContain("Auto-open: On");
+	expect(unsetBody).not.toContain('data-auto="on"');
+
+	// ON: large abort overlay + redirect to the last-used client; no banner.
+	const on = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly|auto-on" },
+	});
+	expect(on.status).toBe(200);
+	const onBody = await on.text();
+	expect(onBody).toContain('data-auto="on"');
+	expect(onBody).toContain("Turn off auto-open");
+	expect(onBody).toContain(
+		'data-auto-url="https://firefly.social/post/farcaster/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	// No countdown banner/chip markup ships in the ON state.
+	expect(onBody).not.toContain('data-auto="unset"');
+	expect(onBody).not.toContain('data-auto="off"');
+
+	// OFF: status chip only.
+	const off = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly|auto-off" },
+	});
+	expect(off.status).toBe(200);
+	const offBody = await off.text();
+	expect(offBody).toContain("Auto-open: Off");
+	expect(offBody).not.toContain("data-auto=");
+});
+
+test("no cookie: no auto-open markup at all (bots and first-timers)", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).not.toContain("data-auto");
+	expect(body).not.toContain("Auto-open:");
+});
+
+test("signed suppression gates auto-open: suppressed client never redirects", async () => {
+	// decent-artlu is unsigned; farcaster requires signing → the ON cookie
+	// targeting farcaster must not arm any redirect.
+	const res = await app.request("/decent-artlu/0xbb54368f", {
+		headers: { cookie: "fc_client=farcaster|auto-on" },
+	});
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).not.toContain('data-auto="on"');
+	expect(body).not.toContain("Turn off auto-open");
+});
+
+test("?noredirect=1 suppresses the redirect and shows the status chip", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}?noredirect=1`, {
+		headers: { cookie: "fc_client=firefly|auto-on" },
+	});
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).not.toContain('data-auto="on"');
+	expect(body).toContain("Auto-open: On");
+});
+
+test("POST /prefs merges the slug and sets the flag via Set-Cookie", async () => {
+	const res = await app.request("/prefs", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			cookie: "fc_client=zoo|auto-off",
+		},
+		body: JSON.stringify({ auto: "on" }),
+	});
+	expect(res.status).toBe(204);
+	const setCookie = res.headers.get("set-cookie") ?? "";
+	// hono encodes "|" as %7C; parseClientCookie decodes it on read.
+	expect(setCookie).toContain("fc_client=zoo%7Cauto-on");
+	expect(setCookie).toContain("Max-Age=31536000");
+	expect(setCookie).toContain("SameSite=Lax");
+
+	const bad = await app.request("/prefs", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ auto: "sometimes" }),
+	});
+	expect(bad.status).toBe(400);
 });
 
 test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
