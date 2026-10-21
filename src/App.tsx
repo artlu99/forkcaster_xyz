@@ -7,7 +7,14 @@ function AutoToggle() {
   const [saved, setSaved] = useState(false)
   useEffect(() => {
     const m = document.cookie.match(/(?:^|; )fc_client=([^;]*)/)
-    const v = m ? m[1] : ''
+    // Cookie values may be percent-encoded (server Set-Cookie encodes
+    // "|" as %7C).
+    let v = ''
+    try {
+      v = m ? decodeURIComponent(m[1]) : ''
+    } catch {
+      v = m ? m[1] : ''
+    }
     const sep = v.indexOf('|')
     const flag = sep === -1 ? '' : v.slice(sep + 1)
     if (flag === 'auto-on') setAuto('on')

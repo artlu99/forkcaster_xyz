@@ -284,7 +284,8 @@ const CLIENT_SCRIPT = `<script>
       var id = el.getAttribute && el.getAttribute("data-client");
       if (id) {
         var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
-        var cur = m ? m[1] : "";
+        var cur = "";
+        try { cur = m ? decodeURIComponent(m[1]) : ""; } catch (err) { cur = m ? m[1] : ""; }
         var sep = cur.indexOf("|");
         var tail = sep === -1 ? "" : cur.slice(sep);
         document.cookie = "${LAST_CLIENT_COOKIE}=" + id + tail +
@@ -354,18 +355,37 @@ const QUOTE_FILL_SCRIPT = `<script>
 
 // Auto-open flow (PLAN2): for a returning user with a last-used client.
 // - unset: 5s pausable countdown banner → redirect; "Auto-open: On" chip
-//   doubles as the off switch; settings link to the landing.
+//   toggles the preference off; settings link to the landing.
 // - on: short-circuit — the page renders under a LARGE abort overlay
-//   (Stay · Turn off auto-open) and location.replace() fires at ~400ms.
-// - off: compact status chip only.
+//   (Stay · Turn off auto-open) and location.replace() fires at ~1500ms.
+// - off: compact status chip that toggles the preference on.
 // No-JS degrades to a static "Opening … →" link; bots never send the
 // cookie and see none of this. Timer cancels on any pill pointerdown.
 const AUTO_SCRIPT = `<script>
 (function () {
+  var post = function (auto) {
+    return fetch("/prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ auto: auto })
+    }).catch(function () {});
+  };
+  Array.prototype.forEach.call(
+    document.querySelectorAll("[data-auto-toggle]"),
+    function (chip) {
+      chip.addEventListener("click", function () {
+        var target = chip.getAttribute("aria-pressed") === "true" ? "off" : "on";
+        post(target).then(function () {
+          chip.setAttribute("aria-pressed", target === "on" ? "true" : "false");
+          chip.textContent = "Auto-open: " + (target === "on" ? "On" : "Off");
+        });
+      });
+    }
+  );
   var el = document.querySelector("[data-auto]");
   if (!el) return;
   var url = el.getAttribute("data-auto-url");
-  var limit = el.getAttribute("data-auto") === "on" ? 400 : 5000;
+  var limit = el.getAttribute("data-auto") === "on" ? 1500 : 5000;
   var fired = false;
   var timer = setTimeout(function () {
     if (fired) return;
@@ -387,19 +407,13 @@ const AUTO_SCRIPT = `<script>
   };
   var off = function () {
     cancel();
-    fetch("/prefs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ auto: "off" })
-    })
-      .catch(function () {})
-      .then(function () {
-        var chip = document.createElement("a");
-        chip.className = "pill auto-chip";
-        chip.href = "/";
-        chip.textContent = "Auto-open: Off · settings";
-        el.replaceWith(chip);
-      });
+    post("off").then(function () {
+      var chip = document.createElement("a");
+      chip.className = "pill auto-chip";
+      chip.href = "/";
+      chip.textContent = "Auto-open: Off · settings";
+      el.replaceWith(chip);
+    });
   };
   var stay = function () { cancel(); el.remove(); };
   document.addEventListener("pointerdown", function (e) {
@@ -425,7 +439,10 @@ const AUTO_SCRIPT = `<script>
 
 // Auto-open UI for a returning user, keyed off the v2 cookie (see
 // clients.ts). Suppressed when the last-used client isn't offered
-// (signed rule) or on ?noredirect=1 — which renders a status chip only.
+// (signed rule). ?noredirect=1 renders the toggle without any redirect.
+// The chip is a two-way toggle (On ↔ Off) in every state; the ON abort
+// overlay is the one intentionally loud element — and it only exists
+// while a redirect is pending.
 function autoOpenUi(
 	prefs: ClientPrefs,
 	signed: boolean,
@@ -437,10 +454,9 @@ function autoOpenUi(
 	if (!last?.web) return { html: "" };
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);
-	// Short-circuit: large abort overlay, redirect at ~400ms. The overlay
-	// is the one intentionally loud element — and it only exists while a
-	// redirect is pending.
-	if (!noredirect && prefs.auto === "on") {
+	const state = noredirect ? undefined : prefs.auto;
+	// Short-circuit: large abort overlay, redirect at ~1500ms.
+	if (state === "on") {
 		return {
 			html:
 				`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}">` +
@@ -449,23 +465,26 @@ function autoOpenUi(
 			script: AUTO_SCRIPT,
 		};
 	}
-	// Discovery: 5s pausable countdown; the On chip doubles as the off
-	// switch. No-JS: the countdown text is itself the client link.
-	if (!noredirect && prefs.auto === undefined) {
+	// Discovery: 5s pausable countdown; the chip toggles the preference.
+	// No-JS: the countdown text is itself the client link.
+	if (state === undefined) {
 		return {
 			html:
 				`<div class="auto-banner" data-auto="unset" data-auto-url="${url}">` +
 				`<a class="auto-go" href="${url}">Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s →</a>` +
 				`<button class="pill" data-auto-action="pause">Pause</button>` +
-				`<button class="pill auto-chip" data-auto-action="off" title="Turn off auto-open">Auto-open: On</button>` +
+				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Turn off auto-open">Auto-open: On</button>` +
 				`<a class="auto-settings" href="/">settings</a></div>`,
 			script: AUTO_SCRIPT,
 		};
 	}
-	// OFF state, or the ?noredirect escape: status chip + settings link.
-	const label = prefs.auto === "off" ? "Auto-open: Off" : "Auto-open: On";
+	// OFF state (or the ?noredirect escape): status chip that toggles on,
+	// plus a settings link to the landing.
 	return {
-		html: `<a class="pill auto-chip" href="/">${escapeHtml(label)} · settings</a>`,
+		html:
+			`<button class="pill auto-chip" data-auto-toggle aria-pressed="false" title="Turn on auto-open">Auto-open: Off</button>` +
+			`<a class="auto-settings" href="/">settings</a>`,
+		script: AUTO_SCRIPT,
 	};
 }
 
