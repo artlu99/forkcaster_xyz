@@ -393,12 +393,13 @@ const AUTO_SCRIPT = `<script>
       return '<span class="auto-status">Paused \u2014 ' +
         (prefOn ? "auto-open is on; next casts open in <strong>" + name + "</strong>" : "pick a client below") +
         '</span>' +
+        '<button class="pill" data-auto-action="go">Go now</button>' +
         (prefOn ? '<button class="pill" data-auto-action="off">Turn off auto-open</button>' : '') +
-        '<button class="pill" data-auto-action="resume">Resume</button>' +
         settings;
     },
     arming: function () {
-      return '<p class="auto-overlay-title">Opening <strong>' + name + '</strong>\u2026</p>' +
+      return '<p class="auto-overlay-title">Opening <strong>' + name +
+        '</strong> in <span class="auto-secs">5</span>s\u2026</p>' +
         '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p>';
     },
     stayed: function () {
@@ -426,9 +427,7 @@ const AUTO_SCRIPT = `<script>
     location.replace(url);
   };
   var secsLeft = 5;
-  var startCountdown = function () {
-    secsLeft = 5;
-    apply("countdown");
+  var startTimer = function () {
     tick = setInterval(function () {
       secsLeft -= 1;
       if (secsLeft <= 0) {
@@ -441,10 +440,16 @@ const AUTO_SCRIPT = `<script>
       if (s) s.textContent = String(secsLeft);
     }, 1000);
   };
+  var startCountdown = function () {
+    secsLeft = 5;
+    apply("countdown");
+    startTimer();
+  };
   var pause = function () { cancelAll(); apply("paused"); };
-  var resume = function () {
-    if (mode === "on") { apply("arming"); arm(1500); }
-    else { startCountdown(); }
+  var goNow = function () {
+    cancelAll();
+    fired = true;
+    location.replace(url);
   };
   var turnOff = function () {
     cancelAll();
@@ -468,7 +473,7 @@ const AUTO_SCRIPT = `<script>
       if (!a) return;
       var action = a.getAttribute("data-auto-action");
       if (action === "pause") pause();
-      else if (action === "resume") resume();
+      else if (action === "go") goNow();
       else if (action === "off") turnOff();
     });
     document.addEventListener("pointerdown", function (e) {
@@ -482,8 +487,14 @@ const AUTO_SCRIPT = `<script>
       }
     }, true);
   }
-  if (mode === "on") arm(1500);
-  if (mode === "unset") startCountdown();
+  if (mode === "on") {
+    apply("arming");
+    startTimer();
+  }
+  if (mode === "unset") {
+    apply("countdown");
+    startTimer();
+  }
 })();
 </script>`;
 
