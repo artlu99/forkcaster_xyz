@@ -117,7 +117,7 @@ export const CLIENTS: ClientDefinition[] = [
 	{
 		id: "vibeshift",
 		title: "Vibeshift",
-		logoUrl: "/logos/vibeshift.svg",
+		logoUrl: "/logos/vibeshift.png",
 		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}&castFid={fid}",
 	},
 ];
