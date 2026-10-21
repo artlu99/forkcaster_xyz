@@ -70,7 +70,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | --- | --- | --- |
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
-| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image) + Mini App embed meta (`fc:miniapp`/`fc:frame`, gated on `PRIMARY_ORIGIN`, image + "View cast" launch button — Farcaster's OG equivalent) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
+| `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image; `og:site_name` = forkcaster) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
 

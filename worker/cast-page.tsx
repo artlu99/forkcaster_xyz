@@ -443,13 +443,13 @@ function shell(
 	},
 	clientScript?: string,
 	canonicalUrl?: string,
-	extraMeta?: string,
 ): string {
 	const canonicalMeta = canonicalUrl
 		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
 		: "";
 	const meta = og
 		? [
+				`<meta property="og:site_name" content="forkcaster" />`,
 				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
 				...(canonicalUrl
 					? [`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`]
@@ -480,7 +480,6 @@ function shell(
 <title>${title}</title>
 ${canonicalMeta}
 ${meta}
-${extraMeta ?? ""}
 <link rel="alternate" type="application/json" href="?format=json" />
 <link rel="stylesheet" href="/farcaster-embed.css" />
 <style>
@@ -644,43 +643,12 @@ function castPage(
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.hash}`
 		: undefined;
-	// Mini App embed meta (miniapps.farcaster.xyz/docs/guides/sharing):
-	// when a forkcaster link is shared in a Farcaster client, the client
-	// fetches this HTML and renders the image + button as a rich card —
-	// our equivalent of the Telegram/Discord OG card. Needs an image, so
-	// it ships only when og.image exists (cast embed image or avatar).
-	let miniAppMeta: string | undefined;
-	if (primaryOrigin && canonicalUrl && og.image) {
-		const miniAppEmbed = {
-			version: "1",
-			imageUrl: og.image,
-			button: {
-				title: "View cast",
-				action: {
-					type: "launch_miniapp",
-					name: "forkcaster",
-					url: canonicalUrl,
-				},
-			},
-		};
-		const legacyFrameEmbed = {
-			...miniAppEmbed,
-			button: {
-				...miniAppEmbed.button,
-				action: { ...miniAppEmbed.button.action, type: "launch_frame" },
-			},
-		};
-		miniAppMeta =
-			`<meta name="fc:miniapp" content="${escapeHtml(JSON.stringify(miniAppEmbed))}" />\n` +
-			`<meta name="fc:frame" content="${escapeHtml(JSON.stringify(legacyFrameEmbed))}" />`;
-	}
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${cardHtml}${notice}${actions}`,
 		og,
 		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}`,
 		canonicalUrl,
-		miniAppMeta,
 	);
 }
 

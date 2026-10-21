@@ -589,20 +589,14 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(canonicalBody).toContain(
 		'<meta property="og:url" content="https://forkcaster.xyz/zoo/0x895ecc74" />',
 	);
-	// Mini App embed meta (Farcaster's OG equivalent), with the cast image
-	// and a launch action pinned to the canonical URL. The JSON is
-	// HTML-escaped inside the content attribute (&quot;), which parsers
-	// unescape before reading.
-	expect(canonicalBody).toContain('name="fc:miniapp"');
-	expect(canonicalBody).toContain('name="fc:frame"');
-	expect(canonicalBody).toContain("&quot;version&quot;:&quot;1&quot;");
-	expect(canonicalBody).toContain("&quot;type&quot;:&quot;launch_miniapp&quot;");
+	// Farcaster renders plain OG link cards (X-style) for forkcaster links:
+	// og:site_name labels the card, and NO fc:miniapp/fc:frame tags ship —
+	// those would turn shares into miniapp cards with launch friction.
 	expect(canonicalBody).toContain(
-		"&quot;url&quot;:&quot;https://forkcaster.xyz/zoo/0x895ecc74&quot;",
+		'<meta property="og:site_name" content="forkcaster" />',
 	);
-	expect(canonicalBody).toContain(
-		"&quot;imageUrl&quot;:&quot;https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/0eeef320/original&quot;",
-	);
+	expect(canonicalBody).not.toContain("fc:miniapp");
+	expect(canonicalBody).not.toContain("fc:frame");
 
 	// No var (tests / bare workers.dev deploys): neither tag ships, byte
 	// compatibility with the pre-dual-serve output.
