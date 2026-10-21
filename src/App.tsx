@@ -1,5 +1,5 @@
 import './App.css'
-import { siGithub } from 'simple-icons'
+import { siGithub, siGithubsponsors } from 'simple-icons'
 
 function App() {
   return (
@@ -33,6 +33,14 @@ function App() {
               dangerouslySetInnerHTML={{ __html: siGithub.svg }}
             />
             MIT license
+          </a>{' '}
+          <span aria-hidden="true">·</span>{' '}
+          <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">
+            <span
+              className="repo-mark"
+              dangerouslySetInnerHTML={{ __html: siGithubsponsors.svg }}
+            />
+            Contributing
           </a>
         </p>
       </section>
