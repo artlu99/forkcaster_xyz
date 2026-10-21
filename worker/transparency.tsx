@@ -10,53 +10,43 @@ const PROVIDERS = [
 	{
 		id: "shim",
 		host: "shim.artlu.xyz",
-		role: "complete",
-		note: "owner-run",
 	},
 	{
 		id: "farcaster-tv",
-		host: "farcaster.tv",
-		role: "partial",
-		note: "drops quote embeds",
+		host: "farcaster.tv (partial)",
 	},
 	{
 		id: "haatz",
 		host: "haatz.quilibrium.com",
-		role: "complete",
-		note: "full hash + fid only",
 	},
 	{
 		id: "snap",
 		host: "snap.farcaster.xyz:3381",
-		role: "complete",
-		note: "full hash + fid only",
 	},
 ];
 
 const REPO = "https://github.com/artlu99/forkcaster_xyz";
 
 function statsTable(rows: Array<string[]>): string {
-	const head = ["provider", "role", "wins", "p50", "p95", "errors"]
+	const head = ["provider", "wins", "p50", "p95", "errors"]
 		.map((h) => `<th>${h}</th>`)
 		.join("");
 	const body = rows
-		.map(
-			(row) =>
-				`<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`,
-		)
+		.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`)
 		.join("");
 	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 export function transparencyJson(): Record<string, unknown> {
 	return {
-		what: "Farcaster cast links -> clean web pages. No app, no login.",
+		what: "Farcaster cast links -> clean redirects. No app, no login.",
 		license: "MIT",
 		code: REPO,
 		data: {
 			method: "race 4 providers in parallel; first validated answer wins",
 			providers: PROVIDERS,
-			banSignal: "author signed Farcaster's contract? shim /signed/{fid}; unknown -> fail open",
+			banSignal:
+				"author signed Farcaster's contract? shim /signed/{fid}; unknown -> fail open",
 		},
 		tracking: {
 			counters:
@@ -73,27 +63,27 @@ export function transparencyJson(): Record<string, unknown> {
 			window: null,
 			providers: PROVIDERS.map((p) => ({
 				id: p.id,
-				role: p.role,
 				wins: null,
 				requests: null,
 				p50Ms: null,
 				p95Ms: null,
 				errorRate: null,
+				host: p.host,
 			})),
 		},
 	};
 }
 
-export function renderTransparencyHtml(options: {
-	canonicalUrl?: string;
-} = {}): string {
+export function renderTransparencyHtml(
+	options: { canonicalUrl?: string } = {},
+): string {
 	const placeholderRows = PROVIDERS.map((p) => [
 		p.id,
-		p.role,
 		"—",
 		"—",
 		"—",
 		"—",
+		p.host,
 	]);
 	const body = `
 <style>
@@ -106,19 +96,19 @@ export function renderTransparencyHtml(options: {
 .tr a { color: var(--ink); }
 </style>
 <div class="tr">
-<p class="lede"><strong>forkcaster — transparency</strong></p>
+<p class="lede"><strong>transparency</strong></p>
 
 <h2>What</h2>
 <ul>
-<li>Farcaster cast links → clean web pages. No app, no login.</li>
-<li>Open source, MIT, owner-run. <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
+<li>Farcaster cast links → clean redirects. No app, no login.</li>
+<li>MIT licensed open source: <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
 </ul>
 
 <h2>Data</h2>
 <ul>
 <li>Cast data is raced across 4 providers in parallel; first validated answer wins.</li>
 </ul>
-${statsTable(PROVIDERS.map((p) => [p.id, p.host, p.role, p.note]))}
+${statsTable(placeholderRows)}
 <ul>
 <li>Ban check (has the author signed Farcaster's contract?): shim <code>/signed/{fid}</code>. Unknown → fail open, everything shown.</li>
 </ul>
@@ -132,13 +122,8 @@ ${statsTable(PROVIDERS.map((p) => [p.id, p.host, p.role, p.note]))}
 
 <h2>Domains</h2>
 <ul>
-<li><code>forkcaster.xyz</code> — canonical. <code>warpcats.com</code> — same pages, canonicalized here.</li>
-</ul>
-
-<h2>Racing stats — coming soon</h2>
-${statsTable(placeholderRows)}
-<ul>
-<li>Filled from anonymous race telemetry once traffic accumulates.</li>
+<li><code>forkcaster.xyz</code> — canonical domain</li>
+<li><code>warpcats.com</code> — same pages</li>
 </ul>
 
 <p class="notice">Questions? <a href="${REPO}/issues">Open an issue</a>.</p>
