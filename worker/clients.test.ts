@@ -71,12 +71,16 @@ describe("missingVars", () => {
 
 describe("clientsForPage", () => {
 	test("skips clients with unsatisfied optional placeholders ({fid})", () => {
-		const offered = clientsForPage(true, { ...VARS, fid: undefined }).map(
-			(c) => c.id,
-		);
-		// Every registry client today has a satisfiable template —
-		// farcaster/firefly/quilcast/neynar/vibeshift stay.
-		expect(offered).toEqual([
+		// Vibeshift needs the cast originator's fid (castFid): with no fid
+		// in the vars it is skipped, the rest stay.
+		const withoutFid = clientsForPage(true, {
+			...VARS,
+			fid: undefined,
+		}).map((c) => c.id);
+		expect(withoutFid).toEqual(["farcaster", "firefly", "quilcast", "neynar"]);
+		// With the fid satisfied, the full roster is offered.
+		const withFid = clientsForPage(true, VARS).map((c) => c.id);
+		expect(withFid).toEqual([
 			"farcaster",
 			"firefly",
 			"quilcast",

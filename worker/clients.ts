@@ -110,14 +110,15 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/neynar.png",
 		web: "https://explorer.neynar.com/{fullHash}",
 	},
-	// Per-cast format owner-provided and live-checked (200, renders the
-	// cast view): query-param form, {fullHash} — short-hash support
-	// unverified, the route-form hash can be shorter than 40 hex.
+	// Per-cast format owner-provided + user-verified: the view needs the
+	// cast originator's fid (castFid) alongside the hash, so the entry is
+	// {fid}-gated — skipped on fid-less surfaces (e.g. the link-only
+	// fallback page). castHash wants the full 40 hex, hence {fullHash}.
 	{
 		id: "vibeshift",
 		title: "Vibeshift",
 		logoUrl: "/logos/vibeshift.svg",
-		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}",
+		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}&castFid={fid}",
 	},
 ];
 
