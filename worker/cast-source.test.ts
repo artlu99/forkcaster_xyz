@@ -314,3 +314,26 @@ test("shim adapter maps success:false to an authoritative miss", async () => {
 	const outcome = await shimProvider.fetchCast(VARS, new AbortController().signal);
 	expect(outcome.kind).toBe("miss");
 });
+
+test("raceCast reports one timing row per eligible provider", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/zoo/${SHORT_HASH}`) {
+			return respond(url, SHIM_FOUND, 15);
+		}
+		if (url === `https://farcaster.tv/zoo/${SHORT_HASH}`) {
+			return respond(url, FCTV_FOUND);
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(VARS, { boxMs: 500 });
+	expect(race.timings.length).toBe(2);
+	const shim = race.timings.find((t) => t.provider === "shim");
+	const fctv = race.timings.find((t) => t.provider === "farcaster-tv");
+	expect(shim?.kind).toBe("found");
+	expect(shim && shim.ms >= 10).toBe(true);
+	expect(fctv?.kind).toBe("found");
+	expect(race.elapsedMs).toBeGreaterThanOrEqual(shim?.ms ?? 0);
+	// Erroring providers get timing rows too (the raw nodes are ineligible
+	// on short hashes, so this roster only has two eligible providers).
+});

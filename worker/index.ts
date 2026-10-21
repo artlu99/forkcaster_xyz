@@ -33,6 +33,39 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
+	// Non-blocking race telemetry: one Analytics Engine datapoint per
+	// resolve (index = winner/kind; doubles = total ms, box, partial flag;
+	// blob = per-provider outcomes). Guarded: tests and other callers
+	// without an executionCtx or the binding simply skip it.
+	try {
+		const dataset = c.env.RACE_STATS;
+		if (dataset) {
+			c.executionCtx.waitUntil(
+				Promise.resolve(
+					dataset.writeDataPoint({
+						indexes: [
+							resolved.kind === "found"
+								? (resolved.provider ?? "none")
+								: resolved.kind,
+						],
+						blobs: [
+							resolved.timings
+								.map((t) => `${t.provider}:${t.kind}:${t.ms}`)
+								.join(","),
+							wantsJson ? "json" : "html",
+						],
+						doubles: [
+							resolved.elapsedMs,
+							wantsJson ? -1 : 700,
+							resolved.kind === "found" && resolved.partial ? 1 : 0,
+						],
+					}),
+				),
+			);
+		}
+	} catch {
+		// No executionCtx (tests) — telemetry is best-effort.
+	}
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderCastJson(
 			resolved,

@@ -13,6 +13,7 @@ import {
 } from "./clients.ts";
 import {
 	type ProviderId,
+	type ProviderTiming,
 	type ShimCast,
 	raceCast,
 	shimProvider,
@@ -668,9 +669,19 @@ export type ResolvedCast =
 			signed: boolean | null;
 			provider: ProviderId;
 			partial: boolean;
+			timings: ProviderTiming[];
+			elapsedMs: number;
 	  }
-	| { kind: "not-found" }
-	| { kind: "unreachable" };
+	| {
+			kind: "not-found";
+			timings: ProviderTiming[];
+			elapsedMs: number;
+	  }
+	| {
+			kind: "unreachable";
+			timings: ProviderTiming[];
+			elapsedMs: number;
+	  };
 
 export async function resolveCast(
 	username: string,
@@ -755,6 +766,8 @@ export async function resolveCast(
 		signed,
 		provider: race.provider,
 		partial: race.partial,
+		timings: race.timings,
+		elapsedMs: race.elapsedMs,
 	};
 }
 

@@ -118,6 +118,8 @@ Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fa
 
 **Ban signal:** NOT raced — `/signed/{fid}` stays a shim dependency, orthogonal to cast content, time-boxed to the HTML box with the usual fail-open.
 
+**Telemetry:** every resolve writes one Analytics Engine datapoint (`RACE_STATS` binding, non-blocking via `waitUntil`): index = winning provider (or outcome kind), doubles = total ms / box / partial flag, blob = per-provider `id:kind:ms` rows. Query via the CF GraphQL API when tuning the box; tests and callers without an executionCtx skip it.
+
 Follow-ups: quote hydration could race haatz/snap (`/h/{fullHash}` vs `castById` — the castId embed carries the fid); a `?format=json` consumer willing to trade completeness for latency could opt into the race.
 
 ## Client registry (action row, last-used badge)

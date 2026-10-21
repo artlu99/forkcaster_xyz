@@ -62,6 +62,14 @@ export interface CastProvider {
 	fetchCast(vars: CastVars, signal: AbortSignal): Promise<ProviderResult>;
 }
 
+/** Per-provider outcome observed for one race — one row per eligible provider. */
+export interface ProviderTiming {
+	provider: ProviderId;
+	kind: "found" | "miss" | "error";
+	/** Milliseconds from race start to this provider's settle. */
+	ms: number;
+}
+
 export type RaceResult =
 	| {
 			kind: "found";
@@ -69,9 +77,19 @@ export type RaceResult =
 			provider: ProviderId;
 			/** True when the winner was quote-blind (farcaster.tv). */
 			partial: boolean;
+			timings: ProviderTiming[];
+			elapsedMs: number;
 	  }
-	| { kind: "not-found" }
-	| { kind: "unreachable" };
+	| {
+			kind: "not-found";
+			timings: ProviderTiming[];
+			elapsedMs: number;
+	  }
+	| {
+			kind: "unreachable";
+			timings: ProviderTiming[];
+			elapsedMs: number;
+	  };
 
 /** Snapchain message timestamps count from 2021-01-01T00:00:00Z. */
 const FARCASTER_EPOCH = 1609459200;
@@ -389,10 +407,16 @@ export async function raceCast(
 ): Promise<RaceResult> {
 	const roster = opts.providers ?? PROVIDERS;
 	const eligible = roster.filter((provider) => provider.canServe(vars));
-	if (eligible.length === 0) return { kind: "unreachable" };
+	const startedAt = Date.now();
+	const finish = (): { timings: ProviderTiming[]; elapsedMs: number } => ({
+		timings,
+		elapsedMs: Date.now() - startedAt,
+	});
+	if (eligible.length === 0) return { kind: "unreachable", timings: [], elapsedMs: 0 };
 	const isComplete = new Map(eligible.map((p) => [p.id, p.complete]));
 
 	const controllers = new Map<ProviderId, AbortController>();
+	const timings: ProviderTiming[] = [];
 	const abortAll = () => {
 		for (const controller of controllers.values()) controller.abort();
 	};
@@ -405,6 +429,14 @@ export async function raceCast(
 			() => controller.abort(),
 			HARD_TIMEOUT_MS,
 		);
+		const providerStartedAt = Date.now();
+		const settled = (kind: ProviderTiming["kind"]): void => {
+			timings.push({
+				provider: provider.id,
+				kind,
+				ms: Date.now() - providerStartedAt,
+			});
+		};
 		pending.set(
 			provider.id,
 			provider
@@ -417,6 +449,7 @@ export async function raceCast(
 						result.kind === "found" &&
 						!resolvesRequested(vars, result.cast)
 					) {
+						settled("error");
 						return {
 							provider: provider.id,
 							result: {
@@ -426,14 +459,17 @@ export async function raceCast(
 							},
 						};
 					}
+					settled(result.kind);
 					return { provider: provider.id, result };
 				})
-				.catch(
-					(error): RaceEvent => ({
+				.catch((error): RaceEvent => {
+					clearTimeout(timer);
+					settled("error");
+					return {
 						provider: provider.id,
 						result: { kind: "error", provider: provider.id, message: String(error) },
-					}),
-				),
+					};
+				}),
 		);
 	}
 
@@ -494,16 +530,18 @@ export async function raceCast(
 			cast: winner.cast,
 			provider: winner.provider,
 			partial: !winner.complete,
+			...finish(),
 		};
 	}
-	if (completeMiss) return { kind: "not-found" };
+	if (completeMiss) return { kind: "not-found", ...finish() };
 	if (partial !== null) {
 		return {
 			kind: "found",
 			cast: partial.cast,
 			provider: partial.provider,
 			partial: true,
+			...finish(),
 		};
 	}
-	return { kind: "unreachable" };
+	return { kind: "unreachable", ...finish() };
 }
