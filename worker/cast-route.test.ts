@@ -607,14 +607,19 @@ test("auto-open unset: countdown banner; ON: abort overlay; OFF: chip only", asy
 	expect(onBody).not.toContain('data-auto="unset"');
 	expect(onBody).not.toContain('data-auto="off"');
 
-	// OFF: status chip only.
+	// OFF: status + two-way toggle chip inside the persistent container.
 	const off = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|auto-off" },
 	});
 	expect(off.status).toBe(200);
 	const offBody = await off.text();
+	expect(offBody).toContain('data-auto="off"');
+	expect(offBody).toContain('aria-pressed="false"');
 	expect(offBody).toContain("Auto-open: Off");
-	expect(offBody).not.toContain("data-auto=");
+	// No arming overlay / redirect in the OFF state (script text may mention
+	// the labels; the markup must not).
+	expect(offBody).not.toContain('data-auto="on"');
+	expect(offBody).not.toContain('class="auto-overlay"');
 });
 
 test("no cookie: no auto-open markup at all (bots and first-timers)", async () => {

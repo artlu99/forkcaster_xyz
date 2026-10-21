@@ -363,6 +363,7 @@ const QUOTE_FILL_SCRIPT = `<script>
 // cookie and see none of this. Timer cancels on any pill pointerdown.
 const AUTO_SCRIPT = `<script>
 (function () {
+  var box = document.querySelector("[data-auto]");
   var post = function (auto) {
     return fetch("/prefs", {
       method: "POST",
@@ -370,79 +371,116 @@ const AUTO_SCRIPT = `<script>
       body: JSON.stringify({ auto: auto })
     }).catch(function () {});
   };
-  Array.prototype.forEach.call(
-    document.querySelectorAll("[data-auto-toggle]"),
-    function (chip) {
-      chip.addEventListener("click", function () {
-        var target = chip.getAttribute("aria-pressed") === "true" ? "off" : "on";
-        post(target).then(function () {
-          chip.setAttribute("aria-pressed", target === "on" ? "true" : "false");
-          chip.textContent = "Auto-open: " + (target === "on" ? "On" : "Off");
-        });
-      });
+  var name = box ? box.getAttribute("data-auto-client") : "";
+  var url = box ? box.getAttribute("data-auto-url") : "";
+  var mode = box ? box.getAttribute("data-auto") : "";
+  var chip = function (pressed) {
+    return '<button class="pill auto-chip" data-auto-toggle aria-pressed="' +
+      (pressed ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
+      (pressed ? "On" : "Off") + '</button>';
+  };
+  var settings = '<a class="auto-settings" href="/">settings</a>';
+  var views = {
+    countdown: function () {
+      return '<a class="auto-go" href="' + url + '">Opening <strong>' + name +
+        '</strong> in <span class="auto-secs">5</span>s \u2192</a>' +
+        '<button class="pill" data-auto-action="pause">Pause</button>' +
+        chip(true) + settings;
+    },
+    paused: function () {
+      return '<span class="auto-status">Paused \u2014 pick a client below</span>' +
+        '<button class="pill" data-auto-action="resume">Resume</button>' +
+        chip(true) + settings;
+    },
+    arming: function () {
+      return '<p class="auto-overlay-title">Opening <strong>' + name + '</strong></p>' +
+        '<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button>' +
+        '<button class="pill" data-auto-action="off">Turn off auto-open</button></p>' +
+        chip(true) + settings;
+    },
+    stayed: function () {
+      return '<span class="auto-status">Auto-open is on \u2014 next casts open in ' + name + '</span>' +
+        chip(true) + settings;
+    },
+    off: function () {
+      return '<span class="auto-status">Auto-open is off</span>' + chip(false) + settings;
     }
-  );
-  var el = document.querySelector("[data-auto]");
-  if (!el) return;
-  var url = el.getAttribute("data-auto-url");
-  var limit = el.getAttribute("data-auto") === "on" ? 1500 : 5000;
+  };
+  var apply = function (view) {
+    box.className = view === "arming" ? "auto-overlay" : "auto-banner";
+    box.innerHTML = views[view]();
+  };
   var fired = false;
-  var timer = setTimeout(function () {
+  var timer = null;
+  var tick = null;
+  var cancelAll = function () {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (tick) { clearInterval(tick); tick = null; }
+  };
+  var go = function () {
     if (fired) return;
     fired = true;
     location.replace(url);
-  }, limit);
-  var cancel = function () { clearTimeout(timer); };
-  var pause = function () {
-    cancel();
-    var s = el.querySelector(".auto-secs");
-    if (s) {
-      var note = document.createElement("span");
-      note.className = "auto-paused";
-      note.textContent = " — paused, pick a client below";
-      s.parentNode.replaceChild(note, s);
-    }
-    var p = el.querySelector("[data-auto-action=pause]");
-    if (p) p.remove();
   };
-  var off = function () {
-    cancel();
-    post("off").then(function () {
-      var chip = document.createElement("a");
-      chip.className = "pill auto-chip";
-      chip.href = "/";
-      chip.textContent = "Auto-open: Off · settings";
-      el.replaceWith(chip);
-    });
+  var arm = function (ms) {
+    cancelAll();
+    timer = setTimeout(function () { fired = true; location.replace(url); }, ms);
   };
-  var stay = function () { cancel(); el.remove(); };
-  document.addEventListener("pointerdown", function (e) {
-    var n = e.target;
-    while (n && n !== document) {
-      if (n.classList && n.classList.contains("actions")) {
-        if (el.getAttribute("data-auto") !== "on") cancel();
+  var secsLeft = 5;
+  var startCountdown = function () {
+    secsLeft = 5;
+    apply("countdown");
+    tick = setInterval(function () {
+      secsLeft -= 1;
+      if (secsLeft <= 0) {
+        cancelAll();
+        fired = true;
+        location.replace(url);
         return;
       }
-      n = n.parentNode;
-    }
-  }, true);
-  el.addEventListener("click", function (e) {
-    var a = e.target && e.target.closest ? e.target.closest("[data-auto-action]") : null;
-    if (!a) return;
-    var action = a.getAttribute("data-auto-action");
-    if (action === "pause") pause();
-    else if (action === "stay") stay();
-    else if (action === "off") off();
-  });
+      var s = box.querySelector(".auto-secs");
+      if (s) s.textContent = String(secsLeft);
+    }, 1000);
+  };
+  var pause = function () { cancelAll(); apply("paused"); };
+  var resume = function () { apply("countdown"); arm(5000); };
+  var stay = function () { cancelAll(); apply("stayed"); };
+  var turnOff = function () { cancelAll(); post("off").then(function () { apply("off"); }); };
+  if (box) {
+    box.addEventListener("click", function (e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-auto-toggle]") : null;
+      if (chip) {
+        var target = chip.getAttribute("aria-pressed") === "true" ? "off" : "on";
+        cancelAll();
+        post(target).then(function () {
+          apply(target === "on" ? "stayed" : "off");
+        });
+        return;
+      }
+      var a = e.target && e.target.closest ? e.target.closest("[data-auto-action]") : null;
+      if (!a) return;
+      var action = a.getAttribute("data-auto-action");
+      if (action === "pause") pause();
+      else if (action === "resume") resume();
+      else if (action === "stay") stay();
+      else if (action === "off") turnOff();
+    });
+    document.addEventListener("pointerdown", function (e) {
+      var n = e.target;
+      while (n && n !== document) {
+        if (n.classList && n.classList.contains("actions")) {
+          if (box.getAttribute("data-auto") === "unset") pause();
+          return;
+        }
+        n = n.parentNode;
+      }
+    }, true);
+  }
+  if (mode === "on") arm(1500);
+  if (mode === "unset") startCountdown();
 })();
 </script>`;
 
-// Auto-open UI for a returning user, keyed off the v2 cookie (see
-// clients.ts). Suppressed when the last-used client isn't offered
-// (signed rule). ?noredirect=1 renders the toggle without any redirect.
-// The chip is a two-way toggle (On ↔ Off) in every state; the ON abort
-// overlay is the one intentionally loud element — and it only exists
-// while a redirect is pending.
 function autoOpenUi(
 	prefs: ClientPrefs,
 	signed: boolean,
@@ -454,36 +492,48 @@ function autoOpenUi(
 	if (!last?.web) return { html: "" };
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);
-	const state = noredirect ? undefined : prefs.auto;
-	// Short-circuit: large abort overlay, redirect at ~1500ms.
-	if (state === "on") {
+	const open =
+		`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}" data-auto-client="${name}">`;
+	const banner = (status: string, mode: string) =>
+		`<div class="auto-banner" data-auto="${mode}" data-auto-url="${url}" data-auto-client="${name}"><span class="auto-status">${status}</span>`;
+	// Short-circuit: LARGE abort overlay, redirect at ~1500ms.
+	if (!noredirect && prefs.auto === "on") {
 		return {
 			html:
-				`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}">` +
+				open +
 				`<p class="auto-overlay-title">Opening <strong>${name}</strong></p>` +
-				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button><button class="pill" data-auto-action="off">Turn off auto-open</button></p></div>`,
-			script: AUTO_SCRIPT,
-		};
-	}
-	// Discovery: 5s pausable countdown; the chip toggles the preference.
-	// No-JS: the countdown text is itself the client link.
-	if (state === undefined) {
-		return {
-			html:
-				`<div class="auto-banner" data-auto="unset" data-auto-url="${url}">` +
-				`<a class="auto-go" href="${url}">Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s →</a>` +
-				`<button class="pill" data-auto-action="pause">Pause</button>` +
-				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Turn off auto-open">Auto-open: On</button>` +
+				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="stay">Stay</button><button class="pill" data-auto-action="off">Turn off auto-open</button></p>` +
+				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Toggle auto-open">Auto-open: On</button>` +
 				`<a class="auto-settings" href="/">settings</a></div>`,
 			script: AUTO_SCRIPT,
 		};
 	}
-	// OFF state (or the ?noredirect escape): status chip that toggles on,
-	// plus a settings link to the landing.
+	// Discovery: 5s pausable countdown; the chip toggles the preference
+	// (which also cancels the pending redirect). No-JS: the countdown text
+	// is itself the client link.
+	if (!noredirect && prefs.auto === undefined) {
+		return {
+			html:
+				banner(`Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s \u2192`, "unset") +
+				`<button class="pill" data-auto-action="pause">Pause</button>` +
+				`<button class="pill auto-chip" data-auto-toggle aria-pressed="true" title="Toggle auto-open">Auto-open: On</button>` +
+				`<a class="auto-settings" href="/">settings</a></div>`,
+			script: AUTO_SCRIPT,
+		};
+	}
+	// OFF state, or the ?noredirect escape: status + two-way chip.
+	const status = noredirect
+		? prefs.auto === "on"
+			? "Auto-open: On \u2014 this page won't redirect"
+			: "Auto-open: Off"
+		: "Auto-open is off";
+	const pressed = prefs.auto === "on" ? "true" : "false";
+	const label = prefs.auto === "on" ? "On" : "Off";
 	return {
 		html:
-			`<button class="pill auto-chip" data-auto-toggle aria-pressed="false" title="Turn on auto-open">Auto-open: Off</button>` +
-			`<a class="auto-settings" href="/">settings</a>`,
+			banner(status, noredirect ? "noredirect" : "off") +
+			`<button class="pill auto-chip" data-auto-toggle aria-pressed="${pressed}" title="Toggle auto-open">Auto-open: ${label}</button>` +
+			`<a class="auto-settings" href="/">settings</a></div>`,
 		script: AUTO_SCRIPT,
 	};
 }
