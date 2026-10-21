@@ -544,40 +544,6 @@ test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
 	expect(res.status).toBe(404);
 });
 
-// A mini app universal link as the cast's URL embed: the page renders
-// client-side with no server meta, unfurl has no mock (fails), and the
-// card must still be a clean preview built from the link structure.
-const MINIAPP_CAST = {
-	...SHIM_CAST,
-	hash: "0x3c3c3c3c11aa22bb33cc44dd55ee66ff77889900",
-	embeds: [{ url: "https://farcaster.xyz/miniapps/A2SFoJHW7Y9B/neynart" }],
-};
-
-test("mini app universal links render clean previews without unfurl", async () => {
-	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
-		const url = String(input);
-		if (url === "https://shim.artlu.xyz/wc/zoo/0x3c3c3c3c") {
-			return Response.json({ success: true, cast: MINIAPP_CAST });
-		}
-		if (url === "https://shim.artlu.xyz/signed/10215") {
-			return Response.json({ success: true, signed: true });
-		}
-		throw new Error(`Unexpected fetch in test: ${url}`);
-	}) as typeof fetch;
-	const res = await app.request("/zoo/0x3c3c3c3c");
-	expect(res.status).toBe(200);
-
-	const body = await res.text();
-	// Slug-derived title + category domain label, instead of a bare
-	// hostname card (the bundle nulls farcaster.xyz/warpcast.com domains).
-	expect(body).toContain("Neynart");
-	expect(body).toContain("Farcaster mini app");
-	expect(body).toContain("mini app · farcaster.xyz");
-	expect(body).toContain(
-		'href="https://farcaster.xyz/miniapps/A2SFoJHW7Y9B/neynart"',
-	);
-});
-
 test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
@@ -595,6 +561,7 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(canonicalBody).toContain(
 		'<meta property="og:site_name" content="forkcaster" />',
 	);
+	expect(canonicalBody).toContain('<meta property="og:type" content="article" />');
 	expect(canonicalBody).not.toContain("fc:miniapp");
 	expect(canonicalBody).not.toContain("fc:frame");
 

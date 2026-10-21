@@ -170,61 +170,20 @@ function toCastData(
 	};
 }
 
-// Mini App universal links (https://farcaster.xyz/miniapps/<app-id>/
-// <app-slug>/...) render client-side with zero server meta tags, so unfurl
-// comes back empty and the card would be a bare "farcaster.xyz" hostname.
-// Build a clean preview locally from the link structure instead: the slug
-// is a kebab-case version of the app name per the universal-links spec
-// (miniapps.farcaster.xyz/docs/guides/urls). Legacy warpcast.com
-// /~/miniapps/<token> links carry an opaque token — generic title.
-function miniAppUniversalLink(url: string): { title: string } | undefined {
-	try {
-		const parsed = new URL(url);
-		const host = parsed.hostname.replace(/^www\./, "");
-		if (host === "farcaster.xyz") {
-			const match = parsed.pathname.match(/^\/miniapps\/[^/]+\/([a-z0-9-]+)/i);
-			if (match) {
-				const pretty = match[1]
-					.split("-")
-					.filter(Boolean)
-					.map((word) => word[0].toUpperCase() + word.slice(1))
-					.join(" ");
-				return { title: pretty };
-			}
-		}
-		if (host === "warpcast.com" && parsed.pathname.startsWith("/~/miniapps/")) {
-			return { title: "Mini app" };
-		}
-	} catch {
-		// Unparseable URL — not a mini app link.
-	}
-	return undefined;
-}
-
 function openGraphFor(
 	url: string,
 	data?: UnfurlResult,
 ): Record<string, string | boolean> {
-	const mini = miniAppUniversalLink(url);
-	// The embed bundle nulls any card whose domain is farcaster.xyz or
-	// warpcast.com (it strips self-referential links) — so mini app cards
-	// carry a category-style domain label instead, which renders.
-	const domain = mini
-		? `mini app · ${urlOpenGraph(url).domain}`
-		: urlOpenGraph(url).domain;
-	const title = data?.ogTitle ?? data?.twitterTitle ??
-		(mini ? mini.title : urlOpenGraph(url).title);
+	const title = data?.ogTitle ?? data?.twitterTitle ?? urlOpenGraph(url).title;
 	const description = data?.ogDescription ?? data?.twitterDescription;
 	const first = data?.ogImage?.[0];
 	const image = typeof first === "string" ? first : first?.url;
 	return {
 		url,
-		domain,
+		domain: urlOpenGraph(url).domain,
 		title,
-		// Mini app cards stay compact — no image, one-line subtitle.
-		...(mini && !description ? { description: "Farcaster mini app" } : {}),
 		...(description ? { description } : {}),
-		...(image && !mini ? { image, useLargeImage: true } : {}),
+		...(image ? { image, useLargeImage: true } : {}),
 	};
 }
 
@@ -450,6 +409,7 @@ function shell(
 	const meta = og
 		? [
 				`<meta property="og:site_name" content="forkcaster" />`,
+				`<meta property="og:type" content="article" />`,
 				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
 				...(canonicalUrl
 					? [`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`]
@@ -464,6 +424,9 @@ function shell(
 					: "",
 				og.image
 					? `<meta property="og:image" content="${escapeHtml(og.image)}" />`
+					: "",
+				og.image
+					? `<meta property="og:image:alt" content="${escapeHtml(og.ogTitle)}" />`
 					: "",
 				og.image
 					? `<meta name="twitter:image" content="${escapeHtml(og.image)}" />`
