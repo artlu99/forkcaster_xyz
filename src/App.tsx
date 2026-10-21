@@ -41,7 +41,9 @@ function App() {
               dangerouslySetInnerHTML={{ __html: siGithubsponsors.svg }}
             />
             Contributing
-          </a>
+          </a>{' '}
+          <span aria-hidden="true">·</span>{' '}
+          <a href="/transparency">Transparency</a>
         </p>
       </section>
       <div className="ticks"></div>

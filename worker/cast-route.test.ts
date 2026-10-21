@@ -544,6 +544,42 @@ test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
 	expect(res.status).toBe(404);
 });
 
+test("GET /transparency serves terse facts; JSON twin; casts for username 'transparency' unaffected", async () => {
+	const res = await app.request("/transparency");
+	expect(res.status).toBe(200);
+	expect(res.headers.get("content-type") ?? "").toContain("text/html");
+	const body = await res.text();
+	expect(body).toContain("forkcaster — transparency");
+	expect(body).toContain("first validated answer wins");
+	expect(body).toContain("No cast IDs");
+	expect(body).toContain("coming soon");
+	expect(body).toContain('href="/transparency"'); // footer link present
+
+	const jsonRes = await app.request("/transparency?format=json");
+	expect(jsonRes.status).toBe(200);
+	expect(jsonRes.headers.get("content-type") ?? "").toContain(
+		"application/json",
+	);
+	const json = await jsonRes.json();
+	expect(json.data.providers).toHaveLength(4);
+	expect(json.racingStats.status).toBe("coming-soon");
+	expect(json.tracking.counters).toContain("No cast IDs");
+
+	// A Farcaster user literally named "transparency": two-segment cast
+	// URLs must still hit the cast handler (shim miss → 404, not the
+	// transparency page).
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/wc/transparency/0xdeadbeef") {
+			return Response.json({ success: false });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const castRes = await app.request("/transparency/0xdeadbeef");
+	expect(castRes.status).toBe(404);
+	expect(await castRes.text()).toContain("not found");
+});
+
 test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});

@@ -7,8 +7,28 @@ import {
 	renderQuotesFragment,
 	resolveCast,
 } from "./cast-page.tsx";
+import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
+
+// Reserved single-segment paths (/api/, /transparency) are exact-match and
+// registered before the parametric cast route; cast URLs are always
+// two-segment, so a Farcaster user literally named "transparency" is
+// unaffected (/transparency/0x… still routes to the cast handler).
+app.get("/transparency", (c) => {
+	const wantsJson =
+		c.req.query("format") === "json" ||
+		(c.req.header("Accept") ?? "").includes("application/json");
+	if (wantsJson) return c.json(transparencyJson());
+	const primaryOrigin = (c.env as Env | undefined)?.PRIMARY_ORIGIN;
+	return c.html(
+		renderTransparencyHtml({
+			canonicalUrl: primaryOrigin
+				? `${primaryOrigin}/transparency`
+				: undefined,
+		}),
+	);
+});
 
 app.get("/api/", (c) => c.json({ name: "Cloudflare" }));
 
