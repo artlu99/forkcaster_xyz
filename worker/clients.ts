@@ -110,6 +110,15 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/neynar.png",
 		web: "https://explorer.neynar.com/{fullHash}",
 	},
+	// Per-cast format owner-provided and live-checked (200, renders the
+	// cast view): query-param form, {fullHash} — short-hash support
+	// unverified, the route-form hash can be shorter than 40 hex.
+	{
+		id: "vibeshift",
+		title: "Vibeshift",
+		logoUrl: "/logos/vibeshift.svg",
+		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}",
+	},
 ];
 
 export interface TemplateVars {
