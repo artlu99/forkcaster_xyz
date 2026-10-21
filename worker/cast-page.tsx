@@ -512,7 +512,7 @@ function autoOpenUi(
 	const open =
 		`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}" data-auto-client="${name}">`;
 	const banner = (status: string, mode: string) =>
-		`<div class="auto-banner" data-auto="${mode}" data-auto-url="${url}" data-auto-client="${name}"><span class="auto-status">${status}</span>`;
+		`<div class="auto-banner" aria-live="polite" data-auto="${mode}" data-auto-url="${url}" data-auto-client="${name}"><span class="auto-status">${status}</span>`;
 	// Short-circuit: LARGE abort overlay, redirect at ~1500ms.
 	if (!noredirect && prefs.auto === "on") {
 		return {
