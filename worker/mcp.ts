@@ -71,10 +71,25 @@ export function mcpLandingHtml(): string {
 <meta name="twitter:image" content="https://forkcaster.xyz/mcp-card.png" />
 <link rel="canonical" href="${endpoint}" />
 <style>
-body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; color: #111; line-height: 1.5; }
-code { background: #f2f2f2; padding: 2px 6px; border-radius: 4px; }
+:root {
+	color-scheme: light dark;
+	--bg: #fbfbfa;
+	--ink: #101014;
+	--muted: #77747e;
+	--line: #e8e6e3;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0e0e12;
+		--ink: #f0eff2;
+		--line: #26262c;
+	}
+}
+body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; background: var(--bg); color: var(--ink); line-height: 1.5; }
+a { color: var(--ink); }
+code { background: var(--line); padding: 2px 6px; border-radius: 4px; }
 h1 { font-size: 22px; }
-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: #666; margin-top: 28px; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 28px; }
 </style>
 </head>
 <body>
