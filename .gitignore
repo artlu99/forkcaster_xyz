@@ -12,6 +12,6 @@ worker-configuration.d.ts
 
 bun.lock
 PLAN.md
-PLAN3.md
+PLAN[0-9]*.md
 AGENTS.md
 key.pem

@@ -17,6 +17,7 @@
 		"typecheck": "bun check",
 		"lint": "biome lint .",
 		"deploy": "bun run build && wrangler deploy",
+		"stats": "dotenvx run -- bun scripts/race-stats.ts",
 		"cf-typegen": "wrangler types"
 	},
 	"type": "module",
