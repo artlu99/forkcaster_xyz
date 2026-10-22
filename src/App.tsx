@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
-import { siGithub, siGithubsponsors } from 'simple-icons'
+import { siGithub, siGithubsponsors, siOpenaccess } from 'simple-icons'
+import { iconMark } from '../shared/icon-mark.ts'
 import './App.css'
 
 function delayNote(delay: number): string {
@@ -107,7 +108,7 @@ function App() {
           <a href="https://github.com/artlu99/forkcaster_xyz">
             <span
               className="repo-mark"
-              dangerouslySetInnerHTML={{ __html: siGithub.svg }}
+              dangerouslySetInnerHTML={{ __html: iconMark(siGithub.svg) }}
             />
             MIT license
           </a>{' '}
@@ -115,12 +116,22 @@ function App() {
           <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">
             <span
               className="repo-mark"
-              dangerouslySetInnerHTML={{ __html: siGithubsponsors.svg }}
+              dangerouslySetInnerHTML={{
+                __html: iconMark(siGithubsponsors.svg),
+              }}
             />
             Contributing
           </a>{' '}
           <span aria-hidden="true">·</span>{' '}
-          <a href="/transparency">Transparency</a>
+          <a href="/transparency">
+            <span
+              className="repo-mark"
+              dangerouslySetInnerHTML={{
+                __html: iconMark(siOpenaccess.svg),
+              }}
+            />
+            Transparency
+          </a>
         </p>
       </section>
       <div className="ticks"></div>

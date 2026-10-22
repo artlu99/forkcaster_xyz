@@ -1,6 +1,7 @@
 import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
-import { siGithub, siGithubsponsors } from "simple-icons";
+import { siGithub, siGithubsponsors, siOpenaccess } from "simple-icons";
+import { iconMark } from "../shared/icon-mark.ts";
 import {
 	type ProviderId,
 	type ProviderTiming,
@@ -804,9 +805,9 @@ main { padding-bottom: 8px; }
 ${bodyHtml}
 </main>
 <footer class="site-footer">
-  <a href="https://github.com/artlu99/forkcaster_xyz">${siGithub.svg}MIT license</a>
-  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${siGithubsponsors.svg}Contributing</a>
-  <a href="/transparency">Transparency</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz">${iconMark(siGithub.svg)}MIT license</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${iconMark(siGithubsponsors.svg)}Contributing</a>
+  <a href="/transparency">${iconMark(siOpenaccess.svg)}Transparency</a>
 </footer>
 ${clientScript ?? ""}
 </body>

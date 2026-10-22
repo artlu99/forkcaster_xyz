@@ -238,14 +238,17 @@ test("GET /:username/:hash footer shows the GitHub mark and MIT license", async 
 
 	const body = await res.text();
 	const footer = body.slice(body.indexOf('<footer class="site-footer">'));
-	// The GitHub mark comes from the simple-icons dependency (no hand-inlined
-	// SVG), and the wording states the MIT license.
+	// Footer marks come from simple-icons (no hand-inlined SVG), each
+	// aria-hidden with the brand <title> stripped so the link name is the label.
 	expect(footer).toContain("<svg");
 	expect(footer).toContain("MIT");
 	expect(footer).not.toContain(">source<");
-	// Next to it: the contributing guide, with its own GitHub Sponsors mark.
 	expect(footer).toContain("tab=contributing-ov-file");
 	expect(footer).toContain("Contributing");
+	expect(footer).toContain('href="/transparency"');
+	expect(footer).toContain("Transparency");
+	expect(footer.match(/aria-hidden="true"/g)?.length).toBe(3);
+	expect(footer).not.toContain("<title>");
 });
 
 test("GET /:username/:hash returns 404 when Shim reports no such cast", async () => {
