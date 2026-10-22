@@ -342,8 +342,9 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	// Format verified against fc-clients-cast-action: full-hash based.
 	expect(body).toContain(`href="https://explorer.neynar.com/${FULL_HASH}"`);
 	// Format verified against backmeupplz/quilcast: /c/ requires 40 hex
-	// (optional 0x) — the full hash.
-	expect(body).toContain(`href="https://quilcast.com/c/${FULL_HASH}"`);
+	// (0x optional) — emitted BARE, no 0x, matching the client's internal
+	// lowercase-hex lookups.
+	expect(body).toContain(`href="https://quilcast.com/c/${FULL_HASH.slice(2)}"`);
 	// Farcaster ships the only native scheme — verified against the
 	// open-source app (farcasterxyz/client): scheme paths mirror the web
 	// path, /{username}/{fullHash}. Web href stays canonical; scheme +

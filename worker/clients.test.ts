@@ -314,7 +314,7 @@ describe("roster native targets", () => {
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
-	const KNOWN_VARS = new Set(["username", "hash", "fullHash", "fid"]);
+	const KNOWN_VARS = new Set(["username", "hash", "fullHash", "fullHashRaw", "fid"]);
 	const placeholders = (tpl: string): string[] =>
 		[...tpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
 
@@ -337,6 +337,20 @@ describe("registry guardrails", () => {
 				expect(client.web.startsWith("https://")).toBe(true);
 			}
 		}
+	});
+
+	test("{fullHashRaw} substitutes bare lowercase hex and gates with fullHash", () => {
+		const tpl = "https://quilcast.com/c/{fullHashRaw}";
+		const vars = {
+			username: "zoo",
+			hash: "0x895ecc74",
+			fullHash: "0x895ECC7415208BFB6105A8CB675F391F19CB9E2C",
+		};
+		// derived from fullHash — never counted missing while fullHash exists
+		expect(missingVars(tpl, vars)).toEqual([]);
+		expect(resolveTemplate(tpl, vars)).toBe(
+			"https://quilcast.com/c/895ecc7415208bfb6105a8cb675f391f19cb9e2c",
+		);
 	});
 
 	test("suspended clients vanish from advertised ids, findClient, and the page", () => {

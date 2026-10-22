@@ -140,8 +140,9 @@ describe("tools/call get_cast_link", () => {
 			`https://farcaster.xyz/zoo/${SHORT}`,
 		);
 		expect(result.structuredContent.signed).toBe(true);
+		// quilcast emits bare lowercase hex (no 0x) — its internal form.
 		expect(result.structuredContent.all.quilcast).toBe(
-			`https://quilcast.com/c/${FULL}`,
+			`https://quilcast.com/c/${FULL.slice(2)}`,
 		);
 	});
 
@@ -196,6 +197,29 @@ describe("tools/call get_cast_link", () => {
 		expect(result.structuredContent.url).toBe(
 			`https://vibeshift.onchain.cooking/?view=cast&castHash=${FULL}&castFid=${FID}`,
 		);
+	});
+
+	test("quilcast target emits bare hex; bare-hex shorthash input accepted", async () => {
+		mockShim({
+			"/wc/zoo/0x895ecc74": {
+				success: true,
+				cast: { fid: FID, hash: FULL },
+			},
+			"/signed/10215": { success: true, signed: true },
+		});
+		// shorthash WITHOUT 0x — normalized internally before the shim call.
+		const json = await callRpc("tools/call", {
+			name: "get_cast_link",
+			arguments: { username: "zoo", shorthash: "895ecc74", client: "quilcast" },
+		});
+		const result = json.result as {
+			structuredContent: { url: string; resolved: { hash: string } };
+		};
+		// quilcast's internal lookups key on bare lowercase hex — no 0x out.
+		expect(result.structuredContent.url).toBe(
+			`https://quilcast.com/c/${FULL.slice(2)}`,
+		);
+		expect(result.structuredContent.resolved.hash).toBe("0x895ecc74");
 	});
 
 	test("invalid reference (both hashes) → isError with the recovery hint", async () => {

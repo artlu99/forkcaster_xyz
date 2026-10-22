@@ -102,13 +102,14 @@ export const CLIENTS: ClientDefinition[] = [
 	},
 	// Per-cast format verified against the open-source client
 	// (github.com/backmeupplz/quilcast, server/index.mjs): the /c/ route
-	// matches /(?:0x)?([0-9a-f]{40})/ — {fullHash} required, the route
-	// hash can be shorter. Live-checked against a real cast.
+	// matches /(?:0x)?([0-9a-f]{40})/i and strips the prefix internally —
+	// lookups key on bare lowercase hex, so the template emits {fullHashRaw}.
+	// Re-verified live with and without 0x (both render).
 	{
 		id: "quilcast",
 		title: "Quilcast",
 		logoUrl: "/logos/quilcast.svg",
-		web: "https://quilcast.com/c/{fullHash}",
+		web: "https://quilcast.com/c/{fullHashRaw}",
 	},
 	// Per-cast format verified against fc-clients-cast-action
 	// (github.com/artlu99/fc-clients-cast-action, src/lib/deeplink.ts):
@@ -154,21 +155,43 @@ export interface TemplateVars {
 }
 
 /** Placeholders a template may reference; `fid` is the only optional one. */
-const PLACEHOLDERS = ["username", "hash", "fullHash", "fid"] as const;
+const PLACEHOLDERS = [
+	"username",
+	"hash",
+	"fullHash",
+	"fullHashRaw",
+	"fid",
+] as const;
+
+/** {fullHashRaw} derives from {fullHash}: bare lowercase hex, no 0x prefix. */
+function placeholderValue(
+	name: (typeof PLACEHOLDERS)[number],
+	vars: TemplateVars,
+): string | undefined {
+	if (name === "fullHashRaw") {
+		return vars.fullHash.replace(/^0x/i, "").toLowerCase();
+	}
+	if (name === "fid") {
+		return vars.fid === undefined ? undefined : String(vars.fid);
+	}
+	return vars[name];
+}
 
 /** Template placeholders with no value in these vars — such clients are skipped. */
 export function missingVars(tpl: string, vars: TemplateVars): string[] {
 	return PLACEHOLDERS.filter(
-		(name) => tpl.includes(`{${name}}`) && vars[name] === undefined,
+		(name) => tpl.includes(`{${name}}`) && placeholderValue(name, vars) === undefined,
 	);
 }
 
 export function resolveTemplate(tpl: string, vars: TemplateVars): string {
-	return tpl
-		.replaceAll("{username}", encodeURIComponent(vars.username))
-		.replaceAll("{hash}", encodeURIComponent(vars.hash))
-		.replaceAll("{fullHash}", encodeURIComponent(vars.fullHash))
-		.replaceAll("{fid}", vars.fid === undefined ? "" : String(vars.fid));
+	let out = tpl;
+	for (const name of PLACEHOLDERS) {
+		const value = placeholderValue(name, vars);
+		if (value === undefined) continue;
+		out = out.replaceAll(`{${name}}`, encodeURIComponent(value));
+	}
+	return out;
 }
 
 /**

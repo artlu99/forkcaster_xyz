@@ -26,9 +26,13 @@ import {
 	type ShimCast,
 } from "./shim.ts";
 
-const LONGHASH = /^0x[0-9a-fA-F]{40}$/;
-const SHORTHASH = /^0x[0-9a-fA-F]{4,39}$/;
+const LONGHASH = /^(?:0x)?[0-9a-fA-F]{40}$/;
+const SHORTHASH = /^(?:0x)?[0-9a-fA-F]{4,39}$/;
 const USERNAME = /^[A-Za-z0-9._-]{1,30}$/;
+
+/** Normalizes either hash form to 0x-prefixed lowercase before hitting shim. */
+const with0x = (hash: string): string =>
+	(/^0x/i.test(hash) ? hash : `0x${hash}`).toLowerCase();
 
 const CLIENT_TARGETS = [...CLIENT_IDS, "all"] as const;
 
@@ -39,7 +43,7 @@ export const castRefInput = z
 			.regex(LONGHASH)
 			.optional()
 			.describe(
-				"Full cast hash — 0x-prefixed, 40 hex characters. Identifies the cast on its own; the most reliable form for fresh casts.",
+				"Full cast hash — 40 hex characters, with or without the 0x prefix. Identifies the cast on its own; the most reliable form for fresh casts.",
 			),
 		fid: z
 			.number()
@@ -57,7 +61,7 @@ export const castRefInput = z
 			.regex(SHORTHASH)
 			.optional()
 			.describe(
-				"Abbreviated cast hash as it appears in share URLs — 0x-prefixed, 4-39 hex characters. Requires username or fid alongside it.",
+				"Abbreviated cast hash as it appears in share URLs — 4-39 hex characters, 0x prefix optional. Requires username or fid alongside it.",
 			),
 		client: z
 			.enum(CLIENT_TARGETS)
@@ -257,17 +261,17 @@ export async function runGetCastLink(
 	let identity: Identity | null;
 	try {
 		if (input.longhash !== undefined) {
-			identity = await resolveByLonghash(input.longhash, signal);
+			identity = await resolveByLonghash(with0x(input.longhash), signal);
 		} else if (input.fid !== undefined) {
 			identity = await resolveByFid(
 				input.fid,
-				input.shorthash ?? "",
+				with0x(input.shorthash ?? ""),
 				signal,
 			);
 		} else {
 			identity = await resolveByUsernameHash(
 				input.username ?? "",
-				input.shorthash ?? "",
+				with0x(input.shorthash ?? ""),
 				signal,
 			);
 		}
