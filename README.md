@@ -54,13 +54,23 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ├── public/logos/              # per-client marks for the action row
 ├── worker/
 │   ├── index.ts               # Hono app; export { app }; default { fetch }
-│   ├── clients.ts             # client registry (schema, URLs, logos, cookie)
+│   ├── client-registry.ts     # client registry (verified templates; zero-dep, vendored-able)
+│   ├── clients.ts             # fc_client cookie binding (last-used + auto-open prefs)
+│   ├── shim.ts                # shim identity client (routes, ShimCast, /wc /h /f /signed)
 │   ├── cast-source.ts         # provider race: shim ∥ haatz ∥ snap ∥ farcaster.tv
 │   ├── cast-page.tsx          # resolve (race) → CastData mapping → SSR / 404 / link fallback
+│   ├── cast-ref.ts            # MCP cast-ref: zod contract + shim-direct resolution
+│   ├── mcp.ts                 # MCP SDK v2 server factory (get_cast_link) — only SDK import site
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
 │   ├── clients.test.ts        # registry unit tests: templates, gating, signed rule, deeplinks
-│   ├── cast-source.test.ts    # race unit tests: eligibility, box, miss/error, adapter mapping
+│   ├── cast-source.test.ts    # race unit tests: eligibility, box, miss/error, abort, adapter mapping
+│   ├── race-stats-store.ts    # lmdis snapshot read-through TTL cache (10min TTL / stale 24h / 2s cap)
+│   ├── vendor/lmdis-sdk.ts    # vendored lmdis SDK (Upstash-shaped seam; get/set only)
 │   └── shims/server-only.ts   # empty stub for Next.js marker package
+├── scripts/
+│   ├── race-stats.ts          # offline stats job: AE SQL → snapshot → lmdis (dotenvx env; --dry)
+│   ├── race-stats-lib.ts      # pure query builders (fixture-tested)
+│   └── probe/                 # live-service probes (lmdis, AE SQL, shim timing)
 └── src/                       # landing only (App.tsx)
 ```
 
@@ -71,7 +81,9 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
 | `/prefs` | Hono | `POST` JSON `{ auto: "on" \| "off" }` → 204 + Set-Cookie (`fc_client` v2); auto-open preference write (server cookie — Safari ITP exemption) |
-| `/transparency` | Hono | HTML facts page (what/data/tracking/domains + racer-stats placeholder) or JSON twin via `?format=json`/Accept; reserved exact path — cast URLs for a username named `transparency` still work |
+| `/transparency` | Hono | HTML facts page (what/data/tracking/domains — Domains carries registration expiry + RDAP confirm links — plus race-stats table filled server-side from the lmdis snapshot, "stats as of" line) or JSON twin via `?format=json`/Accept (`racingStats.status: live \| coming-soon`); reserved exact path — cast URLs for a username named `transparency` still work |
+| `/race-stats.json` | Hono | raw stats snapshot (same cached read as `/transparency`); 404 when absent; `cache-control: public, max-age=21600` |
+| `/mcp` | Hono → MCP SDK v2 | MCP Streamable HTTP endpoint (POST JSON-RPC; public, no auth). One tool, `get_cast_link`: cast reference (longhash ∥ fid+shorthash ∥ username+shorthash) + target client → client URLs + author signed status; farcaster.xyz is the canonical surface. See PLAN3 |
 | `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image; `og:site_name` = forkcaster) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
@@ -122,9 +134,17 @@ Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fa
 
 **Ban signal:** NOT raced — `/signed/{fid}` stays a shim dependency, orthogonal to cast content, time-boxed to the HTML box with the usual fail-open.
 
-**Telemetry:** every resolve writes one Analytics Engine datapoint (`RACE_STATS` binding, non-blocking via `waitUntil`): index = winning provider (or outcome kind), doubles = total ms / box / partial flag, blob = per-provider `id:kind:ms` rows. Query via the CF GraphQL API when tuning the box; tests and callers without an executionCtx skip it.
+**Telemetry:** every resolve writes one Analytics Engine datapoint (`RACE_STATS` binding, non-blocking via `waitUntil`): index = winning provider (or outcome kind), doubles = total ms / box / partial flag, blob = per-provider `id:kind:ms` rows (race-abort losers record `abort`, not `error`). Query via the AE SQL API when tuning the box (`scripts/probe/`, `scripts/race-stats.ts`); tests and callers without an executionCtx skip it.
 
 Follow-ups: quote hydration could race haatz/snap (`/h/{fullHash}` vs `castById` — the castId embed carries the fid); a `?format=json` consumer willing to trade completeness for latency could opt into the race.
+
+## Race stats (/transparency)
+
+The racing-stats table is filled **offline** — the render path stays cache-free and stats-free. `bun scripts/race-stats.ts` (run via `dotenvx run --`, env per `.env.example`) queries Analytics Engine through the **SQL API** — sample-weighted (`sum(_sample_interval)`, `quantileExactWeighted`; never raw `count()`) — assembles a versioned snapshot (`v: 1`; wins/requests/p50/p95/errorRate per provider + outcome counts) and publishes it as one lmdis key (`race-stats` on `lmdis.artlu.xyz`, the owner-run Redis-shaped KV) through the vendored Upstash-shaped SDK. Overwrite-only-on-success; `--dry` previews.
+
+The transparency route reads the snapshot through a per-isolate TTL cache (`worker/race-stats-store.ts`: 10 min TTL, 60s failure backoff, last-good served ≤24h, 2s read cap) and fills the table, the "stats as of" line, and the JSON twin's `racingStats` — absent/unreachable snapshot ⇒ "coming soon" dashes, silently. `/race-stats.json` serves the raw snapshot (404 when absent). SQL dialect + store behavior are live-verified by `scripts/probe/` (the AE dialect has no `CONCAT` and only `toUInt32`/`toUInt8` conversions; SQL errors come back as plain-text 422s; the SQL API rejects Account Owned Tokens — use a User token with Account Analytics:Read).
+
+**Abort telemetry:** race-cut losers are recorded as `provider:abort:<ms>` (not `error`) so public errorRate stays honest — the 700ms box cuts slow completes by design; the 5s hard-timeout still counts as an error. `raceCast` drains pending settles after abort (bounded 25ms) so timing rows never escape incomplete.
 
 ## Client registry (action row, last-used badge)
 

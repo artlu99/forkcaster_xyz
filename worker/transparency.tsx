@@ -1,7 +1,9 @@
 // /transparency — terse, agent-friendly facts about how forkcaster works:
 // what it is, where data comes from, what is and isn't tracked, plus the
-// provider roster and a placeholder for race telemetry. HTML for humans,
-// JSON for agents (same negotiation as cast pages).
+// provider roster and live race telemetry (offline-generated snapshot,
+// read from lmdis through the per-isolate TTL cache; absent → dashes).
+// HTML for humans, JSON for agents (same negotiation as cast pages).
+import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import { shell } from "./cast-page.tsx";
 
 // Public provider roster — names included on purpose (transparency over
@@ -27,17 +29,75 @@ const PROVIDERS = [
 
 const REPO = "https://github.com/artlu99/forkcaster_xyz";
 
-function statsTable(rows: Array<string[]>): string {
-	const head = ["id", "wins", "p50", "p95", "errors", "host"]
+// Domain registration facts, hand-verified against the registries' RDAP.
+// Static on purpose: the RDAP links are the live source of truth — a renewal
+// moves the real dates even while these lag until re-checked.
+const DOMAINS = {
+	checked: "2026-10-22",
+	registrations: [
+		{
+			name: "forkcaster.xyz",
+			role: "canonical",
+			registrar: "Cloudflare, Inc.",
+			registered: "2026-10-20",
+			expires: "2027-10-20",
+			rdap: "https://rdap.centralnic.com/xyz/domain/forkcaster.xyz",
+		},
+		{
+			name: "warpcats.com",
+			role: "alias",
+			registrar: "Cloudflare, Inc.",
+			registered: "2026-10-21",
+			expires: "2027-10-21",
+			rdap: "https://rdap.verisign.com/com/v1/domain/warpcats.com",
+		},
+	],
+};
+
+const escapeHtml = (text: string): string =>
+	text.replace(
+		/[&<>"']/g,
+		(c) =>
+			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+				c
+			] ?? c,
+	);
+
+function statsTable(snapshot: Snapshot | null | undefined): string {
+	const head = ["id", "wins", "p50", "p95", "err%", "host"]
 		.map((h) => `<th>${h}</th>`)
 		.join("");
-	const body = rows
-		.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`)
-		.join("");
-	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+	const byId = new Map((snapshot?.providers ?? []).map((p) => [p.id, p]));
+	const body = PROVIDERS.map((p) => {
+		const s = byId.get(p.id);
+		const cells = [
+			p.id,
+			s ? String(s.wins) : "—",
+			s?.p50Ms != null ? `${s.p50Ms}ms` : "—",
+			s?.p95Ms != null ? `${s.p95Ms}ms` : "—",
+			s ? `${Math.round(s.errorRate * 100)}%` : "—",
+			p.host,
+		];
+		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
+	}).join("");
+	const asOf =
+		snapshot == null
+			? ""
+			: `<li>stats as of <code>${escapeHtml(snapshot.generatedAt)}</code> · window ${snapshot.window.hours}h${snapshot.sampled ? " · sampled" : ""} · completes that miss the 700ms box are cut by design</li>`;
+	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
+	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
 }
 
-export function transparencyJson(): Record<string, unknown> {
+export function transparencyJson(
+	snapshot?: Snapshot | null,
+): Record<string, unknown> {
+	const nullStats = () => ({
+		wins: null,
+		requests: null,
+		p50Ms: null,
+		p95Ms: null,
+		errorRate: null,
+	});
 	return {
 		what: "Farcaster cast links -> clean redirects. No app, no login.",
 		license: "MIT",
@@ -52,39 +112,45 @@ export function transparencyJson(): Record<string, unknown> {
 			counters:
 				"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
 			cookies:
-				"fc_client only — remembers your last-used app button and your auto-open preference. Host-only, 1 year.",
+				"fc_client only — remembers your last-used app button. Host-only, 1 year.",
 		},
 		domains: {
 			canonical: "https://forkcaster.xyz",
 			also: ["https://warpcats.com"],
+			checked: DOMAINS.checked,
+			registrations: DOMAINS.registrations,
 		},
-		racingStats: {
-			status: "coming-soon",
-			window: null,
-			providers: PROVIDERS.map((p) => ({
-				id: p.id,
-				wins: null,
-				requests: null,
-				p50Ms: null,
-				p95Ms: null,
-				errorRate: null,
-				host: p.host,
-			})),
-		},
+		racingStats: snapshot
+			? {
+					status: "live",
+					generatedAt: snapshot.generatedAt,
+					window: snapshot.window,
+					sampled: snapshot.sampled,
+					outcomes: snapshot.outcomes,
+					providers: PROVIDERS.map((p) => {
+						const s = snapshot.providers.find((x) => x.id === p.id);
+						return {
+							id: p.id,
+							...(s ?? nullStats()),
+							host: p.host,
+						};
+					}),
+				}
+			: {
+					status: "coming-soon",
+					window: null,
+					providers: PROVIDERS.map((p) => ({
+						id: p.id,
+						...nullStats(),
+						host: p.host,
+					})),
+				},
 	};
 }
 
 export function renderTransparencyHtml(
-	options: { canonicalUrl?: string } = {},
+	options: { canonicalUrl?: string; snapshot?: Snapshot | null } = {},
 ): string {
-	const placeholderRows = PROVIDERS.map((p) => [
-		p.id,
-		"—",
-		"—",
-		"—",
-		"—",
-		p.host,
-	]);
 	const body = `
 <style>
 .tr h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 24px 0 6px; }
@@ -108,7 +174,7 @@ export function renderTransparencyHtml(
 <ul>
 <li>Cast data is raced across 4 providers in parallel; first validated answer wins.</li>
 </ul>
-${statsTable(placeholderRows)}
+${statsTable(options.snapshot)}
 <ul>
 <li>Ban check (has the author signed Farcaster's contract?): shim <code>/signed/{fid}</code>. Unknown → fail open, everything shown.</li>
 </ul>
@@ -116,15 +182,19 @@ ${statsTable(placeholderRows)}
 <h2>Tracking</h2>
 <ul>
 <li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
-<li>One cookie: <code>fc_client</code> — remembers your last-used app button and your auto-open preference. Host-only, 1 year, never sent cross-site.</li>
-<li>Auto-open escape hatch: append <code>?noredirect=1</code> to any cast URL.</li>
+<li>One cookie: <code>fc_client</code> — remembers your last-used app button. Host-only, 1 year, never sent cross-site.</li>
 <li>JSON version of this page: add <code>?format=json</code>.</li>
 </ul>
 
 <h2>Domains</h2>
 <ul>
-<li><code>forkcaster.xyz</code> — canonical domain</li>
-<li><code>warpcats.com</code> — same pages</li>
+${DOMAINS.registrations
+	.map(
+		(d) =>
+			`<li><code>${escapeHtml(d.name)}</code> — ${d.role === "canonical" ? "canonical" : "same pages"} · expires ${d.expires} · <a href="${d.rdap}">RDAP</a></li>`,
+	)
+	.join("\n")}
+<li>Checked ${DOMAINS.checked} · RDAP links are live registry data.</li>
 </ul>
 
 <p class="notice">Questions? <a href="${REPO}/issues">Open an issue</a>.</p>
