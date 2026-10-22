@@ -1,26 +1,27 @@
-import { FarcasterEmbed } from "react-farcaster-embed";
 import { renderToString } from "preact-render-to-string";
+import { FarcasterEmbed } from "react-farcaster-embed";
 import { siGithub, siGithubsponsors } from "simple-icons";
-import {
-	type ClientDefinition,
-	type TemplateVars,
-	clientsForPage,
-	deeplinkTargets,
-	findClient,
-	resolveTemplate,
-} from "./client-registry.ts";
-import {
-	type ClientPrefs,
-	LAST_CLIENT_COOKIE,
-	LAST_CLIENT_MAX_AGE,
-} from "./clients.ts";
 import {
 	type ProviderId,
 	type ProviderTiming,
 	raceCast,
 	shimProvider,
 } from "./cast-source.ts";
-import { type ShimCast, getCastByHash, getSignedStatus } from "./shim.ts";
+import {
+	type ClientDefinition,
+	clientsForPage,
+	deeplinkTargets,
+	findClient,
+	resolveTemplate,
+	type TemplateVars,
+} from "./client-registry.ts";
+import {
+	type ClientPrefs,
+	clientDelay,
+	LAST_CLIENT_COOKIE,
+	LAST_CLIENT_MAX_AGE,
+} from "./clients.ts";
+import { getCastByHash, getSignedStatus, type ShimCast } from "./shim.ts";
 
 type CastData = NonNullable<Parameters<typeof FarcasterEmbed>[0]["castData"]>;
 
@@ -272,9 +273,10 @@ const LIVE_STATS_SCRIPT = `<script>
 </script>`;
 
 // Remembers the visitor's client choice: a delegated click listener
-// writes the v2 cookie value — slug + the existing auto-open flag ("|"
-// tail preserved), so pill clicks never clear the preference. The flag
-// itself is written server-side via POST /prefs (ITP-safe).
+// writes the cookie value — slug + the existing tail ("|" and everything
+// after it: auto-open flag and optional delay), so pill clicks never
+// clear the preference. The flag and delay are written server-side via
+// POST /prefs (ITP-safe).
 const CLIENT_SCRIPT = `<script>
 (function () {
   document.addEventListener("click", function (e) {
@@ -352,14 +354,14 @@ const QUOTE_FILL_SCRIPT = `<script>
 })();
 </script>`;
 
-// Auto-open flow (PLAN2): for a returning user with a last-used client.
-// - unset: 5s pausable countdown banner → redirect; "Auto-open: On" chip
-//   toggles the preference off; settings link to the landing.
-// - on: short-circuit — the page renders under a LARGE abort overlay
-//   (Stay · Turn off auto-open) and location.replace() fires at ~1500ms.
+// Auto-open flow: for a returning user with a last-used client.
+// - unset: pausable countdown (saved delay, default 5s; 0 redirects
+//   immediately) → redirect.
+// - on: LARGE arming overlay with the same countdown + Pause, then
+//   location.replace().
 // - off: compact status chip that toggles the preference on.
-// No-JS degrades to a static "Opening … →" link; bots never send the
-// cookie and see none of this. Timer cancels on any pill pointerdown.
+// Bots never send the cookie and see none of this. Timer cancels on
+// any pill pointerdown.
 const AUTO_SCRIPT = `<script>
 (function () {
   var box = document.querySelector("[data-auto]");
@@ -373,7 +375,18 @@ const AUTO_SCRIPT = `<script>
   var name = box ? box.getAttribute("data-auto-client") : "";
   var url = box ? box.getAttribute("data-auto-url") : "";
   var mode = box ? box.getAttribute("data-auto") : "";
+  var delay = 5;
+  if (box) {
+    var rawDelay = box.getAttribute("data-auto-delay");
+    if (rawDelay === "0" || rawDelay === "1" || rawDelay === "2" || rawDelay === "3" || rawDelay === "4" || rawDelay === "5") {
+      delay = Number(rawDelay);
+    }
+  }
   var prefOn = mode === "on" || mode === "unset";
+  var opening = function (tail) {
+    if (delay === 0) return "Opening <strong>" + name + "</strong> now" + tail;
+    return "Opening <strong>" + name + '</strong> in <span class="auto-secs">' + delay + "</span>s" + tail;
+  };
   var chip = function (pressed) {
     return '<button class="pill auto-chip" data-auto-toggle aria-pressed="' +
       (pressed ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
@@ -384,8 +397,7 @@ const AUTO_SCRIPT = `<script>
   // in the calm paused view, never during the redirect window.
   var views = {
     countdown: function () {
-      return '<a class="auto-go" href="' + url + '">Opening <strong>' + name +
-        '</strong> in <span class="auto-secs">5</span>s \u2192</a>' +
+      return '<a class="auto-go" href="' + url + '">' + opening(" \u2192") + "</a>" +
         '<button class="pill" data-auto-action="pause">Pause</button>';
     },
     paused: function () {
@@ -397,8 +409,7 @@ const AUTO_SCRIPT = `<script>
         settings;
     },
     arming: function () {
-      return '<p class="auto-overlay-title">Opening <strong>' + name +
-        '</strong> in <span class="auto-secs">5</span>s\u2026</p>' +
+      return '<p class="auto-overlay-title">' + opening("\u2026") + "</p>" +
         '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p>';
     },
     stayed: function () {
@@ -425,8 +436,13 @@ const AUTO_SCRIPT = `<script>
     fired = true;
     location.replace(url);
   };
-  var secsLeft = 5;
+  var secsLeft = delay;
   var startTimer = function () {
+    if (delay === 0) {
+      go();
+      return;
+    }
+    secsLeft = delay;
     tick = setInterval(function () {
       secsLeft -= 1;
       if (secsLeft <= 0) {
@@ -438,11 +454,6 @@ const AUTO_SCRIPT = `<script>
       var s = box.querySelector(".auto-secs");
       if (s) s.textContent = String(secsLeft);
     }, 1000);
-  };
-  var startCountdown = function () {
-    secsLeft = 5;
-    apply("countdown");
-    startTimer();
   };
   var pause = function () { cancelAll(); apply("paused"); };
   var goNow = function () {
@@ -508,29 +519,32 @@ function autoOpenUi(
 	if (!last?.web) return { html: "" };
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);
-	const open = `<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}" data-auto-client="${name}">`;
+	const delay = clientDelay(prefs);
+	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-delay="${delay}"`;
+	const opening =
+		delay === 0
+			? `Opening <strong>${name}</strong> now`
+			: `Opening <strong>${name}</strong> in <span class="auto-secs">${delay}</span>s`;
+	const open = `<div class="auto-overlay" role="alert" data-auto="on" ${meta}>`;
 	const banner = (status: string, mode: string) =>
-		`<div class="auto-banner" aria-live="polite" data-auto="${mode}" data-auto-url="${url}" data-auto-client="${name}"><span class="auto-status">${status}</span>`;
-	// Short-circuit: LARGE abort overlay, redirect at ~1500ms.
+		`<div class="auto-banner" aria-live="polite" data-auto="${mode}" ${meta}><span class="auto-status">${status}</span>`;
+	// On: LARGE abort overlay. The script redirects when the wait elapses
+	// (immediately at 0).
 	if (!noredirect && prefs.auto === "on") {
 		return {
 			html:
 				open +
-				`<p class="auto-overlay-title">Opening <strong>${name}</strong>\u2026</p>` +
+				`<p class="auto-overlay-title">${opening}\u2026</p>` +
 				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p></div>`,
 			script: AUTO_SCRIPT,
 		};
 	}
-	// Discovery: 5s pausable countdown; the chip toggles the preference
-	// (which also cancels the pending redirect). No-JS: the countdown text
-	// is itself the client link.
+	// Unset: pausable countdown for the saved wait. The script replaces
+	// this status with a link to the client.
 	if (!noredirect && prefs.auto === undefined) {
 		return {
 			html:
-				banner(
-					`Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s \u2192`,
-					"unset",
-				) +
+				banner(`${opening} \u2192`, "unset") +
 				`<button class="pill" data-auto-action="pause">Pause</button></div>`,
 			script: AUTO_SCRIPT,
 		};

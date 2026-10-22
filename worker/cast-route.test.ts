@@ -683,6 +683,94 @@ test("POST /prefs merges the slug and sets the flag via Set-Cookie", async () =>
 	expect(bad.status).toBe(400);
 });
 
+test("POST /prefs stores a 0–5s delay and keeps the other field", async () => {
+	const delayOnly = await app.request("/prefs", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			cookie: "fc_client=zoo|auto-off",
+		},
+		body: JSON.stringify({ delay: 2 }),
+	});
+	expect(delayOnly.status).toBe(204);
+	expect(delayOnly.headers.get("set-cookie") ?? "").toContain(
+		"fc_client=zoo%7Cauto-off%7Cd2",
+	);
+
+	const autoOnly = await app.request("/prefs", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			cookie: "fc_client=zoo|auto-off|d2",
+		},
+		body: JSON.stringify({ auto: "on" }),
+	});
+	expect(autoOnly.status).toBe(204);
+	expect(autoOnly.headers.get("set-cookie") ?? "").toContain(
+		"fc_client=zoo%7Cauto-on%7Cd2",
+	);
+
+	const zero = await app.request("/prefs", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			cookie: "fc_client=zoo|auto-on",
+		},
+		body: JSON.stringify({ delay: 0 }),
+	});
+	expect(zero.status).toBe(204);
+	expect(zero.headers.get("set-cookie") ?? "").toContain(
+		"fc_client=zoo%7Cauto-on%7Cd0",
+	);
+
+	const backToDefault = await app.request("/prefs", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			cookie: "fc_client=zoo|auto-on|d2",
+		},
+		body: JSON.stringify({ delay: 5 }),
+	});
+	expect(backToDefault.status).toBe(204);
+	const backCookie = backToDefault.headers.get("set-cookie") ?? "";
+	expect(backCookie).toContain("fc_client=zoo%7Cauto-on");
+	expect(backCookie).not.toContain("%7Cd");
+
+	const tooHigh = await app.request("/prefs", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ delay: 6 }),
+	});
+	expect(tooHigh.status).toBe(400);
+});
+
+test("auto-open delay is read from the cookie", async () => {
+	const two = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly|auto-on|d2" },
+	});
+	expect(two.status).toBe(200);
+	const twoBody = await two.text();
+	expect(twoBody).toContain('data-auto-delay="2"');
+	expect(twoBody).toContain('in <span class="auto-secs">2</span>s');
+
+	const zero = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly|d0" },
+	});
+	expect(zero.status).toBe(200);
+	const zeroBody = await zero.text();
+	expect(zeroBody).toContain('data-auto="unset"');
+	expect(zeroBody).toContain('data-auto-delay="0"');
+	expect(zeroBody).toContain("Opening <strong>Firefly</strong> now");
+	expect(zeroBody).not.toContain('in <span class="auto-secs">0</span>s');
+
+	// No delay segment → default 5s.
+	const unset = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly" },
+	});
+	expect(unset.status).toBe(200);
+	expect(await unset.text()).toContain('data-auto-delay="5"');
+});
+
 test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {
 	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",

@@ -12,15 +12,28 @@ export const LAST_CLIENT_COOKIE = "fc_client";
 export const LAST_CLIENT_MAX_AGE = 60 * 60 * 24 * 365;
 
 /**
- * Auto-open preference, carried in the same cookie (v2 value:
- * `<slug>|auto-<on|off>`). Unset = 5s pausable countdown; on = short
- * circuit; off = plain page.
+ * Auto-open preference, carried in the same cookie
+ * (`<slug>|auto-<on|off>|d<0-5>`). The delay segment is omitted at the
+ * default of 5s. Unset auto = pausable countdown; on = arming overlay;
+ * off = plain page. 0 redirects immediately.
  */
 export type AutoOpen = "on" | "off";
+
+/** Whole seconds. Missing or invalid means {@link AUTO_DELAY_DEFAULT}. */
+export const AUTO_DELAY_MIN = 0;
+export const AUTO_DELAY_MAX = 5;
+export const AUTO_DELAY_DEFAULT = 5;
 
 export interface ClientPrefs {
 	slug?: string;
 	auto?: AutoOpen;
+	/** Saved wait in seconds. Absent means the default (5). */
+	delay?: number;
+}
+
+export interface ClientPrefsPatch {
+	auto?: AutoOpen;
+	delay?: number;
 }
 
 /**
@@ -31,33 +44,62 @@ export interface ClientPrefs {
 const SEPARATOR = "|";
 const FLAG_ON = "auto-on";
 const FLAG_OFF = "auto-off";
+const DELAY_SEGMENT = /^d([0-5])$/;
 
-/** Parses a raw cookie value; tolerates v1 (bare slug) and garbage. */
+export function isAutoDelay(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= AUTO_DELAY_MIN &&
+		value <= AUTO_DELAY_MAX
+	);
+}
+
+/** Saved wait, or 5 when the cookie has no delay segment. */
+export function clientDelay(prefs: ClientPrefs): number {
+	return isAutoDelay(prefs.delay) ? prefs.delay : AUTO_DELAY_DEFAULT;
+}
+
+/** Parses a raw cookie value; tolerates a bare slug and garbage segments. */
 export function parseClientCookie(raw: string | undefined): ClientPrefs {
 	if (!raw) return {};
 	// hono's setCookie encodes "|" as %7C; accept both forms.
 	const value = raw.replace(/%7C/gi, SEPARATOR);
 	const sep = value.indexOf(SEPARATOR);
 	if (sep === -1) return { slug: value || undefined };
-	const flag = value.slice(sep + SEPARATOR.length);
-	const auto: AutoOpen | undefined =
-		flag === FLAG_ON ? "on" : flag === FLAG_OFF ? "off" : undefined;
-	return { slug: value.slice(0, sep) || undefined, auto };
+	const prefs: ClientPrefs = { slug: value.slice(0, sep) || undefined };
+	for (const part of value.slice(sep + SEPARATOR.length).split(SEPARATOR)) {
+		if (part === FLAG_ON) prefs.auto = "on";
+		else if (part === FLAG_OFF) prefs.auto = "off";
+		else {
+			const delay = DELAY_SEGMENT.exec(part);
+			if (delay) prefs.delay = Number(delay[1]);
+		}
+	}
+	return prefs;
 }
 
-/** Serializes prefs to the v2 cookie value (omit slug for flag-only). */
+/** Serializes prefs. Omits the delay segment at the default of 5s. */
 export function serializeClientCookie(prefs: ClientPrefs): string {
+	const parts: string[] = [];
+	if (prefs.auto) parts.push(prefs.auto === "on" ? FLAG_ON : FLAG_OFF);
+	if (isAutoDelay(prefs.delay) && prefs.delay !== AUTO_DELAY_DEFAULT) {
+		parts.push(`d${prefs.delay}`);
+	}
 	const slug = prefs.slug ?? "";
-	if (!prefs.auto) return slug;
-	const flag = prefs.auto === "on" ? FLAG_ON : FLAG_OFF;
-	return `${slug}${SEPARATOR}${flag}`;
+	if (parts.length === 0) return slug;
+	return `${slug}${SEPARATOR}${parts.join(SEPARATOR)}`;
 }
 
-/** Keeps the current slug, overwrites the auto-open flag. */
+/** Keeps the slug and any field the patch does not set. */
 export function mergeClientCookie(
 	current: string | undefined,
-	auto: AutoOpen,
+	patch: ClientPrefsPatch,
 ): string {
-	const { slug } = parseClientCookie(current);
-	return serializeClientCookie({ slug, auto });
+	const prev = parseClientCookie(current);
+	return serializeClientCookie({
+		slug: prev.slug,
+		auto: patch.auto ?? prev.auto,
+		delay: isAutoDelay(patch.delay) ? patch.delay : prev.delay,
+	});
 }

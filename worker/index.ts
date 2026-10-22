@@ -7,6 +7,7 @@ import {
 	resolveCast,
 } from "./cast-page.tsx";
 import {
+	isAutoDelay,
 	LAST_CLIENT_COOKIE,
 	LAST_CLIENT_MAX_AGE,
 	mergeClientCookie,
@@ -23,12 +24,20 @@ export const app = new Hono<{ Bindings: Env }>();
 // script-set cookies. Dumb: validate → Set-Cookie → 204.
 app.post("/prefs", async (c) => {
 	const body = (await c.req.json().catch(() => undefined)) as
-		| { auto?: string }
+		| { auto?: unknown; delay?: unknown }
 		| undefined;
-	if (body?.auto !== "on" && body?.auto !== "off") {
+	const auto = body?.auto;
+	const delay = body?.delay;
+	const hasAuto = auto === "on" || auto === "off";
+	const hasDelay = isAutoDelay(delay);
+	if ((auto !== undefined && !hasAuto) || (delay !== undefined && !hasDelay)) {
 		return c.body(null, 400);
 	}
-	const value = mergeClientCookie(getCookie(c, LAST_CLIENT_COOKIE), body.auto);
+	if (!hasAuto && !hasDelay) return c.body(null, 400);
+	const value = mergeClientCookie(getCookie(c, LAST_CLIENT_COOKIE), {
+		...(hasAuto ? { auto } : {}),
+		...(hasDelay ? { delay } : {}),
+	});
 	setCookie(c, LAST_CLIENT_COOKIE, value, {
 		path: "/",
 		maxAge: LAST_CLIENT_MAX_AGE,

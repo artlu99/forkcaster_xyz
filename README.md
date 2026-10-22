@@ -80,7 +80,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | --- | --- | --- |
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
-| `/prefs` | Hono | `POST` JSON `{ auto: "on" \| "off" }` → 204 + Set-Cookie (`fc_client` v2); auto-open preference write (server cookie — Safari ITP exemption) |
+| `/prefs` | Hono | `POST` JSON `{ auto?: "on" \| "off", delay?: 0–5 }` (at least one field) → 204 + Set-Cookie (`fc_client`); delay omitted from the cookie at the default 5s. Auto-open preference write (server cookie — Safari ITP exemption) |
 | `/transparency` | Hono | HTML facts page (what/data/tracking/domains — Domains carries registration expiry + RDAP confirm links — plus race-stats table filled server-side from the lmdis snapshot, "stats as of" line) or JSON twin via `?format=json`/Accept (`racingStats.status: live \| coming-soon`); reserved exact path — cast URLs for a username named `transparency` still work |
 | `/race-stats.json` | Hono | raw stats snapshot (same cached read as `/transparency`); 404 when absent; `cache-control: public, max-age=21600` |
 | `/mcp` | Hono → MCP SDK v2 | MCP Streamable HTTP endpoint (POST JSON-RPC; public, no auth). One tool, `get_cast_link`: cast reference (longhash ∥ fid+shorthash ∥ username+shorthash) + target client → client URLs + author signed status; farcaster.xyz is the canonical surface. |

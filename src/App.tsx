@@ -1,10 +1,21 @@
-import './App.css'
-import { siGithub, siGithubsponsors } from 'simple-icons'
 import { useEffect, useState } from 'preact/hooks'
+import { siGithub, siGithubsponsors } from 'simple-icons'
+import './App.css'
+
+function delayNote(delay: number): string {
+  if (delay === 0) return 'casts redirect immediately to your last-used app'
+  const unit = delay === 1 ? 'second' : 'seconds'
+  return `casts redirect to your last-used app after ${delay} ${unit}`
+}
+
+function delayValueText(delay: number): string {
+  if (delay === 0) return 'immediately'
+  return delay === 1 ? '1 second' : `${delay} seconds`
+}
 
 function AutoToggle() {
   const [auto, setAuto] = useState<'on' | 'off' | undefined>(undefined)
-  const [saved, setSaved] = useState(false)
+  const [delay, setDelay] = useState(5)
   useEffect(() => {
     const m = document.cookie.match(/(?:^|; )fc_client=([^;]*)/)
     // Cookie values may be percent-encoded (server Set-Cookie encodes
@@ -15,29 +26,54 @@ function AutoToggle() {
     } catch {
       v = m ? m[1] : ''
     }
+    v = v.replace(/%7C/gi, '|')
     const sep = v.indexOf('|')
-    const flag = sep === -1 ? '' : v.slice(sep + 1)
-    if (flag === 'auto-on') setAuto('on')
-    if (flag === 'auto-off') setAuto('off')
+    if (sep === -1) return
+    for (const part of v.slice(sep + 1).split('|')) {
+      if (part === 'auto-on') setAuto('on')
+      else if (part === 'auto-off') setAuto('off')
+      else if (/^d[0-5]$/.test(part)) setDelay(Number(part.slice(1)))
+    }
   }, [])
-  const set = (next: 'on' | 'off') => {
-    setAuto(next)
-    setSaved(true)
+  const save = (body: { auto?: 'on' | 'off'; delay?: number }) => {
     fetch('/prefs', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ auto: next }),
+      body: JSON.stringify(body),
     }).catch(() => {})
   }
+  const set = (next: 'on' | 'off') => {
+    setAuto(next)
+    save({ auto: next, delay })
+  }
+  const commitDelay = (next: number) => {
+    setDelay(next)
+    save(auto ? { auto, delay: next } : { delay: next })
+  }
   return (
-    <p className="auto-toggle">
-      <span className="auto-label">auto-open</span>
-      <button type="button" aria-pressed={auto === 'on'} onClick={() => set('on')}>On</button>
-      <button type="button" aria-pressed={auto === 'off'} onClick={() => set('off')}>Off</button>
-      <span className="auto-note">
-        {saved ? 'saved' : 'cast pages open in your last-used app'}
-      </span>
-    </p>
+    <div className="auto-prefs">
+      <p className="auto-toggle">
+        <span className="auto-label">auto-open</span>
+        <button type="button" aria-pressed={auto === 'on'} onClick={() => set('on')}>On</button>
+        <button type="button" aria-pressed={auto === 'off'} onClick={() => set('off')}>Off</button>
+      </p>
+      <label className="auto-delay">
+        <span className="auto-label">delay</span>
+        <input
+          type="range"
+          min={0}
+          max={5}
+          step={1}
+          value={delay}
+          aria-valuetext={delayValueText(delay)}
+          style={{ '--fill': `${(delay / 5) * 100}%` }}
+          onInput={(e) => setDelay(Number(e.currentTarget.value))}
+          onChange={(e) => commitDelay(Number(e.currentTarget.value))}
+        />
+        <span className="auto-delay-value" aria-hidden="true">{delay}s</span>
+      </label>
+      <p className="auto-note">{delayNote(delay)}</p>
+    </div>
   )
 }
 

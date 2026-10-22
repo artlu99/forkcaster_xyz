@@ -112,7 +112,7 @@ export function transparencyJson(
 			counters:
 				"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
 			cookies:
-				"fc_client only — remembers your last-used app button. Host-only, 1 year.",
+				"fc_client only — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
 		},
 		domains: {
 			canonical: "https://forkcaster.xyz",
@@ -182,7 +182,7 @@ ${statsTable(options.snapshot)}
 <h2>Tracking</h2>
 <ul>
 <li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
-<li>One cookie: <code>fc_client</code> — remembers your last-used app button. Host-only, 1 year, never sent cross-site.</li>
+<li>One cookie: <code>fc_client</code> — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
 <li>JSON version of this page: add <code>?format=json</code>.</li>
 </ul>
 

@@ -75,7 +75,7 @@ describe("missingVars", () => {
 	});
 });
 
-describe("client cookie v2", () => {
+describe("client cookie", () => {
 	test("parses legacy bare slug as unset", () => {
 		expect(parseClientCookie("firefly")).toEqual({
 			slug: "firefly",
@@ -115,8 +115,54 @@ describe("client cookie v2", () => {
 		expect(parseClientCookie(v)).toEqual({ slug: "firefly", auto: "on" });
 	});
 	test("merge keeps the slug and overwrites the flag", () => {
-		expect(mergeClientCookie("zoo|auto-off", "on")).toBe("zoo|auto-on");
-		expect(mergeClientCookie(undefined, "on")).toBe("|auto-on");
+		expect(mergeClientCookie("zoo|auto-off", { auto: "on" })).toBe("zoo|auto-on");
+		expect(mergeClientCookie(undefined, { auto: "on" })).toBe("|auto-on");
+	});
+	test("delay segment round-trips and is omitted at the default", () => {
+		expect(parseClientCookie("firefly|auto-on|d2")).toEqual({
+			slug: "firefly",
+			auto: "on",
+			delay: 2,
+		});
+		expect(parseClientCookie("firefly|d0")).toEqual({
+			slug: "firefly",
+			delay: 0,
+		});
+		expect(parseClientCookie("firefly%7Cauto-off%7Cd0")).toEqual({
+			slug: "firefly",
+			auto: "off",
+			delay: 0,
+		});
+		expect(parseClientCookie("firefly|d2|auto-on")).toEqual({
+			slug: "firefly",
+			auto: "on",
+			delay: 2,
+		});
+		expect(parseClientCookie("firefly|d9")).toEqual({
+			slug: "firefly",
+			auto: undefined,
+		});
+		expect(serializeClientCookie({ slug: "firefly", auto: "on", delay: 2 })).toBe(
+			"firefly|auto-on|d2",
+		);
+		expect(serializeClientCookie({ slug: "firefly", delay: 0 })).toBe("firefly|d0");
+		expect(serializeClientCookie({ slug: "firefly", auto: "on", delay: 5 })).toBe(
+			"firefly|auto-on",
+		);
+		expect(parseClientCookie("firefly|auto-on")).toEqual({
+			slug: "firefly",
+			auto: "on",
+		});
+	});
+	test("merge keeps the field the patch does not set", () => {
+		expect(mergeClientCookie("zoo|auto-off|d2", { auto: "on" })).toBe(
+			"zoo|auto-on|d2",
+		);
+		expect(mergeClientCookie("zoo|auto-on|d2", { delay: 0 })).toBe(
+			"zoo|auto-on|d0",
+		);
+		expect(mergeClientCookie("zoo|auto-on|d2", { delay: 5 })).toBe("zoo|auto-on");
+		expect(mergeClientCookie("firefly", { delay: 0 })).toBe("firefly|d0");
 	});
 });
 
