@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { siGithub, siGithubsponsors, siOpenaccess } from 'simple-icons'
+import { siGithub, siGithubsponsors, siModelcontextprotocol, siOpenaccess } from 'simple-icons'
 import { iconMark } from '../shared/icon-mark.ts'
 // Dependency-free — same parser the worker uses for the cookie.
 import { LAST_CLIENT_COOKIE, parseClientCookie } from '../worker/clients.ts'
@@ -130,6 +130,16 @@ function App() {
               }}
             />
             Transparency
+          </a>{' '}
+          <span aria-hidden="true">·</span>{' '}
+          <a href="/mcp" title="MCP server — get_cast_link">
+            <span
+              className="repo-mark"
+              dangerouslySetInnerHTML={{
+                __html: iconMark(siModelcontextprotocol.svg),
+              }}
+            />
+            MCP
           </a>
         </p>
       </section>

@@ -13,7 +13,7 @@ import {
 	mergeClientCookie,
 	parseClientCookie,
 } from "./clients.ts";
-import { mcpHandler } from "./mcp.ts";
+import { mcpLandingHtml, mcpHandler } from "./mcp.ts";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
@@ -53,7 +53,16 @@ app.post("/prefs", async (c) => {
 // parametric cast route; cast URLs are always two-segment, so a Farcaster
 // user literally named "transparency" is unaffected (/transparency/0x…
 // still routes to the cast handler).
-app.all("/mcp", (c) => mcpHandler.fetch(c.req.raw));
+app.post("/mcp", (c) => mcpHandler.fetch(c.req.raw));
+app.get("/mcp", (c) => {
+	// MCP clients probe GET for a server-initiated SSE stream (explicit
+	// text/event-stream accept) — answer with protocol semantics. Browsers
+	// and link crawlers get a shareable OG-tagged server card instead.
+	if ((c.req.header("Accept") ?? "").includes("text/event-stream")) {
+		return c.body(null, 405, { Allow: "POST" });
+	}
+	return c.html(mcpLandingHtml());
+});
 
 app.get("/transparency", async (c) => {
 	const wantsJson =

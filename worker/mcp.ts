@@ -38,3 +38,56 @@ export function createMcpServer(): McpServer {
 }
 
 export const mcpHandler = createMcpHandler(createMcpServer);
+
+/**
+ * GET /mcp — a shareable server card for browsers and link crawlers
+ * (POST remains the protocol transport). Static, first-party constants
+ * only: nothing from the request is reflected, so there is no injection
+ * surface and every platform renders the same card.
+ */
+export function mcpLandingHtml(): string {
+	const title = "forkcaster — MCP server for Farcaster casts";
+	const description =
+		"Resolve any Farcaster cast — by @username, fid, or hash — into shareable links for Farcaster, Firefly, Neynar, Quilcast, and Vibeshift. Public, no auth.";
+	const endpoint = "https://forkcaster.xyz/mcp";
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>forkcaster — MCP server</title>
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${description}" />
+<meta property="og:url" content="${endpoint}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="forkcaster" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="${title}" />
+<meta name="twitter:description" content="${description}" />
+<link rel="canonical" href="${endpoint}" />
+<style>
+body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; color: #111; line-height: 1.5; }
+code { background: #f2f2f2; padding: 2px 6px; border-radius: 4px; }
+h1 { font-size: 22px; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: #666; margin-top: 28px; }
+</style>
+</head>
+<body>
+<h1>forkcaster MCP server</h1>
+<p>An MCP (Model Context Protocol) server that turns Farcaster casts into shareable deep links — race-verified cast identity, every supported Farcaster client app, author signed-contract status included.</p>
+<h2>Connect</h2>
+<p>Point any MCP client at <code>${endpoint}</code> — Streamable HTTP, public, no auth.</p>
+<h2>Tool — get_cast_link</h2>
+<ul>
+<li><strong>Identify a cast</strong>: full 40-hex hash on its own, or author (username or fid) + short hash.</li>
+<li><strong>Pick a client</strong>: farcaster, firefly, neynar, quilcast, vibeshift — or all at once.</li>
+<li><strong>Get</strong>: verified per-client URLs, the farcaster-canonical URL, and the author's signed status (pass-through — never suppressed).</li>
+</ul>
+<h2>More</h2>
+<ul>
+<li><a href="/transparency">Transparency</a> — what forkcaster is and what it tracks</li>
+<li><a href="https://github.com/artlu99/forkcaster_xyz">Source</a> — MIT</li>
+</ul>
+</body>
+</html>`;
+}
