@@ -117,12 +117,20 @@ Decisions:
 
 `https://forkcaster.xyz/mcp` (also `warpcats.com/mcp`) — MCP **Streamable HTTP** endpoint, public, no auth, stateless. One tool: **`get_cast_link`** — resolve a Farcaster cast (full 40-hex hash, or fid/username + short hash) into deep-link URLs for any supported client, with the author's signed-contract status. Wiring: `worker/mcp.ts` (SDK) + `worker/cast-ref.ts` (zod contract, shim-direct resolution).
 
-Registry listing: `server.json` (repo root, official registry schema 2025-09-29, name `xyz.forkcaster/mcp`). To publish:
+Registry listing: `server.json` (repo root, official registry schema 2025-12-11, name `xyz.forkcaster/mcp`). To publish, install the official publisher CLI — a GitHub-release binary. ⚠️ **do NOT `bunx`/`npx` the npm package `mcp-publisher`** — it's an unrelated browser-automation project that collides with the name:
 
 ```sh
-bunx mcp-publisher login dns forkcaster.xyz   # one-time domain verification (DNS TXT) → namespace
-bunx mcp-publisher publish                    # submits server.json to registry.modelcontextprotocol.io
+curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher && sudo mv mcp-publisher /usr/local/bin/
 ```
+
+One-time domain verification: generate an ed25519 keypair (`openssl genpkey -algorithm Ed25519 -out key.pem`), add the apex TXT record it prints (`v=MCPv1; k=ed25519; p=<public key>`), then:
+
+```sh
+mcp-publisher login dns forkcaster.xyz --private-key <hex>   # signs the challenge → xyz.forkcaster namespace
+mcp-publisher publish                                        # submits server.json to registry.modelcontextprotocol.io
+```
+
+`key.pem` is the publishing credential — keep it safe, never commit it.
 
 ## Cast source race
 
