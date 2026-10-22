@@ -58,12 +58,17 @@ export function mcpLandingHtml(): string {
 <title>forkcaster — MCP server</title>
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
+<meta property="og:image" content="https://forkcaster.xyz/mcp-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="forkcaster MCP server card — dark, stylized fork mark, get_cast_link" />
 <meta property="og:url" content="${endpoint}" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="forkcaster" />
-<meta name="twitter:card" content="summary" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${title}" />
 <meta name="twitter:description" content="${description}" />
+<meta name="twitter:image" content="https://forkcaster.xyz/mcp-card.png" />
 <link rel="canonical" href="${endpoint}" />
 <style>
 body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; color: #111; line-height: 1.5; }

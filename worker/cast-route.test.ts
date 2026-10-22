@@ -853,3 +853,23 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(plainBody).not.toContain("og:url");
 	expect(plainBody).not.toContain("fc:miniapp");
 });
+
+test("GET /mcp: server card for browsers, 405 for SSE probes", async () => {
+	// Browsers and link crawlers (no event-stream in Accept) get the
+	// OG-tagged server card; MCP clients probing for SSE get protocol 405.
+	const res = await app.request("/mcp", { headers: { accept: "text/html" } });
+	expect(res.status).toBe(200);
+	expect(res.headers.get("content-type") ?? "").toContain("text/html");
+	const body = await res.text();
+	expect(body).toContain('property="og:title"');
+	expect(body).toContain("get_cast_link");
+	// og:image rides along for share-friendly unfurls.
+	expect(body).toContain('content="https://forkcaster.xyz/mcp-card.png"');
+	expect(body).toContain('content="summary_large_image"');
+
+	const sse = await app.request("/mcp", {
+		headers: { accept: "text/event-stream" },
+	});
+	expect(sse.status).toBe(405);
+	expect(sse.headers.get("allow")).toBe("POST");
+});
