@@ -1,5 +1,5 @@
 {
-	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
 	"name": "xyz.forkcaster/mcp",
 	"description": "Resolve Farcaster casts to deep-link URLs for any supported Farcaster client app. No auth.",
 	"version": "1.0.0",

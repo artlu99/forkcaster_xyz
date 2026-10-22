@@ -1,7 +1,7 @@
 // MCP server factory — the only file that imports the MCP SDK, so
-// protocol/SDK churn can never reach resolution logic (see PLAN3
-// "Change vectors & stability policy"). Mounted at /mcp (index.ts) as a
-// web-standard handler; the factory runs once per request — stateless.
+// protocol/SDK churn can never reach resolution logic. Mounted at /mcp
+// (index.ts) as a web-standard handler; the factory runs once per
+// request — stateless.
 
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import {

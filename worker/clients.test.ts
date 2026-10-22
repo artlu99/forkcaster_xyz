@@ -266,7 +266,7 @@ describe("roster native targets", () => {
 });
 
 // Registry guardrails — data-only registry edits (the common change) must
-// fail here rather than fail agents/pills at runtime (PLAN3 change vectors).
+// fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
 	const KNOWN_VARS = new Set(["username", "hash", "fullHash", "fid"]);
 	const placeholders = (tpl: string): string[] =>

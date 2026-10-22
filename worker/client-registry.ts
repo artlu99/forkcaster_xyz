@@ -5,7 +5,7 @@
 // paths are per-client.
 //
 // This module is deliberately dependency-free and cookie-free: it is the
-// vendored-into-other-projects surface (see PLAN3.md).
+// vendored-into-other-projects surface.
 //
 // URL templates interpolate {username}, {hash} (route-form hash, short
 // or full, exactly as requested) and {fullHash} (as resolved by Shim).

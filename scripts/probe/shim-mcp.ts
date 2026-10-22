@@ -1,4 +1,4 @@
-// PLAN3 probes — shim identity routes for the MCP resolution matrix.
+// Shim identity-route probes — shim identity routes for the MCP resolution matrix.
 //   /h/{longhash}      form B: does the cast carry author username + fid?
 //   /u/{fid}           form C step 1: fid → username
 //   /wc/{u}/{short}    known path (sanity: full hash + prefix match)

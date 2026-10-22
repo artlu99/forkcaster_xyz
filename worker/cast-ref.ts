@@ -1,6 +1,6 @@
 // Cast reference — the zod contract and resolution logic behind the MCP
 // tool. Pure logic: no MCP SDK imports here, so protocol/SDK churn can
-// never reach resolution (see PLAN3 "Change vectors & stability policy").
+// never reach resolution — protocol churn stops at mcp.ts.
 //
 // Identity resolution is shim-direct (canonical identity source, same
 // trust position as the ban signal): /h (longhash), /u + /wc (fid +
