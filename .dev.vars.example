@@ -1,0 +1,6 @@
+# worker local dev (`bun run dev`) — copy to `.dev.vars` and fill in.
+# `.dev.vars` is gitignored; never commit real values.
+# Mirrors the lmdis values in `.env` — rotation touches both.
+
+LMDIS_URL=https://lmdis.artlu.xyz
+LMDIS_REST_TOKEN=

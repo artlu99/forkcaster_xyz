@@ -113,6 +113,17 @@ Decisions:
 - **Deferred**: UA-allowlist morphing (GPTBot, ClaudeBot, …) as a later progressive enhancement. Must stay an allowlist — Telegram/Discord/iMessage preview bots must keep receiving HTML + OG meta.
 - No page-level caching today (Shim is the cache); if edge caching is ever added, the variant must join the cache key.
 
+## MCP
+
+`https://forkcaster.xyz/mcp` (also `warpcats.com/mcp`) — MCP **Streamable HTTP** endpoint, public, no auth, stateless. One tool: **`get_cast_link`** — resolve a Farcaster cast (full 40-hex hash, or fid/username + short hash) into deep-link URLs for any supported client, with the author's signed-contract status. Wiring: `worker/mcp.ts` (SDK) + `worker/cast-ref.ts` (zod contract, shim-direct resolution).
+
+Registry listing: `server.json` (repo root, official registry schema 2025-09-29, name `xyz.forkcaster/mcp`). To publish:
+
+```sh
+bunx mcp-publisher login dns forkcaster.xyz   # one-time domain verification (DNS TXT) → namespace
+bunx mcp-publisher publish                    # submits server.json to registry.modelcontextprotocol.io
+```
+
 ## Cast source race
 
 Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fan out with per-provider abort + 5s cap, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error).

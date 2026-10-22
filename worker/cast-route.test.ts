@@ -31,14 +31,17 @@ const SHIM_CAST = {
 	hash: FULL_HASH,
 	text: CAST_TEXT,
 	embeds: [
-		{ url: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/0eeef320/original" },
+		{
+			url: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/0eeef320/original",
+		},
 	],
 	timestamp: 1_792_425_174,
 	user: {
 		fid: 10215,
 		username: "zoo",
 		displayName: "zoo",
-		pfpUrl: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ab8e1aa9/original",
+		pfpUrl:
+			"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ab8e1aa9/original",
 		bio: "primus amanuensis @qbase",
 	},
 };
@@ -84,7 +87,9 @@ const QUOTE_URL_CAST = {
 	...SHIM_CAST,
 	hash: "0x797945472e1ed7dfe53da94c03ad972ef7fc5fd4",
 	embeds: [
-		{ castId: { fid: 3854, hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23" } },
+		{
+			castId: { fid: 3854, hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23" },
+		},
 		{
 			url: "https://newrepublic.com/article/180487/balaji-srinivasan-network-state-plutocrat",
 		},
@@ -104,7 +109,8 @@ beforeEach(() => {
 			return Response.json({ success: true, cast: QUOTE_URL_CAST });
 		}
 		if (
-			url === "https://shim.artlu.xyz/h/0xa7c5f47033da848d6d16dac11c61838634a50c23"
+			url ===
+			"https://shim.artlu.xyz/h/0xa7c5f47033da848d6d16dac11c61838634a50c23"
 		) {
 			return Response.json({ success: true, cast: QUOTED_CAST });
 		}
@@ -187,16 +193,12 @@ test("GET /:username/:hash hides the farcaster link when the author has not sign
 	const body = await res.text();
 	// The embed still renders for unsigned authors...
 	expect(body).toContain(CAST_TEXT);
-	expect(body).toContain(
-		`https://firefly.social/post/farcaster/${ARTLU_HASH}`,
-	);
+	expect(body).toContain(`https://firefly.social/post/farcaster/${ARTLU_HASH}`);
 	// URL embed unfurl failed (no mock) — hostname fallback still renders.
 	expect(body).toContain("example.com");
 	// ...but the registry's requiresSigned clients (farcaster) are suppressed.
 	expect(body).not.toContain('data-client="farcaster"');
-	expect(body).not.toContain(
-		"https://farcaster.xyz/decent-artlu/0xbb54368f",
-	);
+	expect(body).not.toContain("https://farcaster.xyz/decent-artlu/0xbb54368f");
 	// With farcaster gone, no rendered client has a native scheme — the
 	// mobile deeplink script doesn't ship on this page at all.
 	expect(body).not.toContain("data-scheme");
@@ -294,9 +296,7 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	expect(body).toContain(`href="https://explorer.neynar.com/${FULL_HASH}"`);
 	// Format verified against backmeupplz/quilcast: /c/ requires 40 hex
 	// (optional 0x) — the full hash.
-	expect(body).toContain(
-		`href="https://quilcast.com/c/${FULL_HASH}"`,
-	);
+	expect(body).toContain(`href="https://quilcast.com/c/${FULL_HASH}"`);
 	// Farcaster ships the only native scheme — verified against the
 	// open-source app (farcasterxyz/client): scheme paths mirror the web
 	// path, /{username}/{fullHash}. Web href stays canonical; scheme +
@@ -589,7 +589,7 @@ test("auto-open unset: countdown banner; ON: single-Pause arming; OFF: chip", as
 	expect(unset.status).toBe(200);
 	const unsetBody = await unset.text();
 	expect(unsetBody).toContain('data-auto="unset"');
-	expect(unsetBody).toContain("in <span class=\"auto-secs\">5</span>s");
+	expect(unsetBody).toContain('in <span class="auto-secs">5</span>s');
 	expect(unsetBody).toContain('data-auto-action="pause"');
 	// Exactly one "Auto-open:" occurrence — the script's chip builder — so
 	// the arming view itself carries no settings chrome.
@@ -683,7 +683,8 @@ test("POST /prefs merges the slug and sets the flag via Set-Cookie", async () =>
 	expect(bad.status).toBe(400);
 });
 
-test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
+test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {
+	const canonicalRes = await app.request(`/zoo/${SHORT_HASH}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
 	expect(canonicalRes.status).toBe(200);
@@ -700,7 +701,9 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(canonicalBody).toContain(
 		'<meta property="og:site_name" content="forkcaster" />',
 	);
-	expect(canonicalBody).toContain('<meta property="og:type" content="article" />');
+	expect(canonicalBody).toContain(
+		'<meta property="og:type" content="article" />',
+	);
 	expect(canonicalBody).not.toContain("fc:miniapp");
 	expect(canonicalBody).not.toContain("fc:frame");
 

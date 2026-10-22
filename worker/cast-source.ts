@@ -17,22 +17,15 @@
 // No caching is introduced here: one fan-out per render keeps the last-used
 // badge and signed suppression trivially correct.
 
-export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
-export type ShimCast = {
-	fid?: number;
-	hash?: string;
-	text?: string;
-	/** Unix seconds; the embed does new Date(ts), which wants milliseconds. */
-	timestamp?: number;
-	embeds?: ShimEmbed[];
-	user?: {
-		fid?: number;
-		username?: string;
-		displayName?: string;
-		pfpUrl?: string;
-		bio?: string;
-	};
-};
+import {
+	getCastByUsernameHash,
+	getFidByUsername,
+	resolvesHash,
+	type ShimCast,
+	type ShimEmbed,
+} from "./shim.ts";
+
+export type { ShimCast, ShimEmbed };
 
 export type ProviderId = "shim" | "haatz" | "snap" | "farcaster-tv";
 
@@ -65,7 +58,11 @@ export interface CastProvider {
 /** Per-provider outcome observed for one race — one row per eligible provider. */
 export interface ProviderTiming {
 	provider: ProviderId;
-	kind: "found" | "miss" | "error";
+	/**
+	 * `abort` marks losers cut off when the race resolved — race bookkeeping,
+	 * not provider failures (kept out of public errorRate).
+	 */
+	kind: "found" | "miss" | "error" | "abort";
 	/** Milliseconds from race start to this provider's settle. */
 	ms: number;
 }
@@ -102,19 +99,7 @@ function isFullHash(hash: string): boolean {
 
 /** A found cast is only valid if it resolves the hash that was asked for. */
 function resolvesRequested(vars: CastVars, cast: ShimCast): boolean {
-	return (
-		typeof cast.hash === "string" &&
-		cast.hash.toLowerCase().startsWith(vars.hash.toLowerCase())
-	);
-}
-
-async function getJson(
-	url: string,
-	signal: AbortSignal,
-): Promise<unknown | undefined> {
-	const res = await fetch(url, { signal });
-	if (!res.ok) return undefined;
-	return res.json().catch(() => undefined);
+	return resolvesHash(cast.hash, vars.hash);
 }
 
 async function getJsonWithStatus(
@@ -126,39 +111,24 @@ async function getJsonWithStatus(
 	return { status: res.status, data };
 }
 
-// --- shim (complete, canonical shape, any hash form) ---
+// --- shim (complete, canonical shape, any hash form) — identity calls
+// --- live in shim.ts; this adapter maps them onto race semantics.
 
 export const shimProvider: CastProvider = {
 	id: "shim",
 	complete: true,
 	canServe: () => true,
 	async fetchCast(vars, signal) {
-		try {
-			// A miss is {"success":false} or an empty body, both HTTP 200.
-			const res = await fetch(
-				`https://shim.artlu.xyz/wc/${vars.username}/${vars.hash}`,
-				{ signal },
-			);
-			if (!res.ok) {
-				return { kind: "error", provider: "shim", message: `HTTP ${res.status}` };
-			}
-			const data = (await res.json().catch(() => undefined)) as {
-				success?: boolean;
-				cast?: ShimCast;
-			};
-			const cast = data?.cast;
-			if (data?.success === false || !cast?.hash) {
-				return { kind: "miss", provider: "shim" };
-			}
-			return {
-				kind: "found",
-				provider: "shim",
-				complete: true,
-				cast: { ...cast, hash: cast.hash },
-			};
-		} catch (error) {
-			return { kind: "error", provider: "shim", message: String(error) };
+		const lookup = await getCastByUsernameHash(
+			vars.username,
+			vars.hash,
+			signal,
+		);
+		if (lookup.status === "error") {
+			return { kind: "error", provider: "shim", message: lookup.message };
 		}
+		if (lookup.status === "miss") return { kind: "miss", provider: "shim" };
+		return { kind: "found", provider: "shim", complete: true, cast: lookup.cast };
 	},
 };
 
@@ -256,7 +226,11 @@ export const farcasterTvProvider: CastProvider = {
 				cast: mapFarcasterTvCast(match),
 			};
 		} catch (error) {
-			return { kind: "error", provider: "farcaster-tv", message: String(error) };
+			return {
+				kind: "error",
+				provider: "farcaster-tv",
+				message: String(error),
+			};
 		}
 	},
 };
@@ -322,13 +296,13 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 		canServe: (vars) => isFullHash(vars.hash),
 		async fetchCast(vars, signal) {
 			try {
-				const fidData = (await getJson(
-					`https://shim.artlu.xyz/f/${vars.username}`,
-					signal,
-				)) as { success?: boolean; fid?: number } | undefined;
-				const fid = fidData?.fid;
-				if (typeof fid !== "number") {
-					return { kind: "error", provider: id, message: "no fid for username" };
+				const fid = await getFidByUsername(vars.username, signal);
+				if (fid === undefined) {
+					return {
+						kind: "error",
+						provider: id,
+						message: "no fid for username",
+					};
 				}
 				const { status, data } = await getJsonWithStatus(
 					`${base}/v1/castById?fid=${fid}&hash=${vars.hash}`,
@@ -352,10 +326,9 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 					signal,
 				);
 				const userMessages =
-					(userData.data as { messages?: RawMessage[] } | undefined)?.messages?.slice(
-						0,
-						50,
-					) ?? [];
+					(
+						userData.data as { messages?: RawMessage[] } | undefined
+					)?.messages?.slice(0, 50) ?? [];
 				return {
 					kind: "found",
 					provider: id,
@@ -412,12 +385,17 @@ export async function raceCast(
 		timings,
 		elapsedMs: Date.now() - startedAt,
 	});
-	if (eligible.length === 0) return { kind: "unreachable", timings: [], elapsedMs: 0 };
+	if (eligible.length === 0)
+		return { kind: "unreachable", timings: [], elapsedMs: 0 };
 	const isComplete = new Map(eligible.map((p) => [p.id, p.complete]));
 
 	const controllers = new Map<ProviderId, AbortController>();
 	const timings: ProviderTiming[] = [];
+	// Set once the race has resolved: aborts from here on are the race
+	// cutting off losers, not provider failures (see settled()).
+	let raceOver = false;
 	const abortAll = () => {
+		raceOver = true;
 		for (const controller of controllers.values()) controller.abort();
 	};
 
@@ -425,15 +403,19 @@ export async function raceCast(
 	for (const provider of eligible) {
 		const controller = new AbortController();
 		controllers.set(provider.id, controller);
-		const timer = setTimeout(
-			() => controller.abort(),
-			HARD_TIMEOUT_MS,
-		);
+		const timer = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS);
 		const providerStartedAt = Date.now();
 		const settled = (kind: ProviderTiming["kind"]): void => {
 			timings.push({
 				provider: provider.id,
-				kind,
+				// Aborted losers are race bookkeeping, not provider errors —
+				// record them as `abort` so public errorRate stays honest.
+				// (The 5s hard-timeout abort fires while the race is still
+				// pending, so raceOver is false there and it stays an `error`.)
+				kind:
+					kind === "error" && raceOver && controller.signal.aborted
+						? "abort"
+						: kind,
 				ms: Date.now() - providerStartedAt,
 			});
 		};
@@ -467,7 +449,11 @@ export async function raceCast(
 					settled("error");
 					return {
 						provider: provider.id,
-						result: { kind: "error", provider: provider.id, message: String(error) },
+						result: {
+							kind: "error",
+							provider: provider.id,
+							message: String(error),
+						},
 					};
 				}),
 		);
@@ -523,6 +509,15 @@ export async function raceCast(
 	}
 	if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
 	abortAll();
+	// Give cut-off losers a beat to land their `abort` timing rows before
+	// the result escapes — deterministic telemetry, bounded so a provider
+	// that ignores its signal can't stall the response.
+	if (pending.size > 0) {
+		await Promise.race([
+			Promise.allSettled([...pending.values()]),
+			new Promise((resolve) => setTimeout(resolve, 25)),
+		]);
+	}
 
 	if (winner !== null) {
 		return {

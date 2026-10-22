@@ -11,4 +11,6 @@ dist
 worker-configuration.d.ts
 
 bun.lock
+PLAN.md
+PLAN3.md
 AGENTS.md

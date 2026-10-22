@@ -4,6 +4,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.15",
 		"@cloudflare/vite-plugin": "^1.63.1",
+		"@dotenvx/dotenvx": "^2.36.0",
 		"@preact/preset-vite": "^2.10.6",
 		"@types/node": "^26.6.5",
 		"vite": "^8.3.4",
@@ -20,10 +21,12 @@
 	},
 	"type": "module",
 	"dependencies": {
+		"@modelcontextprotocol/server": "2.3.1",
 		"hono": "^4.13.13",
 		"preact": "^11.0.1",
 		"preact-render-to-string": "^6.8.0",
 		"react-farcaster-embed": "^1.11.0",
-		"simple-icons": "^16.35.0"
+		"simple-icons": "^16.35.0",
+		"zod": "4.6.7"
 	}
 }

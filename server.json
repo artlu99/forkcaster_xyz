@@ -1,0 +1,17 @@
+{
+	"$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+	"name": "xyz.forkcaster/mcp",
+	"description": "Resolve Farcaster casts to deep-link URLs for any supported Farcaster client app. No auth.",
+	"version": "1.0.0",
+	"websiteUrl": "https://forkcaster.xyz",
+	"repository": {
+		"url": "https://github.com/artlu99/forkcaster_xyz",
+		"source": "github"
+	},
+	"remotes": [
+		{
+			"type": "streamable-http",
+			"url": "https://forkcaster.xyz/mcp"
+		}
+	]
+}

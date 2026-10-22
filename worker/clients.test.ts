@@ -16,14 +16,17 @@ const { clientPill } = await import("./cast-page.tsx");
 
 import {
 	CLIENTS,
+	CLIENT_IDS,
 	type ClientDefinition,
 	clientsForPage,
 	deeplinkTargets,
 	findClient,
-	mergeClientCookie,
 	missingVars,
-	parseClientCookie,
 	resolveTemplate,
+} from "./client-registry.ts";
+import {
+	mergeClientCookie,
+	parseClientCookie,
 	serializeClientCookie,
 } from "./clients.ts";
 
@@ -259,5 +262,58 @@ describe("roster native targets", () => {
 			'data-scheme="farcaster://zoo/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
 		);
 		expect(html).toContain("data-intent=");
+	});
+});
+
+// Registry guardrails — data-only registry edits (the common change) must
+// fail here rather than fail agents/pills at runtime (PLAN3 change vectors).
+describe("registry guardrails", () => {
+	const KNOWN_VARS = new Set(["username", "hash", "fullHash", "fid"]);
+	const placeholders = (tpl: string): string[] =>
+		[...tpl.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+
+	test("every template references only resolvable identity vars", () => {
+		for (const client of CLIENTS) {
+			const templates = [client.web, client.deeplink?.scheme];
+			for (const tpl of templates) {
+				if (tpl === undefined) continue;
+				for (const name of placeholders(tpl)) {
+					expect(KNOWN_VARS.has(name)).toBe(true);
+				}
+			}
+		}
+	});
+
+	test("ids are slug-shaped and web URLs are https", () => {
+		for (const client of CLIENTS) {
+			expect(client.id).toMatch(/^[a-z0-9-]+$/);
+			if (client.web !== undefined) {
+				expect(client.web.startsWith("https://")).toBe(true);
+			}
+		}
+	});
+
+	test("suspended clients vanish from advertised ids, findClient, and the page", () => {
+		const probe: ClientDefinition = {
+			id: "guardrail-suspended",
+			title: "Guardrail",
+			logoUrl: "/logos/farcaster.svg",
+			web: "https://example.com/cast",
+			status: "suspended",
+		};
+		CLIENTS.push(probe);
+		try {
+			expect(CLIENT_IDS).not.toContain("guardrail-suspended");
+			expect(findClient("guardrail-suspended")).toBeUndefined();
+			expect(
+				clientsForPage(true, {
+					username: "zoo",
+					hash: "0x895ecc74",
+					fullHash: "0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",
+				}).some((c) => c.id === "guardrail-suspended"),
+			).toBe(false);
+		} finally {
+			CLIENTS.pop();
+		}
 	});
 });

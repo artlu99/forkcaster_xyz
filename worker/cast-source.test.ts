@@ -38,9 +38,18 @@ const SHIM_CAST = {
 	fid: 10215,
 	hash: FULL_HASH,
 	text: "omg so relevant!",
-	embeds: [{ castId: { fid: 3854, hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23" } }],
+	embeds: [
+		{
+			castId: { fid: 3854, hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23" },
+		},
+	],
 	timestamp: 1_792_425_174,
-	user: { fid: 10215, username: "zoo", displayName: "zoo", pfpUrl: "https://img.test/p.png" },
+	user: {
+		fid: 10215,
+		username: "zoo",
+		displayName: "zoo",
+		pfpUrl: "https://img.test/p.png",
+	},
 };
 const SHIM_FOUND = { success: true, cast: { ...SHIM_CAST } };
 const FCTV_FOUND = {
@@ -59,7 +68,14 @@ const FCTV_FOUND = {
 				},
 				embeds: {
 					images: [{ openGraph: { url: "https://img.test/a.png" } }],
-					urls: [{ openGraph: { url: "https://example.com/x", sourceUrl: "https://example.com/x" } }],
+					urls: [
+						{
+							openGraph: {
+								url: "https://example.com/x",
+								sourceUrl: "https://example.com/x",
+							},
+						},
+					],
 				},
 			},
 		],
@@ -204,7 +220,10 @@ test("farcaster.tv adapter maps the Warpcast shape onto ShimCast", async () => {
 		}
 		return respond(url, "throw");
 	});
-	const outcome = await farcasterTvProvider.fetchCast(VARS, new AbortController().signal);
+	const outcome = await farcasterTvProvider.fetchCast(
+		VARS,
+		new AbortController().signal,
+	);
 	expect(outcome.kind).toBe("found");
 	if (outcome.kind !== "found") return;
 	expect(outcome.complete).toBe(false);
@@ -226,13 +245,20 @@ test("farcaster.tv 404 is a miss", async () => {
 		}
 		return respond(url, "throw");
 	});
-	const outcome = await farcasterTvProvider.fetchCast(VARS, new AbortController().signal);
+	const outcome = await farcasterTvProvider.fetchCast(
+		VARS,
+		new AbortController().signal,
+	);
 	expect(outcome.kind).toBe("miss");
 });
 
 test("raw nodes: ineligible on short hashes, mapped on full hashes", async () => {
-	expect(haatzProvider.canServe({ username: "zoo", hash: SHORT_HASH })).toBe(false);
-	expect(haatzProvider.canServe({ username: "zoo", hash: FULL_HASH })).toBe(true);
+	expect(haatzProvider.canServe({ username: "zoo", hash: SHORT_HASH })).toBe(
+		false,
+	);
+	expect(haatzProvider.canServe({ username: "zoo", hash: FULL_HASH })).toBe(
+		true,
+	);
 	expect(haatzProvider.complete).toBe(true);
 
 	const RAW_MESSAGE = {
@@ -244,7 +270,12 @@ test("raw nodes: ineligible on short hashes, mapped on full hashes", async () =>
 			castAddBody: {
 				text: "omg so relevant!",
 				embeds: [
-					{ castId: { fid: 3854, hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23" } },
+					{
+						castId: {
+							fid: 3854,
+							hash: "0xa7c5f47033da848d6d16dac11c61838634a50c23",
+						},
+					},
 					{ url: "https://img.test/a.png" },
 				],
 			},
@@ -252,9 +283,24 @@ test("raw nodes: ineligible on short hashes, mapped on full hashes", async () =>
 	};
 	const USER_DATA = {
 		messages: [
-			{ data: { userDataBody: { type: "USER_DATA_TYPE_USERNAME", value: "zoo" } } },
-			{ data: { userDataBody: { type: "USER_DATA_TYPE_PFP", value: "https://img.test/raw.png" } } },
-			{ data: { userDataBody: { type: "USER_DATA_TYPE_BIO", value: "raw bio" } } },
+			{
+				data: {
+					userDataBody: { type: "USER_DATA_TYPE_USERNAME", value: "zoo" },
+				},
+			},
+			{
+				data: {
+					userDataBody: {
+						type: "USER_DATA_TYPE_PFP",
+						value: "https://img.test/raw.png",
+					},
+				},
+			},
+			{
+				data: {
+					userDataBody: { type: "USER_DATA_TYPE_BIO", value: "raw bio" },
+				},
+			},
 		],
 	};
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
@@ -262,7 +308,10 @@ test("raw nodes: ineligible on short hashes, mapped on full hashes", async () =>
 		if (url === "https://shim.artlu.xyz/f/zoo") {
 			return respond(url, { success: true, fid: 10215 });
 		}
-		if (url === `https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`) {
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
 			return respond(url, RAW_MESSAGE);
 		}
 		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
@@ -311,7 +360,10 @@ test("shim adapter maps success:false to an authoritative miss", async () => {
 		}
 		return respond(url, "throw");
 	});
-	const outcome = await shimProvider.fetchCast(VARS, new AbortController().signal);
+	const outcome = await shimProvider.fetchCast(
+		VARS,
+		new AbortController().signal,
+	);
 	expect(outcome.kind).toBe("miss");
 });
 
@@ -336,4 +388,36 @@ test("raceCast reports one timing row per eligible provider", async () => {
 	expect(race.elapsedMs).toBeGreaterThanOrEqual(shim?.ms ?? 0);
 	// Erroring providers get timing rows too (the raw nodes are ineligible
 	// on short hashes, so this roster only has two eligible providers).
+});
+
+test("race-abort losers are recorded as abort, not error", async () => {
+	// Real fetch rejects on abort; the shared respond() helper ignores the
+	// signal, so this test wires signal-aware mocks directly: farcaster.tv
+	// lands a partial instantly, shim is still pending when the box expires.
+	globalThis.fetch = mock(
+		(input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+			const url = String(input);
+			if (url === `https://farcaster.tv/zoo/${SHORT_HASH}`) {
+				return Promise.resolve(Response.json(FCTV_FOUND));
+			}
+			if (url === `https://shim.artlu.xyz/wc/zoo/${SHORT_HASH}`) {
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () =>
+						reject(new Error("aborted")),
+					);
+				});
+			}
+			return Promise.reject(new Error(`unexpected fetch ${url}`));
+		},
+	);
+	const race = await raceCast(VARS, { boxMs: 20 });
+	expect(race.kind).toBe("found");
+	if (race.kind !== "found") return;
+	expect(race.provider).toBe("farcaster-tv");
+	expect(race.timings.length).toBe(2);
+	const fctv = race.timings.find((t) => t.provider === "farcaster-tv");
+	const shim = race.timings.find((t) => t.provider === "shim");
+	expect(fctv?.kind).toBe("found");
+	// shim was cut off at box expiry — race bookkeeping, not a provider error.
+	expect(shim?.kind).toBe("abort");
 });

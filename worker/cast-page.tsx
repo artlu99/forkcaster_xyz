@@ -3,22 +3,24 @@ import { renderToString } from "preact-render-to-string";
 import { siGithub, siGithubsponsors } from "simple-icons";
 import {
 	type ClientDefinition,
-	type ClientPrefs,
 	type TemplateVars,
-	LAST_CLIENT_COOKIE,
-	LAST_CLIENT_MAX_AGE,
 	clientsForPage,
 	deeplinkTargets,
 	findClient,
 	resolveTemplate,
+} from "./client-registry.ts";
+import {
+	type ClientPrefs,
+	LAST_CLIENT_COOKIE,
+	LAST_CLIENT_MAX_AGE,
 } from "./clients.ts";
 import {
 	type ProviderId,
 	type ProviderTiming,
-	type ShimCast,
 	raceCast,
 	shimProvider,
 } from "./cast-source.ts";
+import { type ShimCast, getCastByHash, getSignedStatus } from "./shim.ts";
 
 type CastData = NonNullable<Parameters<typeof FarcasterEmbed>[0]["castData"]>;
 
@@ -106,18 +108,7 @@ async function unfurl(
 // author.pfp the bundle reads unguarded. Hydration failure drops the quote —
 // old casts get pruned from Snapchain when storage lapses.
 async function fetchQuote(hash: string): Promise<ShimCast | undefined> {
-	try {
-		const res = await fetch(`https://shim.artlu.xyz/h/${hash}`, {
-			signal: AbortSignal.timeout(5000),
-		});
-		if (!res.ok) return undefined;
-		const data = (await res.json().catch(() => undefined)) as {
-			cast?: ShimCast;
-		};
-		return data?.cast ?? undefined;
-	} catch {
-		return undefined;
-	}
+	return getCastByHash(hash, AbortSignal.timeout(5000));
 }
 
 function toCastData(
@@ -131,11 +122,19 @@ function toCastData(
 		sourceUrl: string;
 		alt: string;
 	}> = [];
-	const urls: Array<{ type: string; openGraph: Record<string, string | boolean> }> = [];
+	const urls: Array<{
+		type: string;
+		openGraph: Record<string, string | boolean>;
+	}> = [];
 	for (const embed of cast.embeds ?? []) {
 		if (embed.castId?.hash) continue;
 		if (embed.url && isImageUrl(embed.url)) {
-			images.push({ type: "image", url: embed.url, sourceUrl: embed.url, alt: "" });
+			images.push({
+				type: "image",
+				url: embed.url,
+				sourceUrl: embed.url,
+				alt: "",
+			});
 		} else if (embed.url) {
 			urls.push({
 				type: "url",
@@ -509,8 +508,7 @@ function autoOpenUi(
 	if (!last?.web) return { html: "" };
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);
-	const open =
-		`<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}" data-auto-client="${name}">`;
+	const open = `<div class="auto-overlay" role="alert" data-auto="on" data-auto-url="${url}" data-auto-client="${name}">`;
 	const banner = (status: string, mode: string) =>
 		`<div class="auto-banner" aria-live="polite" data-auto="${mode}" data-auto-url="${url}" data-auto-client="${name}"><span class="auto-status">${status}</span>`;
 	// Short-circuit: LARGE abort overlay, redirect at ~1500ms.
@@ -529,7 +527,10 @@ function autoOpenUi(
 	if (!noredirect && prefs.auto === undefined) {
 		return {
 			html:
-				banner(`Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s \u2192`, "unset") +
+				banner(
+					`Opening <strong>${name}</strong> in <span class="auto-secs">5</span>s \u2192`,
+					"unset",
+				) +
 				`<button class="pill" data-auto-action="pause">Pause</button></div>`,
 			script: AUTO_SCRIPT,
 		};
@@ -584,12 +585,14 @@ function clientActionsHtml(
 	const last = findClient(lastClientId);
 	const offered = clientsForPage(signed, vars);
 	const pills = offered
-		.map((client) => clientPill(client, vars, last !== undefined && client.id === last.id))
+		.map((client) =>
+			clientPill(client, vars, last !== undefined && client.id === last.id),
+		)
 		.join("\n");
 	// The mobile deeplink script ships only when a rendered client
 	// actually has a native target — zero bytes otherwise.
-	const hasNative = offered.some((client) =>
-		Object.keys(deeplinkTargets(client, vars)).length > 0,
+	const hasNative = offered.some(
+		(client) => Object.keys(deeplinkTargets(client, vars)).length > 0,
 	);
 	return `<p class="actions">${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
 }
@@ -848,7 +851,12 @@ function linkOnlyPage(
 	// Auto-open fires here too (the cast lives in the client), with the
 	// {fullHash} slot degraded to the route hash.
 	const prefs: ClientPrefs = { slug };
-	const auto = autoOpenUi(prefs, true, { username, hash, fullHash: hash }, noredirect);
+	const auto = autoOpenUi(
+		prefs,
+		true,
+		{ username, hash, fullHash: hash },
+		noredirect,
+	);
 	return shell(
 		`${username}/${hash} · forkcaster`,
 		`${auto.html}<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
@@ -949,9 +957,7 @@ export async function resolveCast(
 	// page fills them in client-side (QUOTE_FILL_SCRIPT).
 	const urlEmbeds = urlEmbedsOf(foundCast);
 	const quoteHashes = quoteHashesOf(foundCast);
-	const unfurls = Promise.allSettled(
-		urlEmbeds.map((u) => unfurl(u, env)),
-	);
+	const unfurls = Promise.allSettled(urlEmbeds.map((u) => unfurl(u, env)));
 	const quoteFetches = Promise.allSettled(
 		quoteHashes.map((h) => fetchQuote(h)),
 	);
@@ -963,22 +969,7 @@ export async function resolveCast(
 	let signed: boolean | null = null;
 	const fid = foundCast.fid ?? foundCast.user?.fid;
 	if (fid !== undefined) {
-		const signedPromise = (async (): Promise<boolean | null> => {
-			try {
-				const res = await fetch(`https://shim.artlu.xyz/signed/${fid}`, {
-					signal: AbortSignal.timeout(5000),
-				});
-				if (res.ok) {
-					const data = (await res.json().catch(() => ({}))) as {
-						signed?: boolean;
-					};
-					if (typeof data.signed === "boolean") return data.signed;
-				}
-			} catch {
-				// Signed-check unavailable — fail open.
-			}
-			return null;
-		})();
+		const signedPromise = getSignedStatus(fid, AbortSignal.timeout(5000));
 		if (opts.boxMs === null) {
 			signed = await signedPromise;
 		} else {

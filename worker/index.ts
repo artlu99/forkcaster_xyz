@@ -12,6 +12,8 @@ import {
 	mergeClientCookie,
 	parseClientCookie,
 } from "./clients.ts";
+import { mcpHandler } from "./mcp.ts";
+import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -26,10 +28,7 @@ app.post("/prefs", async (c) => {
 	if (body?.auto !== "on" && body?.auto !== "off") {
 		return c.body(null, 400);
 	}
-	const value = mergeClientCookie(
-		getCookie(c, LAST_CLIENT_COOKIE),
-		body.auto,
-	);
+	const value = mergeClientCookie(getCookie(c, LAST_CLIENT_COOKIE), body.auto);
 	setCookie(c, LAST_CLIENT_COOKIE, value, {
 		path: "/",
 		maxAge: LAST_CLIENT_MAX_AGE,
@@ -38,23 +37,36 @@ app.post("/prefs", async (c) => {
 	return c.body(null, 204);
 });
 
-// Reserved single-segment paths (/api/, /transparency) are exact-match and
-// registered before the parametric cast route; cast URLs are always
-// two-segment, so a Farcaster user literally named "transparency" is
-// unaffected (/transparency/0x… still routes to the cast handler).
-app.get("/transparency", (c) => {
+// Reserved single-segment paths (/api/, /transparency, /prefs,
+// /race-stats.json, /mcp) are exact-match and registered before the
+// parametric cast route; cast URLs are always two-segment, so a Farcaster
+// user literally named "transparency" is unaffected (/transparency/0x…
+// still routes to the cast handler).
+app.all("/mcp", (c) => mcpHandler.fetch(c.req.raw));
+
+app.get("/transparency", async (c) => {
 	const wantsJson =
 		c.req.query("format") === "json" ||
 		(c.req.header("Accept") ?? "").includes("application/json");
-	if (wantsJson) return c.json(transparencyJson());
+	// One cacheTtl'd read (per-isolate) feeds the HTML table and the JSON
+	// twin; absent/unreachable snapshot → dashes/coming-soon. Silent.
+	const snapshot = await getRaceStatsSnapshot(c.env);
+	if (wantsJson) return c.json(transparencyJson(snapshot));
 	const primaryOrigin = (c.env as Env | undefined)?.PRIMARY_ORIGIN;
 	return c.html(
 		renderTransparencyHtml({
-			canonicalUrl: primaryOrigin
-				? `${primaryOrigin}/transparency`
-				: undefined,
+			canonicalUrl: primaryOrigin ? `${primaryOrigin}/transparency` : undefined,
+			snapshot,
 		}),
 	);
+});
+
+// Raw agent-facing snapshot — the same cached read the transparency page
+// uses, no rendering. 404 when there is no snapshot to serve.
+app.get("/race-stats.json", async (c) => {
+	const snapshot = await getRaceStatsSnapshot(c.env);
+	if (snapshot === null) return c.body(null, 404);
+	return c.json(snapshot, 200, { "cache-control": "public, max-age=21600" });
 });
 
 app.get("/api/", (c) => c.json({ name: "Cloudflare" }));
