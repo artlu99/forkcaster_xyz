@@ -147,10 +147,14 @@ afterEach(() => {
 	globalThis.fetch = originalFetch;
 });
 
-test("GET /api/ returns Cloudflare JSON", async () => {
+test("GET /api/ returns the agent-facing index", async () => {
 	const res = await app.request("/api/");
 	expect(res.status).toBe(200);
-	expect(await res.json()).toEqual({ name: "Cloudflare" });
+	expect(await res.json()).toEqual({
+		cast: "/{username}/{hash}?format=json",
+		raceStats: "/race-stats.json",
+		transparency: "/transparency?format=json",
+	});
 });
 
 test("GET /:username/:hash SSR-renders the cast card from Shim data", async () => {
@@ -258,6 +262,46 @@ test("GET /:username/:hash returns 404 when Shim reports no such cast", async ()
 	const body = await res.text();
 	expect(body).toContain("not found");
 	expect(body).not.toContain(CAST_TEXT);
+});
+
+// The username route param arrives percent-decoded — it must never reach
+// HTML raw (regression: reflected <script> in the 404 body and </title>
+// breakout on cast pages).
+test("404 page escapes the percent-decoded username (XSS regression)", async () => {
+	globalThis.fetch = mock(async () => Response.json({ success: false }));
+	const payload = encodeURIComponent("<script>alert(1)</script>");
+	const res = await app.request(`/${payload}/0xdeadbeef`);
+	expect(res.status).toBe(404);
+
+	const body = await res.text();
+	expect(body).not.toContain("<script>alert(1)");
+	expect(body).toContain(
+		"Cast not found: &lt;script&gt;alert(1)&lt;/script&gt;/0xdeadbeef",
+	);
+});
+
+test("cast page <title> escapes the percent-decoded username (XSS regression)", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url.includes("shim.artlu.xyz/wc/")) {
+			return Response.json({
+				success: true,
+				cast: {
+					...SHIM_CAST,
+					hash: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+				},
+			});
+		}
+		return new Response("", { status: 404 });
+	});
+	const payload = encodeURIComponent("</title><script>alert(1)</script>");
+	const res = await app.request(`/${payload}/0xdeadbeef`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The payload must stay escaped inside <title>, never close it early.
+	expect(body).not.toContain("</title><script>");
+	expect(body).toContain("<title>&lt;/title&gt;&lt;script&gt;");
 });
 
 test("GET /:username/:hash falls back to a link-only page when Shim is unreachable", async () => {
@@ -780,11 +824,14 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	});
 	expect(canonicalRes.status).toBe(200);
 	const canonicalBody = await canonicalRes.text();
+	// Canonical carries the resolved FULL hash: short/long variants of the
+	// same cast dedupe onto one URL (the JSON renderer and MCP tool
+	// advertise the same form).
 	expect(canonicalBody).toContain(
-		'<link rel="canonical" href="https://forkcaster.xyz/zoo/0x895ecc74" />',
+		`<link rel="canonical" href="https://forkcaster.xyz/zoo/${FULL_HASH}" />`,
 	);
 	expect(canonicalBody).toContain(
-		'<meta property="og:url" content="https://forkcaster.xyz/zoo/0x895ecc74" />',
+		`<meta property="og:url" content="https://forkcaster.xyz/zoo/${FULL_HASH}" />`,
 	);
 	// Farcaster renders plain OG link cards (X-style) for forkcaster links:
 	// og:site_name labels the card, and NO fc:miniapp/fc:frame tags ship —

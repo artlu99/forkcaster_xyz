@@ -167,7 +167,10 @@ async function resolveByUsernameHash(
 	if (lookup.status === "error") throw new ShimUnavailableError(lookup.message);
 	if (lookup.status === "miss") return null;
 	if (!resolvesHash(lookup.cast.hash, hash)) return null;
-	return identityFromCast(lookup.cast, hash);
+	const identity = identityFromCast(lookup.cast, hash);
+	// Sparse cast data: the caller's username is as good as shim's.
+	if (identity.username === "") return { ...identity, username };
+	return identity;
 }
 
 // --- form B: longhash ---

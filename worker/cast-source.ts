@@ -17,6 +17,7 @@
 // No caching is introduced here: one fan-out per render keeps the last-used
 // badge and signed suppression trivially correct.
 
+import { sort } from "radash";
 import {
 	getCastByUsernameHash,
 	getFidByUsername,
@@ -90,8 +91,12 @@ export type RaceResult =
 
 /** Snapchain message timestamps count from 2021-01-01T00:00:00Z. */
 const FARCASTER_EPOCH = 1609459200;
-/** Hard per-provider cap, matching the other Shim calls in the worker. */
-const HARD_TIMEOUT_MS = 5000;
+/**
+ * Hard cap for every upstream call in the worker — each race leg and each
+ * Shim/enrichment call in cast-page rides on it. Shim's cold sharded
+ * lookups can otherwise hang 15s+.
+ */
+export const UPSTREAM_TIMEOUT_MS = 5000;
 
 function isFullHash(hash: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(hash);
@@ -266,9 +271,12 @@ function mapRawCast(
 	const embeds: ShimEmbed[] = (body.embeds ?? []).filter(
 		(embed) => typeof embed?.url === "string" || embed?.castId !== undefined,
 	);
-	// Latest message per user-data type wins.
+	// Latest message per user-data type wins — sort newest-first so the
+	// verdict doesn't depend on the gateway's row order (timestamps are
+	// Farcaster-epoch; only relative order matters).
 	const user: ShimCast["user"] = { fid: message.data?.fid };
-	for (const m of userMessages) {
+	const latestFirst = sort(userMessages, (m) => m.data?.timestamp ?? 0, true);
+	for (const m of latestFirst) {
 		const { type, value } = m.data?.userDataBody ?? {};
 		if (typeof value !== "string") continue;
 		if (type === "USER_DATA_TYPE_USERNAME") user.username = value;
@@ -308,11 +316,13 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 					`${base}/v1/castById?fid=${fid}&hash=${vars.hash}`,
 					signal,
 				);
-				const message = data as RawMessage | undefined;
-				if (status === 400 && !message?.hash) {
-					// {"error":"Failed to get cast"} — the raw nodes' not-found.
+				if (status === 400) {
+					// The raw nodes' not-found ({"error":"Failed to get cast"}).
+					// Non-ok bodies are never parsed below, so the status code is
+					// the whole verdict here.
 					return { kind: "miss", provider: id };
 				}
+				const message = data as RawMessage | undefined;
 				if (!message?.hash || !message.data?.castAddBody) {
 					return { kind: "error", provider: id, message: `HTTP ${status}` };
 				}
@@ -403,7 +413,7 @@ export async function raceCast(
 	for (const provider of eligible) {
 		const controller = new AbortController();
 		controllers.set(provider.id, controller);
-		const timer = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS);
+		const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 		const providerStartedAt = Date.now();
 		const settled = (kind: ProviderTiming["kind"]): void => {
 			timings.push({
@@ -411,7 +421,9 @@ export async function raceCast(
 				// Aborted losers are race bookkeeping, not provider errors —
 				// record them as `abort` so public errorRate stays honest.
 				// (The 5s hard-timeout abort fires while the race is still
-				// pending, so raceOver is false there and it stays an `error`.)
+				// pending, so raceOver is false there and it stays an `error`.
+				// A real error landing in the post-resolution grace window is
+				// likewise relabeled `abort` — accepted telemetry fuzz.)
 				kind:
 					kind === "error" && raceOver && controller.signal.aborted
 						? "abort"
@@ -470,6 +482,9 @@ export async function raceCast(
 		// Arm the box only once a partial has landed and no complete provider
 		// has authoritatively missed — otherwise there is nothing to wake for.
 		if (partial !== null && !completeMiss && Date.now() < deadline) {
+			// A prior iteration's box may still be armed (it lost the last
+			// race to a provider event) — clear it before re-arming.
+			if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
 			events.push(
 				new Promise<RaceEvent>((resolve) => {
 					deadlineTimer = setTimeout(

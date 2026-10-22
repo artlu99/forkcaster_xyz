@@ -7,6 +7,7 @@ import {
 	type ProviderTiming,
 	raceCast,
 	shimProvider,
+	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
 	type ClientDefinition,
@@ -76,14 +77,15 @@ async function unfurl(
 ): Promise<UnfurlResult | undefined> {
 	// In production, a Worker fetching another workers.dev Worker on the same
 	// account is blocked (Cloudflare error 1042) — the UNFURL service binding
-	// is the sanctioned path. Local dev/tests have no live binding, so after
-	// a binding failure we fall back to plain fetch, which is not subject to
-	// that restriction.
+	// is the sanctioned path. The plain-fetch fallback exists for local
+	// dev/tests (and dev with a configured-but-unresolvable binding); in
+	// production a binding failure means the fallback is expected to hit
+	// 1042 — ≤5s wasted on an already-degraded path, never a wrong answer.
 	const target = `https://unfurl.artlu.workers.dev/?u=${encodeURIComponent(url)}`;
 	if (env?.UNFURL) {
 		try {
 			const res = await env.UNFURL.fetch(target, {
-				signal: AbortSignal.timeout(5000),
+				signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
 			});
 			if (res.ok) {
 				return (await res.json().catch(() => undefined)) as
@@ -95,7 +97,7 @@ async function unfurl(
 		}
 	}
 	try {
-		const res = await fetch(target, { signal: AbortSignal.timeout(5000) });
+		const res = await fetch(target, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
 		if (!res.ok) return undefined;
 		return (await res.json().catch(() => undefined)) as
 			| UnfurlResult
@@ -110,7 +112,7 @@ async function unfurl(
 // author.pfp the bundle reads unguarded. Hydration failure drops the quote —
 // old casts get pruned from Snapchain when storage lapses.
 async function fetchQuote(hash: string): Promise<ShimCast | undefined> {
-	return getCastByHash(hash, AbortSignal.timeout(5000));
+	return getCastByHash(hash, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
 }
 
 function toCastData(
@@ -189,7 +191,8 @@ function openGraphFor(
 	};
 }
 
-function escapeHtml(s: string): string {
+// Shared with transparency.tsx — the only escaper for hand-built HTML.
+export function escapeHtml(s: string): string {
 	return s
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")
@@ -291,7 +294,7 @@ const CLIENT_SCRIPT = `<script>
         var sep = cur.indexOf("|");
         var tail = sep === -1 ? "" : cur.slice(sep);
         document.cookie = "${LAST_CLIENT_COOKIE}=" + id + tail +
-          ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax";
+          ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax;Secure";
         return;
       }
       el = el.parentNode;
@@ -656,12 +659,13 @@ export function shell(
 				.filter(Boolean)
 				.join("\n")
 		: "";
+	// Title is escaped: it embeds the route's percent-decoded username.
 	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 ${canonicalMeta}
 ${meta}
 <link rel="alternate" type="application/json" href="?format=json" />
@@ -840,8 +844,10 @@ function castPage(
 	const actions = clientActionsHtml(vars, signed, prefs.slug);
 	// Dual-serve canonicalization: every host renders the same page, but
 	// points at the primary origin so link equity and unfurlers agree.
+	// The full hash additionally dedupes short/long variants of the same
+	// cast — the form the JSON renderer and MCP tool already advertise.
 	const canonicalUrl = primaryOrigin
-		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.hash}`
+		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.fullHash}`
 		: undefined;
 	const auto = autoOpenUi(prefs, signed, vars, noredirect);
 	return shell(
@@ -885,9 +891,11 @@ function linkOnlyPage(
 }
 
 function notFoundPage(username: string, hash: string): string {
+	// username is a percent-decoded route param — escape it before it
+	// reaches the body (the title is escaped inside shell()).
 	return shell(
 		`${username}/${hash} · forkcaster`,
-		`<p class="notice">Cast not found: ${username}/${hash}. The username or hash may be wrong, or the cast was deleted.</p>`,
+		`<p class="notice">Cast not found: ${escapeHtml(username)}/${hash}. The username or hash may be wrong, or the cast was deleted.</p>`,
 	);
 }
 
@@ -984,7 +992,7 @@ export async function resolveCast(
 	let signed: boolean | null = null;
 	const fid = foundCast.fid ?? foundCast.user?.fid;
 	if (fid !== undefined) {
-		const signedPromise = getSignedStatus(fid, AbortSignal.timeout(5000));
+		const signedPromise = getSignedStatus(fid, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
 		if (opts.boxMs === null) {
 			signed = await signedPromise;
 		} else {
@@ -1111,7 +1119,7 @@ export async function renderQuotesFragment(
 ): Promise<{ status: 200 | 404 | 503; html: string }> {
 	const outcome = await shimProvider.fetchCast(
 		{ username, hash },
-		AbortSignal.timeout(5000),
+		AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
 	);
 	if (outcome.kind === "error") return { status: 503, html: "" };
 	if (outcome.kind === "miss") return { status: 404, html: "" };

@@ -42,6 +42,8 @@ app.post("/prefs", async (c) => {
 		path: "/",
 		maxAge: LAST_CLIENT_MAX_AGE,
 		sameSite: "Lax",
+		// HTTPS-only in prod; localhost dev is a secure context.
+		secure: true,
 	});
 	return c.body(null, 204);
 });
@@ -78,7 +80,14 @@ app.get("/race-stats.json", async (c) => {
 	return c.json(snapshot, 200, { "cache-control": "public, max-age=21600" });
 });
 
-app.get("/api/", (c) => c.json({ name: "Cloudflare" }));
+// Agent-facing index: the JSON surfaces this worker serves.
+app.get("/api/", (c) =>
+	c.json({
+		cast: "/{username}/{hash}?format=json",
+		raceStats: "/race-stats.json",
+		transparency: "/transparency?format=json",
+	}),
+);
 
 app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const { username, hash } = c.req.param();
@@ -112,9 +121,7 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 				Promise.resolve(
 					dataset.writeDataPoint({
 						indexes: [
-							resolved.kind === "found"
-								? (resolved.provider ?? "none")
-								: resolved.kind,
+							resolved.kind === "found" ? resolved.provider : resolved.kind,
 						],
 						blobs: [
 							resolved.timings

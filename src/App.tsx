@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'preact/hooks'
 import { siGithub, siGithubsponsors, siOpenaccess } from 'simple-icons'
 import { iconMark } from '../shared/icon-mark.ts'
+// Dependency-free — same parser the worker uses for the cookie.
+import { LAST_CLIENT_COOKIE, parseClientCookie } from '../worker/clients.ts'
 import './App.css'
 
 function delayNote(delay: number): string {
@@ -18,7 +20,9 @@ function AutoToggle() {
   const [auto, setAuto] = useState<'on' | 'off' | undefined>(undefined)
   const [delay, setDelay] = useState(5)
   useEffect(() => {
-    const m = document.cookie.match(/(?:^|; )fc_client=([^;]*)/)
+    const m = document.cookie.match(
+      new RegExp(`(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)`),
+    )
     // Cookie values may be percent-encoded (server Set-Cookie encodes
     // "|" as %7C).
     let v = ''
@@ -27,14 +31,9 @@ function AutoToggle() {
     } catch {
       v = m ? m[1] : ''
     }
-    v = v.replace(/%7C/gi, '|')
-    const sep = v.indexOf('|')
-    if (sep === -1) return
-    for (const part of v.slice(sep + 1).split('|')) {
-      if (part === 'auto-on') setAuto('on')
-      else if (part === 'auto-off') setAuto('off')
-      else if (/^d[0-5]$/.test(part)) setDelay(Number(part.slice(1)))
-    }
+    const prefs = parseClientCookie(v)
+    if (prefs.auto) setAuto(prefs.auto)
+    if (prefs.delay !== undefined) setDelay(prefs.delay)
   }, [])
   const save = (body: { auto?: 'on' | 'off'; delay?: number }) => {
     fetch('/prefs', {

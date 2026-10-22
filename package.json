@@ -26,6 +26,7 @@
 		"hono": "^4.13.13",
 		"preact": "^11.0.1",
 		"preact-render-to-string": "^6.8.0",
+		"radash": "^12.1.1",
 		"react-farcaster-embed": "^1.11.0",
 		"simple-icons": "^16.35.0",
 		"zod": "4.6.7"

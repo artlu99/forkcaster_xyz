@@ -4,28 +4,22 @@
 // read from lmdis through the per-isolate TTL cache; absent → dashes).
 // HTML for humans, JSON for agents (same negotiation as cast pages).
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
-import { shell } from "./cast-page.tsx";
+import type { ProviderId } from "./cast-source.ts";
+import { escapeHtml, shell } from "./cast-page.tsx";
 
 // Public provider roster — names included on purpose (transparency over
-// infra obscurity). Mirrors worker/cast-source.ts; keep in sync.
-const PROVIDERS = [
-	{
-		id: "shim",
-		host: "shim.artlu.xyz",
-	},
-	{
-		id: "farcaster-tv",
-		host: "farcaster.tv (partial)",
-	},
-	{
-		id: "haatz",
-		host: "haatz.quilibrium.com",
-	},
-	{
-		id: "snap",
-		host: "snap.farcaster.xyz:3381",
-	},
-];
+// infra obscurity). Keyed by ProviderId so a roster change in
+// cast-source.ts fails the typecheck here instead of drifting silently.
+const PROVIDER_HOSTS: Record<ProviderId, string> = {
+	shim: "shim.artlu.xyz",
+	"farcaster-tv": "farcaster.tv (partial)",
+	haatz: "haatz.quilibrium.com",
+	snap: "snap.farcaster.xyz:3381",
+};
+const PROVIDERS = Object.entries(PROVIDER_HOSTS).map(([id, host]) => ({
+	id: id as ProviderId,
+	host,
+}));
 
 const REPO = "https://github.com/artlu99/forkcaster_xyz";
 
@@ -53,15 +47,6 @@ const DOMAINS = {
 		},
 	],
 };
-
-const escapeHtml = (text: string): string =>
-	text.replace(
-		/[&<>"']/g,
-		(c) =>
-			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-				c
-			] ?? c,
-	);
 
 function statsTable(snapshot: Snapshot | null | undefined): string {
 	const head = ["id", "wins", "p50", "p95", "err%", "host"]
