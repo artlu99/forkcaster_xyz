@@ -39,6 +39,14 @@ import type { TemplateVars } from "./client-registry.ts";
 import { getCastByHash, getSignedStatus, type ShimCast } from "./shim.ts";
 import { escapeHtml, shell } from "./shell.tsx";
 
+// react-farcaster-embed emits every card anchor as a bare target="_blank"
+// (url cards, images, body links, the Show-on-Farcaster icon) with no rel.
+// Browsers imply noopener there today, but spell it out server-side for
+// parity with the stats links the live-stats script builds (cast-scripts.ts).
+function hardenBlankTargets(html: string): string {
+	return html.replaceAll('target="_blank"', 'target="_blank" rel="noopener"');
+}
+
 async function unfurl(
 	url: string,
 	env?: { UNFURL?: Fetcher },
@@ -291,16 +299,18 @@ export async function renderCastHtml(
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
 	try {
-		const cardHtml = renderToString(
-			(await FarcasterEmbed({
-				username,
-				hash,
-				castData: toCastData(cast, unfurlMap, quotes),
-			})) as never,
-		).replace(
-			STATS_ROW,
-			() =>
-				`<div class="farcaster-embed-stats" data-username="${escapeHtml(username)}" data-hash="${escapeHtml(hash)}">`,
+		const cardHtml = hardenBlankTargets(
+			renderToString(
+				(await FarcasterEmbed({
+					username,
+					hash,
+					castData: toCastData(cast, unfurlMap, quotes),
+				})) as never,
+			).replace(
+				STATS_ROW,
+				() =>
+					`<div class="farcaster-embed-stats" data-username="${escapeHtml(username)}" data-hash="${escapeHtml(hash)}">`,
+			),
 		);
 		// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the
 		// cast: author handle as title, cast text as description, first
@@ -372,12 +382,14 @@ export async function renderQuotesFragment(
 		if (!quote?.hash) continue;
 		try {
 			const quoteUsername = quote.user?.username ?? username;
-			const card = renderToString(
-				(await FarcasterEmbed({
-					username: quoteUsername,
-					hash: quote.hash,
-					castData: toCastData(quote),
-				})) as never,
+			const card = hardenBlankTargets(
+				renderToString(
+					(await FarcasterEmbed({
+						username: quoteUsername,
+						hash: quote.hash,
+						castData: toCastData(quote),
+					})) as never,
+				),
 			)
 				// Quote cards carry no live-stats slot: drop the zero-stub row.
 				.replace(STATS_ROW, "$1");
