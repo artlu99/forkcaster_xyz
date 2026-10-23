@@ -265,7 +265,11 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	const wantsJson =
 		c.req.query("format") === "json" ||
 		(c.req.header("Accept") ?? "").includes("application/json");
-	const resolved = await resolveProfile(username, { timeline: wantsJson });
+	const resolved = await resolveProfile(username, {
+		timeline: wantsJson,
+		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
+		signed: true,
+	});
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
 			resolved,

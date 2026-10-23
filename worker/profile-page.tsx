@@ -31,6 +31,7 @@ import {
 	getCastsAndReplies,
 	getCastByHash,
 	getFidByUsername,
+	getSignedStatus,
 	getUserByFid,
 	hUrl,
 	getUsernameByFid,
@@ -55,20 +56,24 @@ export type ResolvedProfile =
 			casts: ProfileCast[];
 			/** false when the timeline call failed — render "unavailable", not 404. */
 			timelineOk: boolean;
+			/** The ban signal (shim /signed/{fid}); null = unknown ⇒ fail open. */
+			signed: boolean | null;
 	  }
 	| { kind: "not-found" }
 	| { kind: "unreachable" };
 
 /**
  * Resolve once: /f (identity verdict) fires in parallel with the timeline
- * when one is wanted; /user/{fid} follows the fid. Only the identity stage
- * can produce 404/503. `timeline: false` (the identity-card profile page)
- * skips the timeline call entirely — the casts skeleton page owns the list;
- * the JSON twin and the casts page fetch it.
+ * when one is wanted; /user/{fid} and the signed check follow the fid. Only
+ * the identity stage can produce 404/503. `timeline: false` (the
+ * identity-card profile page) skips the timeline call entirely — the casts
+ * page owns the list; the JSON twin and the casts page fetch it.
+ * `signed: true` runs the ban signal (shim /signed/{fid}) — null (unknown)
+ * fails open, exactly like the cast action row.
  */
 export async function resolveProfile(
 	username: string,
-	opts: { timeline?: boolean } = {},
+	opts: { timeline?: boolean; signed?: boolean } = {},
 ): Promise<ResolvedProfile> {
 	const castsPromise = opts.timeline
 		? getCastsAndReplies(
@@ -96,6 +101,15 @@ export async function resolveProfile(
 	if (user !== undefined && user.username == null) {
 		return { kind: "not-found" };
 	}
+	let signed: boolean | null = null;
+	if (opts.signed) {
+		// The ban signal rides the same trust seat as identity (shim).
+		// getSignedStatus never throws; unknown (null) fails open.
+		signed = await getSignedStatus(
+			fid,
+			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+		);
+	}
 	const timeline = castsPromise ? await castsPromise : null;
 	return {
 		kind: "found",
@@ -104,6 +118,7 @@ export async function resolveProfile(
 		fid,
 		casts: timeline ? (timeline.casts as ProfileCast[]) : [],
 		timelineOk: timeline ? timeline.ok : true,
+		signed,
 	};
 }
 
@@ -173,6 +188,11 @@ const PROFILE_STYLE = `<style>
 .profile-copy.profile-copied .icon-copy { display: none; }
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
 .profile-empty { color: var(--muted); font-size: 14px; }
+/* Unsigned way out: both pills ship in the SSR HTML (byte-identical for
+   every device — no UA sniffing); CSS picks by pointer class. pointer:none
+   devices see both — a graceful default. */
+@media (pointer: coarse) { .fine-only { display: none; } }
+@media (pointer: fine) { .coarse-only { display: none; } }
 .casts-page-head { margin: 8px 0 0; }
 .casts-page-head .profile-handle a { color: var(--muted); text-decoration: none; }
 .casts-page-head .profile-handle a:hover, .casts-page-head .profile-handle a:focus-visible { color: var(--accent); }
@@ -243,6 +263,31 @@ export function renderProfileHtml(
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
 
+	// The way out depends on the ban signal: signed === false means the
+	// account is read-only on farcaster.xyz — "Open on Farcaster" would be
+	// futile, so unsigned visitors get the hardcoded non-signer clients
+	// instead (Quorum on desktop — the flagship client for non-signers —
+	// Quilcast on mobile). Both pills ship; CSS picks by pointer. Unknown
+	// (shim down / no answer) fails open: Farcaster stays offered.
+	//
+	// Destinations are hardcoded (owner-directed), not registry-driven:
+	// - Quorum desktop: the homepage stub — the verified desktop target
+	//   (quorum-mobile registers quorummobile:// on iOS/Android only, and
+	//   source-verified profile deep links exist but are device-unverified:
+	//   quorummobile://feed?profileFid={fid}&profileUsername={username}
+	//   seeds SocialFeedModal's nav stack with a profile screen;
+	//   profileUsername is optional, fid is required — see
+	//   app/(tabs)/feed/index.tsx initialProfile).
+	// - Quilcast mobile: the owner-provided /u/ profile route.
+	const actions =
+		profile.signed === false
+			? `<p class="actions">
+<a class="pill fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>
+<a class="pill coarse-only" href="https://quilcast.com/u/${encodeURIComponent(handle)}">Open in Quilcast</a>
+</p>
+<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
+			: `<p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>`;
+
 	// Waypoint law, strict dial: the identity card IS the page — no cast
 	// list here. The list lives on /{username}/casts-and-replies.
 	const body = `
@@ -256,7 +301,7 @@ ${bio ? `<p class="profile-bio">${escapeHtml(bio)}</p>` : ""}
 <ul class="profile-facts">${facts.join("")}</ul>
 </div>
 </div>
-<p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>
+${actions}
 <p class="actions"><a class="pill" href="/${encodeURIComponent(handle)}/casts-and-replies">Casts and replies</a></p>`;
 
 	const og = {
@@ -325,6 +370,12 @@ export function renderProfileJson(
 		}));
 	if (rows.length > 0) body.casts = rows;
 	if (!timelineOk) body.note = "timeline unavailable";
+	// Same note contract as the cast JSON: signed === false is the only
+	// trigger; unknown/failed fails open.
+	if (profile.signed === false) {
+		body.note =
+			"account hasn't signed the social smart contract; the profile is read-only on farcaster.xyz";
+	}
 	body.farcaster = `https://farcaster.xyz/${handle}`;
 	return { status: 200, body };
 }

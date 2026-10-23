@@ -77,6 +77,10 @@ function defaultMock(): typeof fetch {
 	return shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: true,
+		},
 		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
 	});
 }
@@ -581,6 +585,61 @@ test("profile card escapes hostile upstream text (XSS regression)", async () => 
 	);
 	// And the hostile pfp stays an inert, escaped attribute value.
 	expect(body).toContain('src="https://img.test/x&quot; onerror=&quot;alert(1)"');
+});
+
+test("signed-check unavailable fails open: Farcaster stays offered", async () => {
+	// No /signed mock — the check throws internally, null ⇒ fail open.
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+	});
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	expect(body).toContain(">Open on Farcaster</a>");
+	expect(body).not.toContain("Open in Quorum");
+	expect(body).not.toContain("Open in Quilcast");
+	expect(body).not.toContain("read-only on farcaster.xyz");
+});
+
+test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async () => {
+	// decent-artlu's real state: fid 3319217 has NOT signed the social
+	// smart contract — farcaster.xyz is read-only for them, so "Open on
+	// Farcaster" would be futile.
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: false,
+		},
+	});
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// Farcaster is not offered at all.
+	expect(body).not.toContain(">Open on Farcaster</a>");
+	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu"');
+	// The hardcoded unsigned way out: BOTH pills ship in the SSR HTML (no
+	// UA sniffing), CSS picks by pointer class. Quilcast deep-links the
+	// owner-provided /u/ profile route.
+	expect(body).toContain(
+		'class="pill fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>',
+	);
+	expect(body).toContain(
+		`class="pill coarse-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
+	);
+	expect(body).toContain("read-only on farcaster.xyz");
+	// The identity card is otherwise unchanged.
+	expect(body).toContain("Bass Ackwards.");
+	expect(body).toContain(`href="/${USERNAME}/casts-and-replies">Casts and replies</a>`);
+
+	// The JSON twin carries the same note the cast JSON uses.
+	const json = await app.request(`/${USERNAME}?format=json`);
+	const data = await json.json();
+	expect(data.note).toContain("social smart contract");
 });
 
 test("casts-and-replies lowercases the username before lookup", async () => {
