@@ -90,6 +90,31 @@ export const CLIENTS: ClientDefinition[] = [
 		},
 		requiresSigned: true,
 	},
+	// Quilibrium's decentralized group messenger renders Farcaster casts in
+	// its Feed tab. Scheme VERIFIED against the open-source app
+	// (github.com/QuilibriumNetwork/quorum-mobile): the committed
+	// AndroidManifest registers scheme "quorummobile" (+ exp+quorum-mobile,
+	// no host) and expo-router automatic linking maps the URL path onto
+	// routes — app/feed.tsx redirects /feed to the Feed tab PRESERVING query
+	// params, where FeedScreen reads castHashPrefix (+ optional username)
+	// and SocialFeedModal auto-opens that thread on mount: full 40-hex
+	// hashes take the direct hypersnap lookup (isFullCastHash), short
+	// prefixes resolve via the username+URL path — hence {fullHash}.
+	// WEB HAS NO CAST ROUTE: quorummessenger.com serves the quorum-desktop
+	// build (react-router: /messages, /spaces, /farcaster…; /feed 404s), so
+	// the https href is an honest homepage stub and the scheme is the only
+	// per-cast target. The Feed tab requires a Farcaster account connected
+	// inside Quorum — without one the app lands on its sign-in screen.
+	{
+		id: "quorum",
+		title: "Quorum",
+		logoUrl: "/logos/quorum.png",
+		web: "https://www.quorummessenger.com/",
+		deeplink: {
+			scheme: "quorummobile://feed?castHashPrefix={fullHash}&username={username}",
+			androidPackage: "com.quilibrium.quorummobile",
+		},
+	},
 	{
 		id: "firefly",
 		title: "Firefly",

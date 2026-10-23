@@ -174,11 +174,18 @@ describe("clientsForPage", () => {
 			...VARS,
 			fid: undefined,
 		}).map((c) => c.id);
-		expect(withoutFid).toEqual(["farcaster", "firefly", "quilcast", "neynar"]);
+		expect(withoutFid).toEqual([
+			"farcaster",
+			"quorum",
+			"firefly",
+			"quilcast",
+			"neynar",
+		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
 		expect(withFid).toEqual([
 			"farcaster",
+			"quorum",
 			"firefly",
 			"quilcast",
 			"neynar",
@@ -198,6 +205,7 @@ describe("clientsForPage", () => {
 		// Guards the roster against homepage stubs/removed clients sneaking back.
 		expect(CLIENTS.map((c) => c.id)).toEqual([
 			"farcaster",
+			"quorum",
 			"firefly",
 			"quilcast",
 			"neynar",
@@ -281,9 +289,9 @@ describe("deeplinkTargets", () => {
 });
 
 describe("roster native targets", () => {
-	test("farcaster is the only client with a native scheme", () => {
+	test("farcaster and quorum are the clients with native schemes", () => {
 		const withScheme = CLIENTS.filter((c) => c.deeplink).map((c) => c.id);
-		expect(withScheme).toEqual(["farcaster"]);
+		expect(withScheme).toEqual(["farcaster", "quorum"]);
 	});
 
 	test("farcaster's scheme resolves per cast; androidPackage composes intent", () => {
@@ -306,6 +314,30 @@ describe("roster native targets", () => {
 		expect(html).toContain('href="https://farcaster.xyz/zoo/0x895ecc74"');
 		expect(html).toContain(
 			'data-scheme="farcaster://zoo/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+		);
+		expect(html).toContain("data-intent=");
+	});
+
+	test("quorum's scheme routes the Feed tab to the cast thread", () => {
+		const quorum = findClient("quorum");
+		expect(quorum).toBeDefined();
+		// Verified against quorum-mobile: /feed → FeedRedirect preserves
+		// query params → FeedScreen reads castHashPrefix + username →
+		// SocialFeedModal auto-opens the thread (full hash ⇒ direct
+		// hypersnap lookup). The web href is a homepage stub — the scheme
+		// is the only per-cast target.
+		const targets = deeplinkTargets(quorum as ClientDefinition, VARS);
+		expect(targets.scheme).toBe(
+			"quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&username=zoo",
+		);
+		expect(targets.intent).toBe(
+			"intent://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&username=zoo#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end",
+		);
+		const html = clientPill(quorum as ClientDefinition, VARS, false);
+		// Canonical target is ALWAYS the (stub) web href.
+		expect(html).toContain('href="https://www.quorummessenger.com/"');
+		expect(html).toContain(
+			'data-scheme="quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo"',
 		);
 		expect(html).toContain("data-intent=");
 	});

@@ -100,7 +100,7 @@ h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: v
 <h2>Tool — get_cast_link</h2>
 <ul>
 <li><strong>Identify a cast</strong>: full 40-hex hash on its own, or author (username or fid) + short hash.</li>
-<li><strong>Pick a client</strong>: farcaster, firefly, neynar, quilcast, vibeshift — or all at once.</li>
+<li><strong>Pick a client</strong>: farcaster, quorum, firefly, neynar, quilcast, vibeshift — or all at once.</li>
 <li><strong>Get</strong>: verified per-client URLs, the farcaster-canonical URL, and the author's signed status (pass-through — never suppressed).</li>
 </ul>
 <h2>More</h2>

@@ -203,10 +203,12 @@ test("GET /:username/:hash hides the farcaster link when the author has not sign
 	// ...but the registry's requiresSigned clients (farcaster) are suppressed.
 	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).not.toContain("https://farcaster.xyz/decent-artlu/0xbb54368f");
-	// With farcaster gone, no rendered client has a native scheme — the
-	// mobile deeplink script doesn't ship on this page at all.
-	expect(body).not.toContain("data-scheme");
-	expect(body).not.toContain("pointer: coarse");
+	// Quorum (native scheme, no requiresSigned) still renders — its
+	// quorummobile:// pill ships data-scheme and the deeplink script.
+	expect(body).toContain("quorummobile://");
+	// farcaster itself contributes no native target on this page.
+	expect(body).not.toContain("farcaster://");
+	expect(body).toContain("pointer: coarse");
 	expect(body).toContain("social smart contract");
 });
 
