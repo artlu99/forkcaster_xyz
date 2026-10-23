@@ -113,12 +113,20 @@ test("profile page renders the full hydrated entity as the identity card", async
 	expect(body).toContain(`href="https://basescan.org/address/${ADDRESS}"`);
 	// proNft is typed but never rendered (no known shape).
 	expect(body).not.toContain("proNft");
-	// Skeleton rows route into the cast waypoints, with markers.
-	expect(body).toContain(`href="/${USERNAME}/${CAST_HASH}"`);
-	expect(body).toContain(`href="/${USERNAME}/${REPLY_HASH}"`);
-	expect(body).toContain("↳ reply");
-	expect(body).toContain("[image]");
-	expect(body).toContain("Recent casts");
+	// Waypoint law, strict dial: NO cast list on the identity card — the
+	// list lives on /{username}/casts-and-replies, one pill away.
+	expect(body).toContain(
+		`href="/${USERNAME}/casts-and-replies">Casts and replies</a>`,
+	);
+	expect(body).not.toContain("Recent casts");
+	expect(body).not.toContain('class="profile-cast"');
+	// The identity card skips the timeline call entirely (only /f + /user).
+	const fetchMock = globalThis.fetch as ReturnType<typeof mock>;
+	expect(
+		fetchMock.mock.calls.every((c) =>
+			!String(c[0]).includes("casts-and-replies"),
+		),
+	).toBe(true);
 	// OG meta: profile type, summary card (avatar is not a cast image).
 	expect(body).toContain('<meta property="og:type" content="profile" />');
 	expect(body).toContain(
@@ -190,9 +198,6 @@ test("optional entity fields vanish instead of rendering empty", async () => {
 	// No address facts without primaryAddress (match the row, not the CSS
 	// class name in the <style> block).
 	expect(body).not.toContain('<li class="profile-address">');
-	// ok+empty timeline is a real "No casts yet." — not an outage note.
-	expect(body).toContain("No casts yet.");
-	expect(body).not.toContain("unavailable right now");
 });
 
 test("a malformed primaryAddress renders as bare text — no copy, no explorer", async () => {
@@ -268,7 +273,7 @@ test("shim unreachable ⇒ 503 + Retry-After (HTML error page; JSON error body)"
 
 // --- Timeline fails soft: never a 404 once identity is proven -----------------
 
-test("timeline success:false ⇒ 200 with an unavailable note (HTML + JSON note)", async () => {
+test("timeline failure fails soft: JSON carries the note, the identity page is untouched", async () => {
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
@@ -277,29 +282,15 @@ test("timeline success:false ⇒ 200 with an unavailable note (HTML + JSON note)
 			error: "getHubFidByUsername: User not found",
 		},
 	});
-	const res = await app.request(`/${USERNAME}`);
-	expect(res.status).toBe(200);
-	const body = await res.text();
-	expect(body).toContain("Recent casts are unavailable right now.");
-	// The identity card still renders in full.
-	expect(body).toContain("Bass Ackwards.");
-
 	const json = await app.request(`/${USERNAME}?format=json`);
 	const data = await json.json();
 	expect(data.note).toBe("timeline unavailable");
 	expect("casts" in data).toBe(false);
-});
 
-test("timeline network failure ⇒ same fail-soft note", async () => {
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]:
-			new Error("shim timeline down"),
-	});
-	const res = await app.request(`/${USERNAME}`);
-	expect(res.status).toBe(200);
-	expect(await res.text()).toContain("Recent casts are unavailable right now.");
+	// The identity page never fetched the timeline, so it never mentions it.
+	const html = await app.request(`/${USERNAME}`);
+	expect(html.status).toBe(200);
+	expect(await html.text()).not.toContain("unavailable right now");
 });
 
 // --- Agent JSON twin ----------------------------------------------------------
@@ -424,47 +415,77 @@ const REPLIES = {
 			hash: REPLY_HASH,
 			text: "second cast",
 			timestamp: CAST_TS,
-			embeds: [],
+			// Quote embed with no /h mock ⇒ hydration fails, quote dropped.
+			embeds: [{ castId: { fid: 3854, hash: "0x11111111deadbeef" } }],
 			parentCastId: { fid: FID, hash: REPLY_HASH },
 		},
-		// No hash ⇒ unroutable — must be skipped, not rendered as a dead row.
+		// No hash ⇒ unroutable — must be skipped, not rendered as a dead card.
 		{ fid: FID, text: "hashless", timestamp: CAST_TS, embeds: [] },
+		{
+			fid: FID,
+			hash: "0xcccccccccccccccccccccccccccccccccccccccc",
+			text: "linking example.com today",
+			timestamp: CAST_TS,
+			// URL embed with no unfurl mock ⇒ hostname fallback card.
+			embeds: [{ url: "https://example.com/article" }],
+		},
 	],
 };
 
 function repliesMock(): typeof fetch {
 	return shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=3`]: REPLIES,
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: REPLIES,
 	});
 }
 
-test("casts-and-replies renders the fixed-3 skeleton with no identity card", async () => {
+test("casts-and-replies renders full embed cards with the profile's OG preview", async () => {
 	globalThis.fetch = repliesMock();
 	const res = await app.request(`/${USERNAME}/casts-and-replies`);
 	expect(res.status).toBe(200);
 	expect(res.headers.get("content-type") ?? "").toContain("text/html");
 
 	const body = await res.text();
-	// Key-form title; minimal handle head with the way out (profile + Farcaster).
+	// Key-form title; head with the way out (profile + Farcaster).
 	expect(body).toContain(
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
-	expect(body).toContain("<h1 class=\"profile-title\">@decent-artlu</h1>");
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
 	expect(body).toContain(
 		`href="https://farcaster.xyz/${USERNAME}">Open on Farcaster</a>`,
 	);
-	// Skeleton rows only: the routable ones render, the hashless one doesn't.
+	// The OG preview is IDENTICAL to the profile's (entity-backed card);
+	// canonical stays on this page's own URL.
+	expect(body).toContain(
+		'<meta property="og:title" content="Ultra (@decent-artlu)" />',
+	);
+	expect(body).toContain(
+		`<meta property="og:image" content="${USER.pfpUrl}" />`,
+	);
+	// Full embed cards — the individual cast page's rendering, author
+	// attached from the hydrated entity. Hashless rows are skipped.
+	expect(body).toContain("farcaster-embed");
+	expect(body).toContain(
+		'<p class="farcaster-embed-author-display-name">Ultra</p>',
+	);
 	expect(body).toContain("first cast");
-	expect(body).toContain(`href="/${USERNAME}/${REPLY_HASH}"`);
-	expect(body).toContain("↳ reply");
+	expect(body).toContain("second cast");
+	expect(body).toContain("farcaster-embed-farcaster-link");
 	expect(body).not.toContain("hashless");
-	// No identity card (match the element, not the CSS class in <style>),
-	// no scripts at all, no advertised JSON twin.
+	// Per-card live-stats slot + the multi-slot fill script.
+	expect(body).toContain(`data-hash="${CAST_HASH}"`);
+	expect(body).toContain(`data-hash="${REPLY_HASH}"`);
+	expect(body).toContain("farcaster.tv/");
+	// The unfurl pipeline ran (no unfurl mock ⇒ hostname fallback card).
+	expect(body).toContain("example.com");
+	// The unhydrated quote (no /h mock) is dropped, not rendered broken.
+	expect(body).not.toContain("quote-embeds");
+	// No identity card, no pills/telemetry/auto-open, no advertised twin.
 	expect(body).not.toContain('class="profile-card"');
-	expect(body).not.toContain("Bass Ackwards");
-	expect(body).not.toContain("<script");
+	expect(body).not.toContain("data-client");
+	expect(body).not.toContain("window.__fk");
+	expect(body).not.toContain("data-auto");
 	expect(body).not.toContain('rel="alternate"');
 });
 
@@ -498,7 +519,7 @@ test("casts-and-replies: /f miss ⇒ 404; /f unreachable ⇒ 503 + Retry-After",
 test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=3`]: {
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
 			success: false,
 			error: "getHubFidByUsername: User not found",
 		},
@@ -511,7 +532,7 @@ test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=3`]: {
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
 			success: true,
 			casts: [],
 		},

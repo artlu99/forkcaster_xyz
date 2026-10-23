@@ -19,7 +19,6 @@ import {
 	renderCastsHtml,
 	renderProfileHtml,
 	renderProfileJson,
-	resolveCastsPage,
 	resolveConversationAlias,
 	resolveProfile,
 } from "./profile-page.tsx";
@@ -261,11 +260,12 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	}
 	// Resolve once, render twice — same negotiation as the cast route:
 	// ?format=json wins over Accept; only strict application/json Accept
-	// also negotiates JSON.
+	// also negotiates JSON. The identity-card page skips the timeline call
+	// entirely; the JSON twin keeps serving recent casts.
 	const wantsJson =
 		c.req.query("format") === "json" ||
 		(c.req.header("Accept") ?? "").includes("application/json");
-	const resolved = await resolveProfile(username);
+	const resolved = await resolveProfile(username, { timeline: wantsJson });
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
 			resolved,
@@ -292,20 +292,22 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	);
 });
 
-// The casts skeleton page (/{username}/casts-and-replies): a list, not a
-// feed — fixed 3 rows, no identity card, no JSON twin. Patterns are disjoint
-// from the 0x-hashed cast route above, so registration order carries no
-// shadow risk; the /f verdict and fail-soft timeline match the profile.
+// The casts page (/{username}/casts-and-replies): the ONE list surface —
+// every cast rendered in full through the individual cast page's pipeline
+// (embed SSR + unfurl + quote hydration + per-card live-stats slot), with
+// the profile's OG preview. Patterns are disjoint from the 0x-hashed cast
+// route above; the /f verdict and fail-soft timeline match the profile.
 app.get("/:username/casts-and-replies", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {
 		return c.body(null, 404);
 	}
-	const resolved = await resolveCastsPage(username);
-	const { status, html } = renderCastsHtml(
+	const resolved = await resolveProfile(username, { timeline: true });
+	const { status, html } = await renderCastsHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+		c.env,
 	);
 	return c.html(
 		html,

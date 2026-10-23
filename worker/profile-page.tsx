@@ -15,10 +15,21 @@
 // apply to both variants — unlike casts, a profile has no fail-open
 // content source when shim is unreachable.
 
+import { renderToString } from "preact-render-to-string";
+import { FarcasterEmbed } from "react-farcaster-embed";
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
-import { isImageUrl } from "./cast-data.ts";
+import {
+	quoteHashesOf,
+	STATS_ROW,
+	toCastData,
+	urlEmbedsOf,
+	type UnfurlResult,
+} from "./cast-data.ts";
+import { hardenBlankTargets, unfurl } from "./cast-page.tsx";
+import { LIVE_STATS_SCRIPT } from "./cast-scripts.ts";
 import {
 	getCastsAndReplies,
+	getCastByHash,
 	getFidByUsername,
 	getUserByFid,
 	hUrl,
@@ -30,9 +41,6 @@ import { escapeHtml, shell } from "./shell.tsx";
 
 /** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
 export const TIMELINE_LIMIT = 10;
-
-/** Snippet clamp for skeleton rows — routing matter, not reading matter. */
-const TEXT_CLAMP = 200;
 
 /** casts-and-replies rows add reply parenting on top of the canonical shape. */
 type ProfileCast = ShimCast & {
@@ -52,20 +60,23 @@ export type ResolvedProfile =
 	| { kind: "unreachable" };
 
 /**
- * Resolve once: /f (identity verdict) races the timeline (independent —
- * keyed by username); /user/{fid} follows the fid. Only the identity stage
- * can produce 404/503: a /f miss is shim's authoritative "no such username",
- * and a sparse /user shape (username null after the fid resolved) is shim
- * contradicting itself — paranoid parity, also not-found.
+ * Resolve once: /f (identity verdict) fires in parallel with the timeline
+ * when one is wanted; /user/{fid} follows the fid. Only the identity stage
+ * can produce 404/503. `timeline: false` (the identity-card profile page)
+ * skips the timeline call entirely — the casts skeleton page owns the list;
+ * the JSON twin and the casts page fetch it.
  */
 export async function resolveProfile(
 	username: string,
+	opts: { timeline?: boolean } = {},
 ): Promise<ResolvedProfile> {
-	const castsPromise = getCastsAndReplies(
-		username,
-		TIMELINE_LIMIT,
-		AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-	);
+	const castsPromise = opts.timeline
+		? getCastsAndReplies(
+				username,
+				TIMELINE_LIMIT,
+				AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+			)
+		: null;
 	let fid: number | undefined;
 	try {
 		fid = await getFidByUsername(
@@ -85,14 +96,14 @@ export async function resolveProfile(
 	if (user !== undefined && user.username == null) {
 		return { kind: "not-found" };
 	}
-	const timeline = await castsPromise;
+	const timeline = castsPromise ? await castsPromise : null;
 	return {
 		kind: "found",
 		// Entity failure fails soft: a username-only card still proves identity.
 		user: user ?? { fid, username },
 		fid,
-		casts: timeline.casts as ProfileCast[],
-		timelineOk: timeline.ok,
+		casts: timeline ? (timeline.casts as ProfileCast[]) : [],
+		timelineOk: timeline ? timeline.ok : true,
 	};
 }
 
@@ -104,7 +115,6 @@ const ICON_ATTRS =
 	'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 const COPY_ICON = `<svg ${ICON_ATTRS} class="icon-copy"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 const CHECK_ICON = `<svg ${ICON_ATTRS} class="icon-check"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-const EXTERNAL_ICON = `<svg ${ICON_ATTRS} class="icon-external"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
 
 /**
  * The one client script a profile ships: write the full address to the
@@ -162,82 +172,29 @@ const PROFILE_STYLE = `<style>
 .profile-copy .icon-check { display: none; }
 .profile-copy.profile-copied .icon-copy { display: none; }
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
-.profile-explorer { color: var(--muted); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 3px; }
-.profile-explorer:hover, .profile-explorer:focus-visible { color: var(--accent); }
-.profile-explorer svg { width: 10px; height: 10px; }
-.profile-casts { margin: 28px 0 0; }
-.profile-casts h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
-.profile-cast { display: block; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0 0 8px; transition: border-color 0.15s ease; }
-.profile-cast:hover, .profile-cast:focus-visible { border-color: var(--accent); }
-.profile-cast-text { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
-.profile-cast-meta { color: var(--muted); font-size: 12px; margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .profile-empty { color: var(--muted); font-size: 14px; }
 .casts-page-head { margin: 8px 0 0; }
 .casts-page-head .profile-handle a { color: var(--muted); text-decoration: none; }
 .casts-page-head .profile-handle a:hover, .casts-page-head .profile-handle a:focus-visible { color: var(--accent); }
+.casts-embeds { display: flex; flex-direction: column; gap: 14px; margin: 24px 0 0; }
 </style>`;
 
-function formatDate(unixSeconds: number): string {
-	const date = new Date(unixSeconds * 1000);
-	if (Number.isNaN(date.getTime())) return "";
-	return new Intl.DateTimeFormat("en-US", {
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-	}).format(date);
-}
-
-/** Collapse whitespace, clamp to the skeleton budget. */
-function clampText(text: string | undefined): string {
-	const flat = (text ?? "").replace(/\s+/g, " ").trim();
-	return flat.length > TEXT_CLAMP ? `${flat.slice(0, TEXT_CLAMP - 1)}…` : flat;
-}
-
-/** An address renders (truncated) only in honest shapes; garbage stays text. */
+/** An address renders (linked, truncated) only in honest shapes; garbage stays text. */
 function isAddress(value: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
 function addressFacts(address: string): string {
 	const truncated = `${address.slice(0, 6)}…${address.slice(-4)}`;
-	const code = `<code title="${escapeHtml(address)}">${escapeHtml(truncated)}</code>`;
-	if (!isAddress(address)) return `<li class="profile-address">${code}</li>`;
-	// Opinionated explorer: Basescan (the Farcaster-ecosystem chain), not
-	// Etherscan — forkcaster picks one surface and stops.
-	const explorer = `<a class="profile-explorer" href="https://basescan.org/address/${escapeHtml(address)}">Basescan${EXTERNAL_ICON}</a>`;
-	const copy = `<button type="button" class="profile-copy" data-copy="${escapeHtml(address)}" aria-label="Copy address">${COPY_ICON}${CHECK_ICON}</button>`;
-	return `<li class="profile-address">${code}${copy}${explorer}</li>`;
-}
-
-function skeletonList(handle: string, casts: ProfileCast[]): string {
-	const rows: string[] = [];
-	for (const cast of casts) {
-		// No hash ⇒ unroutable — skip rather than render a dead row.
-		if (!cast.hash) continue;
-		const href = `/${encodeURIComponent(handle)}/${cast.hash}`;
-		const text = clampText(cast.text);
-		const markers: string[] = [];
-		const date =
-			typeof cast.timestamp === "number" ? formatDate(cast.timestamp) : "";
-		if (date) markers.push(`<span>${escapeHtml(date)}</span>`);
-		if (cast.parentCastId) markers.push("<span>↳ reply</span>");
-		if (
-			(cast.embeds ?? []).some(
-				(embed) => typeof embed.url === "string" && isImageUrl(embed.url),
-			)
-		) {
-			markers.push("<span>[image]</span>");
-		}
-		rows.push(`<a class="profile-cast" href="${escapeHtml(href)}">${
-			text ? `<p class="profile-cast-text">${escapeHtml(text)}</p>` : ""
-		}${
-			markers.length > 0
-				? `<p class="profile-cast-meta">${markers.join("")}</p>`
-				: ""
-		}</a>`);
+	if (!isAddress(address)) {
+		return `<li class="profile-address"><code title="${escapeHtml(address)}">${escapeHtml(truncated)}</code></li>`;
 	}
-	if (rows.length === 0) return "";
-	return `<section class="profile-casts"><h2>Recent casts</h2>${rows.join("\n")}</section>`;
+	// The truncated code IS the Basescan link (new window — an external
+	// surface, so it never navigates away from the waypoint). Opinionated
+	// explorer: Basescan (the Farcaster-ecosystem chain), not Etherscan.
+	const linked = `<a href="https://basescan.org/address/${escapeHtml(address)}" target="_blank" rel="noopener"><code title="${escapeHtml(address)}">${escapeHtml(truncated)}</code></a>`;
+	const copy = `<button type="button" class="profile-copy" data-copy="${escapeHtml(address)}" aria-label="Copy address">${COPY_ICON}${CHECK_ICON}</button>`;
+	return `<li class="profile-address">${linked}${copy}</li>`;
 }
 
 function notFoundPage(username: string, key = username): string {
@@ -272,7 +229,7 @@ export function renderProfileHtml(
 	if (profile.kind === "unreachable") {
 		return { status: 503, html: unavailablePage(username) };
 	}
-	const { user, fid, casts, timelineOk } = profile;
+	const { user, fid } = profile;
 	// Identity is proven by now, but keep the honest fallback chain anyway.
 	const handle = user.username ?? username;
 	const displayName = user.displayName ?? null;
@@ -286,18 +243,8 @@ export function renderProfileHtml(
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
 
-	let timelineHtml: string;
-	if (casts.length > 0) {
-		timelineHtml = skeletonList(handle, casts);
-	} else {
-		// ok+empty = a real "no casts yet"; !ok = shim hiccup — never a 404.
-		timelineHtml = `<p class="profile-empty">${
-			timelineOk
-				? "No casts yet."
-				: "Recent casts are unavailable right now."
-		}</p>`;
-	}
-
+	// Waypoint law, strict dial: the identity card IS the page — no cast
+	// list here. The list lives on /{username}/casts-and-replies.
 	const body = `
 ${PROFILE_STYLE}
 <div class="profile-card">
@@ -310,7 +257,7 @@ ${bio ? `<p class="profile-bio">${escapeHtml(bio)}</p>` : ""}
 </div>
 </div>
 <p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>
-${timelineHtml}`;
+<p class="actions"><a class="pill" href="/${encodeURIComponent(handle)}/casts-and-replies">Casts and replies</a></p>`;
 
 	const og = {
 		ogTitle: title,
@@ -382,52 +329,26 @@ export function renderProfileJson(
 	return { status: 200, body };
 }
 
-// --- Casts skeleton page (/{username}/casts-and-replies) ----------------------
+// --- Casts page (/{username}/casts-and-replies) -------------------------------
 //
-// The farcaster.xyz URL-shape mirror, under the waypoint law: a list, not a
-// feed. Fixed 3 rows, no identity card (no /user call — the entity is the
-// profile's job), no JSON twin. The /f verdict and the fail-soft timeline
-// semantics are identical to the profile route.
+// The farcaster.xyz URL-shape mirror, and the ONE list surface: the profile
+// is the identity card (no casts), this page renders each cast IN FULL —
+// exactly the individual cast page's pipeline: react-farcaster-embed SSR,
+// unfurl-enriched URL embeds (≤3 per cast), /h-hydrated quotes (≤3 per
+// cast), blank-target hardening, live-stats slot per card (the stats
+// script fills every slot). Shim's timeline rows carry no inline user, so
+// the profile entity is attached as the author. The OG preview is IDENTICAL
+// to the profile's (same card visual, deeper page); canonical/og:url stay
+// on this page's own URL. No JSON twin — the link is omitted rather than
+// advertise HTML. The /f verdict and the fail-soft timeline semantics are
+// identical to the profile route.
 
-/** Fixed size — a list, not a feed; the timeline route has no cursor anyway. */
-export const CASTS_PAGE_LIMIT = 3;
-
-export type ResolvedCasts =
-	| { kind: "found"; casts: ProfileCast[]; timelineOk: boolean }
-	| { kind: "not-found" }
-	| { kind: "unreachable" };
-
-export async function resolveCastsPage(
-	username: string,
-): Promise<ResolvedCasts> {
-	const castsPromise = getCastsAndReplies(
-		username,
-		CASTS_PAGE_LIMIT,
-		AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-	);
-	let fid: number | undefined;
-	try {
-		fid = await getFidByUsername(
-			username,
-			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-		);
-	} catch {
-		return { kind: "unreachable" };
-	}
-	if (fid === undefined) return { kind: "not-found" };
-	const timeline = await castsPromise;
-	return {
-		kind: "found",
-		casts: timeline.casts as ProfileCast[],
-		timelineOk: timeline.ok,
-	};
-}
-
-export function renderCastsHtml(
-	profile: ResolvedCasts,
+export async function renderCastsHtml(
+	profile: ResolvedProfile,
 	username: string,
 	primaryOrigin?: string,
-): { status: 200 | 404 | 503; html: string } {
+	env?: { UNFURL?: Fetcher },
+): Promise<{ status: 200 | 404 | 503; html: string }> {
 	const key = `${username}/casts-and-replies`;
 	if (profile.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, key) };
@@ -435,36 +356,113 @@ export function renderCastsHtml(
 	if (profile.kind === "unreachable") {
 		return { status: 503, html: unavailablePage(username, key) };
 	}
-	const { casts, timelineOk } = profile;
+	const { user, fid, casts, timelineOk } = profile;
+	const handle = user.username ?? username;
+	const displayName = user.displayName ?? null;
+
+	// Shim timeline rows are author-implied — attach the hydrated entity so
+	// each card renders exactly like it does on its own cast page.
+	const author: ShimCast["user"] = {
+		fid,
+		username: handle,
+		displayName: displayName ?? undefined,
+		pfpUrl: user.pfpUrl ?? undefined,
+		bio: user.bio ?? undefined,
+	};
+
+	// Enrichment up front, allSettled: every failure degrades alone
+	// (unfurl ⇒ hostname-only card, quotes ⇒ dropped) and never 404s a
+	// proven identity.
+	const unfurlJobs = casts.flatMap((cast) =>
+		urlEmbedsOf(cast).map((u) => unfurl(u, env)),
+	);
+	const quoteJobs = casts.flatMap((cast) =>
+		quoteHashesOf(cast).map((h) =>
+			getCastByHash(h, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)),
+		),
+	);
+	const unfurlResults = await Promise.allSettled(unfurlJobs);
+	const quoteResults = await Promise.allSettled(quoteJobs);
+
+	const cards: string[] = [];
+	let unfurlIndex = 0;
+	let quoteIndex = 0;
+	for (const cast of casts) {
+		// No hash ⇒ unroutable — skip rather than render a dead card.
+		if (!cast.hash) continue;
+		const unfurlMap = new Map<string, UnfurlResult | undefined>();
+		for (const u of urlEmbedsOf(cast)) {
+			const r = unfurlResults[unfurlIndex++];
+			unfurlMap.set(u, r?.status === "fulfilled" ? r.value : undefined);
+		}
+		const quotes = quoteHashesOf(cast).map(() => {
+			const r = quoteResults[quoteIndex++];
+			return r?.status === "fulfilled" ? r.value : undefined;
+		});
+		try {
+			const card = hardenBlankTargets(
+				renderToString(
+					(await FarcasterEmbed({
+						username: handle,
+						hash: cast.hash,
+						castData: toCastData(
+							{ ...cast, user: author },
+							unfurlMap,
+							quotes,
+						),
+					})) as never,
+				),
+				// Same stats slot the individual cast page ships — the
+				// live-stats script fills every slot on the page.
+			).replace(
+				STATS_ROW,
+				() =>
+					`<div class="farcaster-embed-stats" data-username="${escapeHtml(handle)}" data-hash="${escapeHtml(cast.hash as string)}">`,
+			);
+			cards.push(card);
+		} catch {
+			// A broken card must never take the list down.
+		}
+	}
+
 	const listHtml =
-		casts.length > 0
-			? skeletonList(username, casts)
+		cards.length > 0
+			? `<section class="casts-embeds">${cards.join("\n")}</section>`
 			: `<p class="profile-empty">${
 					timelineOk
 						? "No casts yet."
 						: "Recent casts are unavailable right now."
 				}</p>`;
+
 	const body = `
 ${PROFILE_STYLE}
 <div class="casts-page-head">
-<h1 class="profile-title">@${escapeHtml(username)}</h1>
-<p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a> · <a href="https://farcaster.xyz/${escapeHtml(username)}">Open on Farcaster</a></p>
+<h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
+<p class="profile-handle">@${escapeHtml(handle)} · <a href="/${encodeURIComponent(handle)}">Profile</a> · <a href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>
 </div>
 ${listHtml}`;
+
+	// OG preview identical to the profile's: same title/description/image.
+	const og = {
+		ogTitle: displayName ? `${displayName} (@${handle})` : `@${handle}`,
+		description:
+			(user.bio ? user.bio.replace(/\s+/g, " ").trim() : "") ||
+			`Casts from @${handle} on Farcaster`,
+		...(user.pfpUrl ? { image: user.pfpUrl } : {}),
+	};
+	const canonicalUrl = primaryOrigin
+		? `${primaryOrigin}/${encodeURIComponent(handle)}/casts-and-replies`
+		: undefined;
 	return {
 		status: 200,
 		html: shell(
 			`${key} · forkcaster`,
 			body,
-			{
-				ogTitle: `@${username} — casts and replies`,
-				description: `Recent casts and replies from @${username} on Farcaster`,
-			},
-			// No client script: no address row, so nothing to copy.
-			undefined,
-			primaryOrigin
-				? `${primaryOrigin}/${encodeURIComponent(username)}/casts-and-replies`
-				: undefined,
+			og,
+			// The live-stats script fills one slot per card; nothing else —
+			// no pills, no telemetry, no auto-open on this surface.
+			LIVE_STATS_SCRIPT,
+			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.
 			false,

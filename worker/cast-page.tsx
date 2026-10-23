@@ -44,11 +44,14 @@ import { escapeHtml, shell } from "./shell.tsx";
 // (url cards, images, body links, the Show-on-Farcaster icon) with no rel.
 // Browsers imply noopener there today, but spell it out server-side for
 // parity with the stats links the live-stats script builds (cast-scripts.ts).
-function hardenBlankTargets(html: string): string {
+// Shared with the casts skeleton page, which renders the same cards.
+export function hardenBlankTargets(html: string): string {
 	return html.replaceAll('target="_blank"', 'target="_blank" rel="noopener"');
 }
 
-async function unfurl(
+// Exported for the casts skeleton page (same enrichment pipeline, same
+// binding + plain-fetch fallback semantics).
+export async function unfurl(
 	url: string,
 	env?: { UNFURL?: Fetcher },
 ): Promise<UnfurlResult | undefined> {
