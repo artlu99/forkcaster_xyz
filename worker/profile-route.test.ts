@@ -521,6 +521,47 @@ test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 	expect(await empty.text()).toContain("No casts yet.");
 });
 
+test("profile card escapes hostile upstream text (XSS regression)", async () => {
+	// displayName/bio/pfp are untrusted upstream text — same escaper as the
+	// cast pages, but pinned here because og attributes + the identity card
+	// are new interpolation sites. Note: displayName never reaches <title>
+	// (the key-form title carries the handle, not the entity).
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: {
+				fid: FID,
+				username: USERNAME,
+				displayName: `</title><script>alert(1)</script> & "quotes"`,
+				bio: `<b>bold</b> & 'single' "double"`,
+				pfpUrl: `https://img.test/x" onerror="alert(1)`,
+			},
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
+	});
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// Nothing raw survives: the XSS vectors are gone, and `alert(1)` may only
+	// appear inside escaped attribute values (entities can't break out).
+	expect(body).not.toContain("<script>alert(1)");
+	expect(body).not.toContain('" onerror=');
+	expect(body).not.toContain("<b>bold</b>");
+	// h1 + og:title render the escaped form…
+	expect(body).toContain(
+		'<h1 class="profile-title">&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;quotes&quot;</h1>',
+	);
+	expect(body).toContain('content="&lt;/title&gt;&lt;script&gt;');
+	// …as does the bio paragraph.
+	expect(body).toContain(
+		"<p class=\"profile-bio\">&lt;b&gt;bold&lt;/b&gt; &amp; &#39;single&#39; &quot;double&quot;</p>",
+	);
+	// And the hostile pfp stays an inert, escaped attribute value.
+	expect(body).toContain('src="https://img.test/x&quot; onerror=&quot;alert(1)"');
+});
+
 test("casts-and-replies lowercases the username before lookup", async () => {
 	globalThis.fetch = repliesMock();
 	const res = await app.request("/Decent-Artlu/casts-and-replies");
