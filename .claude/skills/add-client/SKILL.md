@@ -1,6 +1,6 @@
 ---
 name: add-client
-description: Add a new Farcaster client app to forkcaster's client registry — verify the client's per-cast URL format (and optional native deeplink scheme), add the registry entry with a provenance comment and self-hosted logo, update the roster-guard tests, run the checks, and open a PR per CONTRIBUTING.md. Use whenever the user asks to add, register, support, or list a new Farcaster client app in forkcaster ("add Supercast", "support <app>", "can casts open in <app>?"), or to verify, fix, or update an existing client's URL format, deeplink scheme, logo, or signed-rule behavior. Do not skip this skill for anything that touches worker/client-registry.ts.
+description: Add a new Farcaster client app to forkcaster's client registry — verify the client's per-cast URL format (and optional native deeplink scheme), add the registry entry with a provenance comment and self-hosted logo, update the roster-guard tests, run the checks, and open a PR per CONTRIBUTING.md. Use whenever the user asks to add, register, support, or list a new Farcaster client app in forkcaster ("add Supercast", "support <app>", "can casts open in <app>?"), or to verify, fix, or update an existing client's URL format, deeplink scheme, logo, signed-rule, or external-link-gate behavior. Do not skip this skill for anything that touches worker/client-registry.ts.
 ---
 
 # Add a Farcaster client to forkcaster's registry
@@ -39,6 +39,18 @@ House test cast (real, used across the repo's tests):
 - full hash: `0x895ecc7415208bfb6105a8cb675f391f19cb9e2c`
 - short hash: `0x895ecc74`
 - author: username `zoo`, fid `10215`
+
+Gate canonicals (the external-link gate, Phase 4 — real casts):
+
+- **has an external link**: `kenny/0xa26d1f38` — full
+  `0xa26d1f3861326cf24977995ec9dd24145e87a2fb`, fid `2210`, signed; one x.com
+  URL embed. A links-only client must show this cast.
+- **no external links**: `decent-artlu/0xbb54368f` — full
+  `0xbb54368f40166b1be5f56048151adf2a3900a54a`, fid `3319217`, unsigned (this
+  is also the Phase 3 cast); quote-only embed, no URL embeds. A links-only
+  client must not show this cast. (Its cast-route test fixture deliberately
+  models a URL embed to exercise the unfurl-fallback path — gate-test against
+  the real shapes, not that fixture.)
 
 The live check passes when the client's own site renders *this* cast (say what
 rendered: text snippet, cast card, etc.). A page that merely loads — a 200 that
@@ -90,7 +102,41 @@ known-unsigned authors (the check fails open; unknown state hides nothing). Test
 against the known-unsigned author cast: `decent-artlu/0xbb54368f`. When unsure,
 omit the flag — failing open is the designed default.
 
-## Phase 4 — Write the registry entry
+## Phase 4 — The external-link gate (cast eligibility)
+
+Some clients only serve a subset of casts. Linkcast, for example, is a links-only
+feed: a cast with no outbound link simply does not exist there. If — and only if —
+the client's product verifiably excludes link-less casts, set
+`requiresExternalLinks: true`.
+
+**Evidence bar** (same admission discipline as the URL format): confirm from the
+client's own behavior that link-less casts are absent — e.g. its feed shows only
+link-bearing casts, or a link-less cast is reported ineligible on its site.
+Live-check both gate canonicals (see the house-cast block above):
+`kenny/0xa26d1f38` must appear in the client; `decent-artlu/0xbb54368f` must
+not. Record that evidence in the entry's provenance comment.
+
+One predicate — `blockedByLinkGate` in `worker/client-registry.ts` — enforces the
+flag on every surface, with the classifier living in `worker/cast-data.ts`
+(`classifyUrl` / `hasExternalLinks`):
+
+| Surface | Behavior |
+| --- | --- |
+| Pill row | hidden unless the cast carries ≥1 external URL embed |
+| Unknown state (link-only fallback page — no cast data) | hidden — **fail-closed**, the deliberate opposite of `requiresSigned` (unknown author state fails open because unsigned authors are rare; unknown cast state proves nothing about eligibility, and link-less casts are the norm) |
+| Auto-open | never redirects to a gated client on an ineligible cast (gated via `clientsForPage`) |
+| MCP `get_cast_link` | omitted from `all`; a direct request answers the `client_ineligible` error |
+
+What counts as **external**: everything at `farcaster.xyz`, `warpcast.com`,
+`forkcaster.xyz`, `warpcats.com`, and every registry client's web host
+(`CLIENT_HOSTS`, derived from the `web` templates — **your new client's host
+becomes internal automatically** once you add the entry). Quote embeds and
+images never qualify; unparseable URLs fail open as external. Known accepted
+edge: a cast whose only link points at a client itself (e.g. a Linkcast
+self-link) classifies internal and gets no pill, even if the client's own feed
+would include it — accepted, do not special-case.
+
+## Phase 5 — Write the registry entry
 
 Append to `CLIENTS` in `worker/client-registry.ts`. **Append at the end**: registry
 order is the fallback pill order, the rank tiebreak, and the MCP listing order, and
@@ -106,6 +152,7 @@ a new client is unranked until the offline rank job publishes its next snapshot.
     web: "https://<host>/<path-with-{placeholders}>",
     // deeplink: { scheme: "<scheme>://…", androidPackage: "<pkg>" },  // only if verified
     // requiresSigned: true,  // only if verified
+    // requiresExternalLinks: true,  // only if the client verifiably serves link casts only (Phase 4)
 },
 ```
 
@@ -119,7 +166,7 @@ Rules the guardrail tests enforce:
 - Default `status` is `active`; you should not be adding `eol`/`suspended` entries
   in a "add client" task.
 
-## Phase 5 — Logo
+## Phase 6 — Logo
 
 Add one self-hosted file at `public/logos/<slug>.svg` (or `.png` downscaled to
 ≤64px). Get the mark from the client's own assets (repo, app icon, press kit).
@@ -128,7 +175,7 @@ on every page view — a tracking surface the transparency page would have to
 declare — and hotlinks break (referrer checks, 403s). There is deliberately no
 remote-fallback path; if the user asks for one, explain this and decline.
 
-## Phase 6 — Update the roster-guard tests
+## Phase 7 — Update the roster-guard tests
 
 `worker/clients.test.ts` asserts the roster **by design** — a new entry must fail
 these tests until they are updated. Touch exactly:
@@ -136,17 +183,25 @@ these tests until they are updated. Touch exactly:
 1. `"every registry client renders today: no stale entries"` — add the id to the
    expected roster array (its loop then checks your `web` template resolves).
 2. The two `clientsForPage` ordered-list assertions — add the id to both expected
-   lists (or only the with-`fid` list if your template uses `{fid}`).
+   lists (or only the with-`fid` list if your template uses `{fid}`). These stay
+   valid even for a link-gated client: they pass no gate argument, so a gated
+   client never appears in them — which is exactly why the next item exists.
 3. `"farcaster and quorum are the clients with native schemes"` — rename/extend
    with your id **only if you added a `deeplink`**.
 4. Add a per-client test following the quorum pattern: assert the resolved scheme
    (and intent, if `androidPackage`) against the house cast, and that the pill
    `href` stays the web URL.
+5. External-link gate (Phase 4 only): the `"no roster client is link-gated
+   today"` guard in `clients.test.ts`'s gate describe fails by design when you
+   set `requiresExternalLinks` — update it to assert your entry is the
+   exception. The gate's behavior tests use a pushed `"gate-links"` fixture in
+   `clients.test.ts` / `mcp.test.ts` / `cast-route.test.ts`; optionally point
+   one at your real slug.
 
 `cast-route.test.ts` needs no changes (its assertions are subsets) — optionally add
 a `toContain('data-client="<slug>"')` to the action-row test.
 
-## Phase 7 — Checks
+## Phase 8 — Checks
 
 ```sh
 bun run lint
@@ -159,7 +214,7 @@ printed local URL at `/zoo/0x895ecc74`, confirm the new pill renders with its lo
 and correct target. **Never deploy** — `bun run deploy` is the owner's explicit,
 manual step.
 
-## Phase 8 — Pull request
+## Phase 9 — Pull request
 
 Open a PR per `CONTRIBUTING.md`: describe what changed and why, and say how you
 verified it — which commands ran, which URLs you checked, what rendered. Do not
@@ -171,8 +226,11 @@ push/deploy to production.
   live-check results) and ask how to proceed.
 - "Just add it as a placeholder/stub" → decline; the stub policy exists so every
   pill works when clicked.
+- Setting `requiresExternalLinks` without eligibility evidence → decline; the
+  gate is a product claim about which casts exist on the client, not a hunch
+  (Phase 4).
 - Suspended/eol id reuse → never.
-- Hotlinked or remote logo → decline (Phase 5).
+- Hotlinked or remote logo → decline (Phase 6).
 - Editing the MCP landing card or README roster for a new client → don't; they
   are generic by design. The registry comment is where the roster knowledge lives.
 - A template with `http://`, an unverified scheme, or an unknown placeholder

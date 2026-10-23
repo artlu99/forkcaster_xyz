@@ -20,6 +20,8 @@ mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 
 const { app } = await import("./index.ts");
 
+import { CLIENTS, type ClientDefinition } from "./client-registry.ts";
+
 const CAST_TEXT = "omg so relevant!";
 const SHORT_HASH = "0x895ecc74";
 const FULL_HASH = "0x895ecc7415208bfb6105a8cb675f391f19cb9e2c";
@@ -50,6 +52,9 @@ const originalFetch = globalThis.fetch;
 
 // decent-artlu's cast: same data, but fid 3319217 has NOT signed, and its
 // URL embed has no unfurl mock — hostname fallback must still render.
+// NOTE: the REAL decent-artlu/0xbb54368f is quote-only (no URL embeds) —
+// the canonical no-external-links cast for the link gate. This fixture
+// deliberately models a URL embed to exercise the unfurl fallback path.
 // The hash matches its route: the race's central validation rejects any
 // found cast that doesn't resolve the requested hash.
 const ARTLU_HASH = "0xbb54368fa1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
@@ -58,6 +63,23 @@ const ARTLU_CAST = {
 	fid: 3319217,
 	hash: ARTLU_HASH,
 	embeds: [{ url: "https://example.com/article" }],
+};
+// The canonical external-link cast (fid 2210, signed): one x.com URL
+// embed — exactly the shape a links-only client exists to serve.
+const KENNY_CAST = {
+	fid: 2210,
+	hash: "0xa26d1f3861326cf24977995ec9dd24145e87a2fb",
+	text: "gold getting cracked by AI before Bitcoin would be pretty funny\n\nhttps://x.com/MarathonFusion/status/2113001073019662481",
+	embeds: [{ url: "https://x.com/MarathonFusion/status/2113001073019662481" }],
+	timestamp: 1_792_683_778,
+	user: {
+		fid: 2210,
+		username: "kenny",
+		displayName: "kenny",
+		pfpUrl:
+			"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/0d23c0b3-a56e-45e0-f97c-80b6c251c900/original",
+		bio: "the coordination protocol - /poidh - @poidhbot",
+	},
 };
 // fid with no /signed mock: its signed-check fetch throws (fail-open path).
 // Its quote embed has no /h mock either: hydration fails, quote is dropped.
@@ -129,6 +151,12 @@ beforeEach(() => {
 		}
 		if (url === "https://shim.artlu.xyz/wc/decent-artlu/0xbb54368f") {
 			return Response.json({ success: true, cast: ARTLU_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/wc/kenny/0xa26d1f38") {
+			return Response.json({ success: true, cast: KENNY_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/signed/2210") {
+			return Response.json({ success: true, signed: true });
 		}
 		if (url === "https://shim.artlu.xyz/signed/3319217") {
 			return Response.json({ success: true, signed: false });
@@ -1107,5 +1135,42 @@ test("rank snapshot reorders pills (never hides); null keeps registry order", as
 		);
 	} finally {
 		resetClientRankStore();
+	}
+});
+
+// The external-link gate, end to end, against the canonical casts: a
+// `requiresExternalLinks` client (fixture, pushed/popped — no roster
+// entry uses the flag today) renders its pill only on casts that carry
+// an external URL embed. kenny/0xa26d1f38 is the canonical with-link
+// cast (one x.com embed, signed author); zoo/0x895ecc74 is the house
+// cast (image-only — genuinely link-less; the REAL no-external canonical
+// is decent-artlu/0xbb54368f, quote-only, but its route fixture models a
+// URL embed for the unfurl-fallback path, so it can't play this role).
+test("link gate: gated client pill only on casts with an external link", async () => {
+	const GATED: ClientDefinition = {
+		id: "gate-links",
+		title: "GateLinks",
+		logoUrl: "/logos/farcaster.svg",
+		web: "https://links.test/c/{fullHashRaw}",
+		requiresExternalLinks: true,
+	};
+	CLIENTS.push(GATED);
+	try {
+		// Image-only cast: nothing external ⇒ pill hidden.
+		const noLinks = await app.request("/zoo/0x895ecc74");
+		expect(noLinks.status).toBe(200);
+		expect(await noLinks.text()).not.toContain('data-client="gate-links"');
+
+		// Cast with an external URL embed ⇒ pill offered.
+		const withLink = await app.request("/kenny/0xa26d1f38");
+		expect(withLink.status).toBe(200);
+		const body = await withLink.text();
+		expect(body).toContain('data-client="gate-links"');
+		// {fullHashRaw} of kenny's cast, bare hex, no 0x.
+		expect(body).toContain(
+			'href="https://links.test/c/a26d1f3861326cf24977995ec9dd24145e87a2fb"',
+		);
+	} finally {
+		CLIENTS.pop();
 	}
 });

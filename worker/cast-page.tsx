@@ -19,6 +19,7 @@ import {
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
+	hasExternalLinks,
 	imageUrlsOf,
 	type UnfurlResult,
 	quoteHashesOf,
@@ -106,6 +107,7 @@ function castPage(
 	primaryOrigin?: string,
 	noredirect = false,
 	rank?: RankSnapshot | null,
+	externalLinks?: boolean,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -115,7 +117,13 @@ function castPage(
 		signed === false
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
 			: "";
-	const actions = clientActionsHtml(vars, signed, prefs.slug, rank);
+	const actions = clientActionsHtml(
+		vars,
+		signed,
+		prefs.slug,
+		rank,
+		externalLinks,
+	);
 	// Dual-serve canonicalization: every host renders the same page, but
 	// points at the primary origin so link equity and unfurlers agree.
 	// The full hash additionally dedupes short/long variants of the same
@@ -123,7 +131,7 @@ function castPage(
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.fullHash}`
 		: undefined;
-	const auto = autoOpenUi(prefs, signed, vars, noredirect);
+	const auto = autoOpenUi(prefs, signed, vars, noredirect, externalLinks);
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${auto.html}${cardHtml}${notice}${actions}`,
@@ -141,11 +149,12 @@ function linkOnlyPage(
 	rank?: RankSnapshot | null,
 ): string {
 	// No provider resolved the cast: signed state is unknown, which fails
-	// open — every registry client is offered. The route hash is used as-is
-	// (it may be short-form); the {fullHash} slot degrades to it. No fid is
-	// known, so any future fid-gated client would be skipped here.
-	// Auto-open fires here too (the cast lives in the client), with the
-	// {fullHash} slot degraded to the route hash.
+	// open — every registry client is offered. External-link state is
+	// unknown too, and that gate is fail-closed: requiresExternalLinks
+	// clients stay hidden here. The route hash is used as-is (it may be
+	// short-form); the {fullHash} slot degrades to it, and no fid is known,
+	// so any future fid-gated client would be skipped here. Auto-open
+	// fires here too (the cast lives in the client).
 	const prefs: ClientPrefs = { slug };
 	const auto = autoOpenUi(
 		prefs,
@@ -336,7 +345,8 @@ export async function renderCastHtml(
 		};
 		return {
 			status: 200,
-			// signed === false is the only hide trigger; unknown fails open.
+			// Signed unknown fails open; the link gate is fail-closed, but
+			// the cast is in hand here, so its state is always known.
 			html: castPage(
 				vars,
 				cardHtml,
@@ -347,6 +357,7 @@ export async function renderCastHtml(
 				primaryOrigin,
 				noredirect,
 				rank,
+				hasExternalLinks(cast),
 			),
 		};
 	} catch {

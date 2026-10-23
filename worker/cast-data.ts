@@ -3,6 +3,7 @@
 // around this mapping (unfurl, quote hydration) lives in cast-page.tsx.
 
 import type { FarcasterEmbed } from "react-farcaster-embed";
+import { CLIENT_HOSTS } from "./client-registry.ts";
 import type { ShimCast } from "./shim.ts";
 
 export type CastData = NonNullable<
@@ -167,4 +168,89 @@ export function imageUrlsOf(cast: ShimCast): string[] {
 	return (cast.embeds ?? [])
 		.map((embed) => embed.url)
 		.filter((u): u is string => typeof u === "string" && isImageUrl(u));
+}
+
+// --- Internal/external link gate --------------------------------------------
+//
+// Classifies URL embeds as ecosystem-internal (warpcast.com, forkcaster's
+// own domains, and every registry client's web host via CLIENT_HOSTS) or
+// external (the open web). Consumer: client eligibility — a
+// `requiresExternalLinks` client (links-only, e.g. Linkcast) is offered
+// only when the cast carries an external URL embed; blockedByLinkGate
+// shares that predicate with the MCP tool. Deduped and uncapped like
+// urlEmbedsOf — the 3-cap stays an unfurl-budget concern.
+
+/** Hosts with no registry `web` template to derive them from. */
+const CORE_INTERNAL_HOSTS = [
+	"warpcast.com", // legacy app host (redirects to farcaster.xyz)
+	"forkcaster.xyz", // this service, primary origin
+	"warpcats.com", // this service, secondary origin
+] as const;
+
+const INTERNAL_HOSTS: ReadonlySet<string> = new Set([
+	...CORE_INTERNAL_HOSTS,
+	...CLIENT_HOSTS,
+]);
+
+export type LinkClass = "internal" | "external";
+
+/**
+ * Classifies a URL by its host (scheme ignored beyond http(s)
+ * parsability). Unparseable and non-web URLs classify as external —
+ * fail open: the worst case is one wasted link-card fetch. Hosts match
+ * equals-or-subdomain; the leading dot defeats lookalikes.
+ */
+export function classifyUrl(
+	url: string,
+	hosts: Iterable<string> = INTERNAL_HOSTS,
+): LinkClass {
+	try {
+		const parsed = new URL(url);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return "external";
+		}
+		const host = parsed.hostname.toLowerCase().replace(/\.+$/, "");
+		for (const known of hosts) {
+			if (host === known || host.endsWith(`.${known}`)) return "internal";
+		}
+		return "external";
+	} catch {
+		return "external";
+	}
+}
+
+/**
+ * External URL embeds in embed order — the uncapped sibling of
+ * urlEmbedsOf: same dedupe shape, plus the internal-link filter.
+ */
+export function externalUrlEmbedsOf(
+	cast: ShimCast,
+	hosts: Iterable<string> = INTERNAL_HOSTS,
+): string[] {
+	return Array.from(
+		new Set(
+			(cast.embeds ?? [])
+				.map((embed) => embed.url)
+				.filter(
+					(u): u is string =>
+						typeof u === "string" &&
+						u !== "" &&
+						!isImageUrl(u) &&
+						classifyUrl(u, hosts) === "external",
+				),
+		),
+	);
+}
+
+/**
+ * True iff the cast carries ≥1 external URL embed. The exact negative is
+ * what the eligibility gate relies on — no external links ⇒ a links-only
+ * client cannot serve this cast — while a true only means "might be
+ * eligible" (the client's own filtering decides the rest).
+ */
+export function hasExternalLinks(
+	cast: ShimCast,
+	hosts: Iterable<string> = INTERNAL_HOSTS,
+): boolean {
+	return externalUrlEmbedsOf(cast, hosts).length > 0;
 }

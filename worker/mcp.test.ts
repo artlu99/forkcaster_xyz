@@ -8,6 +8,9 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 const originalFetch = globalThis.fetch;
 
+import { CLIENTS, type ClientDefinition } from "./client-registry.ts";
+import { runGetCastLink, type ToolOutcome } from "./cast-ref.ts";
+import type { ShimEmbed } from "./shim.ts";
 import { mcpHandler } from "./mcp.ts";
 
 const SHORT = "0x895ecc74";
@@ -279,5 +282,92 @@ describe("tools/call get_cast_link", () => {
 		const result = json.result as { isError: boolean; content: Array<{ text: string }> };
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("client_unavailable");
+	});
+});
+
+// The external-link gate, MCP side: `requiresExternalLinks` clients
+// answer `client_ineligible` when the resolved cast carries no external
+// URL embed, and are omitted from the `all` record. Same predicate as
+// the pill row (blockedByLinkGate), same fail-closed posture. The
+// zod `client` enum is frozen at import, so these drive runGetCastLink
+// directly with a fixture client pushed into CLIENTS (popped in
+// finally — the roster guards run against the pristine registry).
+describe("external-link gate (MCP)", () => {
+	const GATED: ClientDefinition = {
+		id: "gate-links",
+		title: "GateLinks",
+		logoUrl: "/logos/farcaster.svg",
+		web: "https://links.test/c/{fullHashRaw}",
+		requiresExternalLinks: true,
+	};
+	const signal = AbortSignal.timeout(5000);
+
+	/** Resolves one shim-mocked cast shape against one target client. */
+	async function outcomeFor(
+		embeds: ShimEmbed[] | undefined,
+		client: "gate-links" | "all",
+	): Promise<ToolOutcome> {
+		CLIENTS.push(GATED);
+		try {
+			mockShim({
+				"/wc/zoo/0x895ecc74": {
+					success: true,
+					cast: {
+						fid: FID,
+						hash: FULL,
+						user: { fid: FID, username: "zoo" },
+						embeds,
+					},
+				},
+				"/signed/10215": { success: true, signed: true },
+			});
+			// await INSIDE the try: the pop must wait for the (multi-hop,
+			// async) resolution — an early return would empty the registry
+			// while buildAll is still pending.
+			return await runGetCastLink(
+				{ username: "zoo", shorthash: SHORT, client },
+				signal,
+			);
+		} finally {
+			CLIENTS.pop();
+		}
+	}
+
+	test("link-less cast → gated client answers client_ineligible", async () => {
+		const outcome = await outcomeFor(undefined, "gate-links");
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) expect(outcome.code).toBe("client_ineligible");
+	});
+
+	test("internal-only embeds do not qualify", async () => {
+		const outcome = await outcomeFor(
+			[{ url: `https://farcaster.xyz/zoo/${SHORT}` }],
+			"gate-links",
+		);
+		expect(outcome.ok).toBe(false);
+		if (!outcome.ok) expect(outcome.code).toBe("client_ineligible");
+	});
+
+	test("external URL embed → gated client served, present in all", async () => {
+		const outcome = await outcomeFor(
+			[{ url: "https://example.com/article" }],
+			"gate-links",
+		);
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			// {fullHashRaw}: bare lowercase hex, quilcast-style.
+			const url = `https://links.test/c/${FULL.slice(2)}`;
+			expect(outcome.result.url).toBe(url);
+			expect(outcome.result.all["gate-links"]).toBe(url);
+		}
+	});
+
+	test('"all" omits the gated client on a link-less cast; roster unaffected', async () => {
+		const outcome = await outcomeFor(undefined, "all");
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.result.all["gate-links"]).toBeUndefined();
+			expect(outcome.result.all.farcaster).toBeDefined();
+		}
 	});
 });

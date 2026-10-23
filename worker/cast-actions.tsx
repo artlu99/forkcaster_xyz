@@ -39,8 +39,9 @@ export function clientPill(
 // The "Open in …" action row, rendered from the client registry. One
 // pill per client; the pill whose id matches the last-used cookie
 // carries the badge. Suppression (signed rule, unsatisfied placeholders
-// like {fid}) is decided by clientsForPage; here signed is already
-// reduced to pass/fail-open.
+// like {fid}, and the external-link gate) is decided by clientsForPage;
+// here signed is already reduced to pass/fail-open and externalLinks is
+// the cast's known gate state (undefined = unknown ⇒ fail-closed).
 //
 // Rank ordering (PLAN3): when a rank snapshot is available, pills are
 // reordered by weighted score — a reordering, never a hiding (every
@@ -52,9 +53,10 @@ export function clientActionsHtml(
 	signed: boolean,
 	lastClientId: string | undefined,
 	rank?: RankSnapshot | null,
+	externalLinks?: boolean,
 ): string {
 	const last = findClient(lastClientId);
-	const offered = clientsForPage(signed, vars);
+	const offered = clientsForPage(signed, vars, externalLinks);
 	const scoreById = new Map((rank?.rows ?? []).map((row) => [row.id, row.score]));
 	const positionById = new Map(offered.map((client, i) => [client.id, i]));
 	const ordered =
@@ -89,9 +91,12 @@ export function autoOpenUi(
 	signed: boolean,
 	vars: TemplateVars,
 	noredirect: boolean,
+	externalLinks?: boolean,
 ): { html: string; script?: string } {
 	if (!prefs.slug) return { html: "" };
-	const last = clientsForPage(signed, vars).find((c) => c.id === prefs.slug);
+	const last = clientsForPage(signed, vars, externalLinks).find(
+		(c) => c.id === prefs.slug,
+	);
 	if (!last?.web) return { html: "" };
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);

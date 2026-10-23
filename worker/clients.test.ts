@@ -17,7 +17,9 @@ const { clientPill } = await import("./cast-actions.tsx");
 import {
 	CLIENTS,
 	CLIENT_IDS,
+	CLIENT_HOSTS,
 	type ClientDefinition,
+	blockedByLinkGate,
 	clientsForPage,
 	deeplinkTargets,
 	findClient,
@@ -407,5 +409,70 @@ describe("registry guardrails", () => {
 		} finally {
 			CLIENTS.pop();
 		}
+	});
+});
+
+// The external-link gate (`requiresExternalLinks`): a client that only
+// serves casts carrying an external (non-ecosystem) URL embed — a
+// links-only feed client. Offered only on casts known to carry an
+// external link; UNKNOWN state hides the pill (fail-closed — the
+// deliberate opposite of the signed rule, whose unknown fails open).
+// One predicate, blockedByLinkGate, is shared verbatim with the MCP tool.
+describe("external-link gate", () => {
+	const gated: ClientDefinition = {
+		id: "gate-links",
+		title: "GateLinks",
+		logoUrl: "/logos/farcaster.svg",
+		web: "https://links.test/c/{fullHashRaw}",
+		requiresExternalLinks: true,
+	};
+	const ungated: ClientDefinition = {
+		id: "gate-open",
+		title: "GateOpen",
+		logoUrl: "/logos/farcaster.svg",
+		web: "https://open.test/{fullHash}",
+	};
+
+	test("blockedByLinkGate is fail-closed on unknown cast state", () => {
+		expect(blockedByLinkGate(gated, true)).toBe(false);
+		expect(blockedByLinkGate(gated, false)).toBe(true);
+		expect(blockedByLinkGate(gated, undefined)).toBe(true);
+		// Clients without the flag are never gated.
+		expect(blockedByLinkGate(ungated, true)).toBe(false);
+		expect(blockedByLinkGate(ungated, false)).toBe(false);
+		expect(blockedByLinkGate(ungated, undefined)).toBe(false);
+	});
+
+	test("clientsForPage offers a link-gated client only on known-external casts", () => {
+		CLIENTS.push(gated);
+		try {
+			const ids = (externalLinks?: boolean) =>
+				clientsForPage(true, VARS, externalLinks).map((c) => c.id);
+			expect(ids(undefined)).not.toContain("gate-links"); // unknown ⇒ hidden
+			expect(ids(false)).not.toContain("gate-links"); // internal-only ⇒ hidden
+			expect(ids(true)).toContain("gate-links"); // external link ⇒ offered
+			// The ungated roster is untouched by the third argument.
+			expect(ids(undefined)).toContain("firefly");
+			expect(ids(true)).toContain("firefly");
+		} finally {
+			CLIENTS.pop();
+		}
+	});
+
+	test("no roster client is link-gated today (the ordered-list tests pass no gate arg)", () => {
+		for (const client of CLIENTS) {
+			expect(client.requiresExternalLinks).toBeUndefined();
+		}
+	});
+
+	test("CLIENT_HOSTS derives www-stripped web hosts in registry order", () => {
+		expect(CLIENT_HOSTS).toEqual([
+			"farcaster.xyz",
+			"quorummessenger.com",
+			"firefly.social",
+			"quilcast.com",
+			"explorer.neynar.com",
+			"vibeshift.onchain.cooking",
+		]);
 	});
 });

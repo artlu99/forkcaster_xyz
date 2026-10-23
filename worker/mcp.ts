@@ -16,7 +16,7 @@ export function createMcpServer(): McpServer {
 	server.registerTool("get_cast_link", {
 		title: "Get cast link",
 		description:
-			"Resolve a Farcaster cast — identified by username/fid + short hash, or by its full 40-hex hash — and return the URL that opens it in a target Farcaster client app (or all supported apps). Also returns the author's signed-contract status; URLs are returned regardless of signed state.",
+			"Resolve a Farcaster cast — identified by username/fid + short hash, or by its full 40-hex hash — and return the URL that opens it in a target Farcaster client app (or all supported apps). Also returns the author's signed-contract status; URLs are returned regardless of signed state. Link-only clients are gated: they answer client_ineligible when the resolved cast carries no external link.",
 		inputSchema: castRefInput,
 		outputSchema: castRefOutput,
 	}, async (input) => {

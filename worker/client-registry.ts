@@ -61,6 +61,15 @@ export interface ClientDefinition {
 	 */
 	requiresSigned?: boolean;
 	/**
+	 * Cast-eligibility gate for links-only clients: served only when the
+	 * cast is KNOWN to carry an external (non-ecosystem) URL embed.
+	 * Fail-closed — unknown state hides — the deliberate opposite of
+	 * requiresSigned (unsigned authors are rare; link-less casts are the
+	 * norm). Shared verbatim with the MCP tool via blockedByLinkGate.
+	 * Default false.
+	 */
+	requiresExternalLinks?: boolean;
+	/**
 	 * Lifecycle. `eol` (graceful goodbye): the MCP tool answers "no longer
 	 * supported"; hidden from the cast page. `suspended` (kill switch — a
 	 * client that turned malicious): hidden everywhere, excluded from the
@@ -171,6 +180,34 @@ export const CLIENT_IDS = CLIENTS.filter(
 	(client) => client.status !== "suspended",
 ).map((client) => client.id);
 
+/**
+ * Web hostnames of every registry client, derived from the `web`
+ * templates (www. and trailing dots stripped) — the taxonomy half of
+ * cast-data.ts's internal-link set. Includes eol/suspended hosts:
+ * internal-ness is ecosystem taxonomy, not a trust judgment.
+ */
+export const CLIENT_HOSTS: string[] = CLIENTS.filter(
+	(client) => client.web !== undefined,
+).map((client) =>
+	new URL(client.web as string)
+		.hostname.toLowerCase()
+		.replace(/\.+$/, "")
+		.replace(/^www\./, ""),
+);
+
+/**
+ * The eligibility gate shared by the pill row (clientsForPage) and the
+ * MCP tool (buildAll + get_cast_link): a requiresExternalLinks client is
+ * offered only when the cast is KNOWN to carry an external URL embed;
+ * `undefined` (no cast data) blocks.
+ */
+export function blockedByLinkGate(
+	client: ClientDefinition,
+	externalLinks: boolean | undefined,
+): boolean {
+	return client.requiresExternalLinks === true && externalLinks !== true;
+}
+
 export interface TemplateVars {
 	username: string;
 	/** Route-form hash, short or full, exactly as requested. */
@@ -223,20 +260,25 @@ export function resolveTemplate(tpl: string, vars: TemplateVars): string {
 
 /**
  * Clients offered on the cast page, in registry order: must have a web
- * URL whose placeholders are all satisfied, and must not be suppressed
+ * URL whose placeholders are all satisfied, must not be suppressed
  * by the signed rule (farcaster.xyz hides unsigned authors; the
- * suppression is fail-open, so only a known signed:false hides anything).
+ * suppression is fail-open, so only a known signed:false hides anything),
+ * and must pass the external-link gate (requiresExternalLinks clients
+ * are fail-closed: hidden unless the cast is known to carry an external
+ * URL embed — see blockedByLinkGate).
  */
 export function clientsForPage(
 	signed: boolean,
 	vars: TemplateVars,
+	externalLinks?: boolean,
 ): ClientDefinition[] {
 	return CLIENTS.filter(
 		(client) =>
 			isActive(client) &&
 			client.web !== undefined &&
 			missingVars(client.web, vars).length === 0 &&
-			!(client.requiresSigned === true && signed === false),
+			!(client.requiresSigned === true && signed === false) &&
+			!blockedByLinkGate(client, externalLinks),
 	);
 }
 

@@ -7,16 +7,22 @@
 // shorthash), /wc (username + shorthash). A shim non-200 is a cache miss
 // on shim's side and resolves to cast_not_found — the longhash form is
 // the reliable one for fresh casts. Author signed-status rides along
-// (shim /signed/{fid}); URLs are built for every reference regardless.
+// (shim /signed/{fid}); URLs are built for every reference regardless of
+// signed state — the one exception being the cast-eligibility gate:
+// requiresExternalLinks clients answer client_ineligible (and drop from
+// `all`) when the resolved cast carries no external URL embed, the same
+// blockedByLinkGate predicate the pill row uses.
 
 import { z } from "zod";
 import {
 	CLIENTS,
 	CLIENT_IDS,
+	blockedByLinkGate,
 	missingVars,
 	resolveTemplate,
 	type TemplateVars,
 } from "./client-registry.ts";
+import { hasExternalLinks } from "./cast-data.ts";
 import {
 	getCastByHash,
 	getCastByUsernameHash,
@@ -122,7 +128,8 @@ export type ToolErrorCode =
 	| "client_unknown"
 	| "client_eol"
 	| "client_suspended"
-	| "client_unavailable";
+	| "client_unavailable"
+	| "client_ineligible";
 
 export type ToolOutcome =
 	| { ok: true; result: CastRefOutput }
@@ -143,6 +150,12 @@ type Identity = {
 	fullHash: string;
 	/** The hash form as requested by the caller. */
 	hash: string;
+	/**
+	 * Whether the resolved cast carries ≥1 external URL embed — the pill
+	 * row's gate state, so requiresExternalLinks clients are gated
+	 * identically here. MCP always resolves the cast: never unknown.
+	 */
+	hasExternalLinks: boolean;
 };
 
 class ShimUnavailableError extends Error {}
@@ -157,6 +170,7 @@ function identityFromCast(
 		fid: typeof fid === "number" ? fid : null,
 		fullHash: cast.hash,
 		hash: requestedHash,
+		hasExternalLinks: hasExternalLinks(cast),
 	};
 }
 
@@ -226,6 +240,7 @@ function buildAll(identity: Identity): Record<string, string> {
 	for (const client of CLIENTS) {
 		if (client.status === "suspended" || client.status === "eol") continue;
 		if (client.web === undefined) continue;
+		if (blockedByLinkGate(client, identity.hasExternalLinks)) continue;
 		if (missingVars(client.web, vars).length > 0) continue;
 		all[client.id] = resolveTemplate(client.web, vars);
 	}
@@ -239,23 +254,24 @@ export async function runGetCastLink(
 	signal: AbortSignal,
 ): Promise<ToolOutcome> {
 	const target = input.client;
-	if (target !== "all") {
-		const client = CLIENTS.find((entry) => entry.id === target);
-		if (client === undefined) {
-			return err("client_unknown", `Unknown client "${target}".`);
-		}
-		if (client.status === "suspended") {
-			return err(
-				"client_suspended",
-				`Client "${target}" is suspended and its URLs are not served.`,
-			);
-		}
-		if (client.status === "eol") {
-			return err(
-				"client_eol",
-				`Client "${target}" is no longer supported.`,
-			);
-		}
+	const targetClient =
+		target === "all"
+			? undefined
+			: CLIENTS.find((entry) => entry.id === target);
+	if (targetClient === undefined && target !== "all") {
+		return err("client_unknown", `Unknown client "${target}".`);
+	}
+	if (targetClient?.status === "suspended") {
+		return err(
+			"client_suspended",
+			`Client "${target}" is suspended and its URLs are not served.`,
+		);
+	}
+	if (targetClient?.status === "eol") {
+		return err(
+			"client_eol",
+			`Client "${target}" is no longer supported.`,
+		);
 	}
 
 	let identity: Identity | null;
@@ -317,6 +333,18 @@ export async function runGetCastLink(
 				all,
 			},
 		};
+	}
+
+	// Eligibility precedes reference sparsity: a links-only client on a
+	// link-less cast is the business answer, even if vars are missing too.
+	if (
+		targetClient !== undefined &&
+		blockedByLinkGate(targetClient, identity.hasExternalLinks)
+	) {
+		return err(
+			"client_ineligible",
+			`Client "${target}" only serves casts that share an external link, and this cast has none visible — try another client, or "all".`,
+		);
 	}
 
 	const url = all[target];
