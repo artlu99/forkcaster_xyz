@@ -183,20 +183,25 @@ these tests until they are updated. Touch exactly:
 1. `"every registry client renders today: no stale entries"` — add the id to the
    expected roster array (its loop then checks your `web` template resolves).
 2. The two `clientsForPage` ordered-list assertions — add the id to both expected
-   lists (or only the with-`fid` list if your template uses `{fid}`). These stay
-   valid even for a link-gated client: they pass no gate argument, so a gated
-   client never appears in them — which is exactly why the next item exists.
+   lists (or only the with-`fid` list if your template uses `{fid}`).
+   **Exception — a `requiresExternalLinks` client (Phase 4):** these calls pass
+   no gate argument, so a gated client is hidden in them (fail-closed) and must
+   NOT be added to either list — adding it fails them by design. Leave the lists
+   untouched and note the gated absence in the test comment (see linkcast);
+   item 5 is where a gated client is recorded.
 3. `"farcaster and quorum are the clients with native schemes"` — rename/extend
    with your id **only if you added a `deeplink`**.
 4. Add a per-client test following the quorum pattern: assert the resolved scheme
    (and intent, if `androidPackage`) against the house cast, and that the pill
-   `href` stays the web URL.
-5. External-link gate (Phase 4 only): the `"no roster client is link-gated
-   today"` guard in `clients.test.ts`'s gate describe fails by design when you
-   set `requiresExternalLinks` — update it to assert your entry is the
-   exception. The gate's behavior tests use a pushed `"gate-links"` fixture in
-   `clients.test.ts` / `mcp.test.ts` / `cast-route.test.ts`; optionally point
-   one at your real slug.
+   `href` stays the web URL. For a web-only client, follow the linkcast pattern
+   instead: the resolved `href`, `data-client`, and the logo `src`.
+5. External-link gate (Phase 4 only): the one-gated-client guard in
+   `clients.test.ts`'s gate describe (`linkcast is the roster's one link-gated
+   client — by contract`) fails by design when you set `requiresExternalLinks` —
+   extend its expected id array with your entry. The gate's behavior tests push
+   a `"gate-links"` fixture in `clients.test.ts` / `mcp.test.ts`; the route-level
+   gate test in `cast-route.test.ts` exercises the real linkcast slug
+   end-to-end — optionally add a parallel assertion for your slug there.
 
 `cast-route.test.ts` needs no changes (its assertions are subsets) — optionally add
 a `toContain('data-client="<slug>"')` to the action-row test.

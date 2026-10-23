@@ -116,6 +116,13 @@ export const CLIENTS: ClientDefinition[] = [
 	// the https href is an honest homepage stub and the scheme is the only
 	// per-cast target. The Feed tab requires a Farcaster account connected
 	// inside Quorum — without one the app lands on its sign-in screen.
+	// LIVE VERIFICATION: iOS device-tested — the pill opens Quorum directly
+	// to the cast thread; Android is source-verified via the intent:// form
+	// but not yet device-tested. Vendor release note: Quilibrium signs
+	// release APKs with the debug keystore committed in their repo —
+	// repo-derived, not binary-verified; expect a rotation at their Play
+	// launch. Keystore SHA-256:
+	// FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C
 	{
 		id: "quorum",
 		title: "Quorum",

@@ -1114,7 +1114,16 @@ test("rank snapshot reorders pills (never hides); null keeps registry order", as
 			rankedBody.indexOf('data-client="farcaster"'),
 		);
 		// …but every client still renders — reordered, never hidden.
-		for (const id of ["farcaster", "quorum", "firefly", "neynar", "quilcast"]) {
+		// (linkcast is legitimately absent: the house cast is link-less, so
+		// the external-link gate hides it — the gate test below covers it.)
+		for (const id of [
+			"farcaster",
+			"quorum",
+			"firefly",
+			"neynar",
+			"quilcast",
+			"vibeshift",
+		]) {
 			expect(rankedBody).toContain(`data-client="${id}"`);
 		}
 		// The badge still follows the cookie, not the rank.

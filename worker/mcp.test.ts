@@ -8,7 +8,11 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 const originalFetch = globalThis.fetch;
 
-import { CLIENTS, type ClientDefinition } from "./client-registry.ts";
+import {
+	CLIENT_IDS,
+	CLIENTS,
+	type ClientDefinition,
+} from "./client-registry.ts";
 import { runGetCastLink, type ToolOutcome } from "./cast-ref.ts";
 import type { ShimEmbed } from "./shim.ts";
 import { mcpHandler } from "./mcp.ts";
@@ -102,7 +106,10 @@ describe("protocol", () => {
 		const tool = tools.find((t) => t.name === "get_cast_link");
 		expect(tool).toBeDefined();
 		const schema = JSON.stringify(tool?.inputSchema);
-		for (const id of ["farcaster", "quorum", "firefly", "neynar", "quilcast", "vibeshift", "linkcast", "all"]) {
+		// Mirror the enum's own derivation (cast-ref's CLIENT_TARGETS =
+		// [...CLIENT_IDS, "all"]) so this assertion self-maintains as clients
+		// join — the roster tripwire itself lives in clients.test.ts.
+		for (const id of [...CLIENT_IDS, "all"]) {
 			expect(schema).toContain(id);
 		}
 	});
