@@ -15,6 +15,14 @@ import {
 } from "./clients.ts";
 import { getRankSnapshot, getRankSnapshotSoon } from "./client-rank-store.ts";
 import { mcpLandingHtml, mcpHandler } from "./mcp.ts";
+import {
+	renderCastsHtml,
+	renderProfileHtml,
+	renderProfileJson,
+	resolveCastsPage,
+	resolveConversationAlias,
+	resolveProfile,
+} from "./profile-page.tsx";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { parseTrackEvent, writeTrackEvent } from "./track.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
@@ -124,6 +132,7 @@ app.get("/race-stats.json", async (c) => {
 app.get("/api/", (c) =>
 	c.json({
 		cast: "/{username}/{hash}?format=json",
+		profile: "/{username}?format=json",
 		raceStats: "/race-stats.json",
 		transparency: "/transparency?format=json",
 	}),
@@ -215,6 +224,113 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		rank,
 	);
 	return c.html(html, status);
+});
+
+// Profile landing pages (PLAN4) — the FIRST parametric single-segment route,
+// registered LAST: Hono matches in registration order, so every exact
+// reserved route above and the two-segment cast route keep winning (a
+// Farcaster user literally named "transparency" is shadowed — the same
+// accepted tradeoff the cast route documents). Waypoint law: identity card +
+// routing skeleton; no pills, no auto-open, no cookies, no telemetry. The
+// charset gate and bot-path denylist 404 garbage with zero upstream fetches —
+// every shim call costs a lookup, so noise never leaves the worker.
+const PROFILE_BOT_PATHS = new Set([
+	"favicon.ico",
+	"robots.txt",
+	"sitemap.xml",
+	"apple-touch-icon.png",
+	"manifest.json",
+	"humans.txt",
+]);
+const PROFILE_USERNAME_PATTERN = /^[a-zA-Z0-9._-]{1,20}$/;
+
+/** Shared profile-surface gate: bot paths + charset, lowercased. null ⇒ 404. */
+function gateProfileUsername(raw: string): string | null {
+	// A blanket extension ban would be wrong (usernames can contain dots) —
+	// the denylist is exact-match on the paths that actually get probed.
+	if (PROFILE_BOT_PATHS.has(raw.toLowerCase())) return null;
+	if (!PROFILE_USERNAME_PATTERN.test(raw)) return null;
+	// People type capitals; Farcaster fnames are lowercase.
+	return raw.toLowerCase();
+}
+
+app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
+	const username = gateProfileUsername(c.req.param().username);
+	if (username === null) {
+		return c.body(null, 404);
+	}
+	// Resolve once, render twice — same negotiation as the cast route:
+	// ?format=json wins over Accept; only strict application/json Accept
+	// also negotiates JSON.
+	const wantsJson =
+		c.req.query("format") === "json" ||
+		(c.req.header("Accept") ?? "").includes("application/json");
+	const resolved = await resolveProfile(username);
+	if (wantsJson) {
+		const { status, body, retryAfter } = renderProfileJson(
+			resolved,
+			username,
+			new URL(c.req.url).origin,
+		);
+		return c.json(
+			body,
+			status,
+			retryAfter ? { "retry-after": retryAfter } : undefined,
+		);
+	}
+	const { status, html } = renderProfileHtml(
+		resolved,
+		username,
+		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+	);
+	// Retry-After rides the 503 in both variants (identity has no fail-open
+	// source — unlike casts, there is nothing to render without shim).
+	return c.html(
+		html,
+		status,
+		status === 503 ? { "retry-after": "60" } : undefined,
+	);
+});
+
+// The casts skeleton page (/{username}/casts-and-replies): a list, not a
+// feed — fixed 3 rows, no identity card, no JSON twin. Patterns are disjoint
+// from the 0x-hashed cast route above, so registration order carries no
+// shadow risk; the /f verdict and fail-soft timeline match the profile.
+app.get("/:username/casts-and-replies", async (c) => {
+	const username = gateProfileUsername(c.req.param().username);
+	if (username === null) {
+		return c.body(null, 404);
+	}
+	const resolved = await resolveCastsPage(username);
+	const { status, html } = renderCastsHtml(
+		resolved,
+		username,
+		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+	);
+	return c.html(
+		html,
+		status,
+		status === 503 ? { "retry-after": "60" } : undefined,
+	);
+});
+
+// Warpcast legacy thread shape (/~/conversations/0x…): the purest waypoint —
+// no surface at all. Resolve via shim /h (misses answer HTTP 200
+// {"success":false}; short hashes miss too — measured) and 302 — NOT 301, so
+// the mapping stays cache-free — to the canonical /{username}/{fullHash} cast
+// waypoint. Relative Location keeps dual-serve hosts self-contained.
+app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
+	const resolved = await resolveConversationAlias(c.req.param().hash);
+	if (resolved.kind === "unreachable") {
+		return c.body(null, 503, { "retry-after": "60" });
+	}
+	if (resolved.kind === "not-found") {
+		return c.body(null, 404);
+	}
+	return c.redirect(
+		`/${encodeURIComponent(resolved.username)}/${resolved.fullHash}`,
+		302,
+	);
 });
 
 export default {

@@ -56,13 +56,14 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── index.ts               # Hono app; export { app }; default { fetch }
 │   ├── client-registry.ts     # client registry (verified templates; zero-dep, vendored-able)
 │   ├── clients.ts             # fc_client cookie binding (last-used + auto-open prefs)
-│   ├── shim.ts                # shim identity client (routes, ShimCast, /wc /h /f /signed)
+│   ├── shim.ts                # shim identity client (routes, ShimCast/ShimUser, /wc /h /f /u /user /casts-and-replies /signed)
 │   ├── cast-source.ts         # provider race: shim ∥ haatz ∥ snap ∥ farcaster.tv
 │   ├── cast-page.tsx          # resolve (race) → render orchestration: SSR / 404 / link fallback
 │   ├── cast-data.ts           # pure Shim → embed-data mapping + embed helpers
 │   ├── cast-actions.tsx       # action row + auto-open banner (server halves)
 │   ├── cast-scripts.ts        # inline client scripts (TRACK/CLIENT/DEEPLINK/AUTO/LIVE_STATS/QUOTE_FILL)
-│   ├── shell.tsx              # shared page frame (head/meta/CSS/footer) — cast pages + /transparency
+│   ├── profile-page.tsx       # profile landings (PLAN4): resolve-once/render-twice, waypoint law
+│   ├── shell.tsx              # shared page frame (head/meta/CSS/footer) — cast pages + profiles + /transparency
 │   ├── cast-ref.ts            # MCP cast-ref: zod contract + shim-direct resolution
 │   ├── mcp.ts                 # MCP SDK v2 server factory (get_cast_link) — only SDK import site
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
@@ -85,7 +86,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | Path | Handler | Response |
 | --- | --- | --- |
 | `/` | static asset `index.html` | landing SPA |
-| `/api/` | Hono | `{ "name": "Cloudflare" }` |
+| `/api/` | Hono | agent-facing index: the JSON surfaces this worker serves (`cast`, `profile`, `raceStats`, `transparency`) |
 | `/prefs` | Hono | `POST` JSON `{ auto?: "on" \| "off", delay?: 0–5 }` (at least one field) → 204 + Set-Cookie (`fc_client`); delay omitted from the cookie at the default 5s. Auto-open preference write (server cookie — Safari ITP exemption) |
 | `/t` | Hono | `POST` beacon (one per client selection): `{ c: slug, k: pill\|auto\|go-now, t?: web\|native, d?: coarse\|fine, f?: first\|switch\|repeat }` → 204 always (invalid = dropped, indistinguishable). Allow-listed against the active registry; one anonymous `CLICK_STATS` datapoint — no cast IDs, no IPs, no identifiers |
 | `/transparency` | Hono | HTML facts page (what/data/tracking/domains — Domains carries registration expiry + RDAP confirm links — plus race-stats and client-rank tables filled server-side from lmdis snapshots, "stats as of" lines) or JSON twin via `?format=json`/Accept (`racingStats.status`/`clientRank.status`: live \| coming-soon); reserved exact path — cast URLs for a username named `transparency` still work |
@@ -93,6 +94,10 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | `/mcp` | Hono → MCP SDK v2 | MCP Streamable HTTP endpoint (POST JSON-RPC; public, no auth). One tool, `get_cast_link`: cast reference (longhash ∥ fid+shorthash ∥ username+shorthash) + target client → client URLs + author signed status; farcaster.xyz is the canonical surface. |
 | `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image; `og:site_name` = forkcaster) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (e.g. farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
 | `/:username/:hash?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status agent variant — see "Agent JSON variant" below |
+| `/:username` | Hono SSR | Profile landing (PLAN4 waypoint law: identity card + routing skeleton, zero pills/cookies/telemetry): the hydrated shim `/user/{fid}` entity (displayName/pfp/bio/fid, truncated `primaryAddress` with copy button + Basescan link) + up-to-10 skeleton rows from shim `/{username}/casts-and-replies` (text snippet, date, reply/image markers) linking into `/{username}/{hash}`; OG meta (`og:type` profile, `twitter:card` summary, image = pfp); single segment registered LAST — reserved exact routes and the two-segment cast route win by registration order; charset gate + bot-path denylist 404 without upstream calls; 404 on shim `/f` miss (or sparse `/user` shape), 503 + Retry-After when shim is unreachable; timeline failure fails soft ("unavailable" note), entity failure fails soft to a username-only card |
+| `/:username?format=json` (or `Accept: application/json`) | Hono JSON | Strict-status profile twin: `{ username, fid, displayName?, bio?, pfp?, primaryAddress?, casts?: [{ hash, text?, timestamp, url }], note? }` — 404 / 503 + Retry-After like the cast JSON; listed in `/api/` |
+| `/:username/casts-and-replies` | Hono SSR | Skeleton-only list surface (farcaster.xyz URL-shape mirror, waypoint law): a minimal `@handle` head (link to the profile + "Open on Farcaster") + **fixed 3** routing rows (same skeleton as the profile; no identity card — no `/user` call; **no JSON twin** — the alternate link is omitted rather than advertise HTML; zero scripts). Shim `/f` verdict ⇒ 404; unreachable ⇒ 503 + Retry-After; timeline failure fails soft ("unavailable" note), ok-empty ⇒ "No casts yet." |
+| `/~/conversations/:hash` (`0x…`) | Hono redirect | Warpcast legacy thread-shape alias — the purest waypoint, **no surface**: resolve via shim `/h/{hash}` (fid fallback via `/u` when the cast is username-less) and **302** (not 301 — mapping stays cache-free) to the canonical `/{username}/{fullHash}` cast waypoint, relative Location (dual-serve hosts stay self-contained); 404 on shim miss / unresolvable username, 503 + Retry-After when shim is unreachable; short hashes miss at shim (measured) and 404 honestly |
 | other missing paths | worker 404 / no SPA fallback | `not_found_handling: none` |
 
 **Multi-domain (dual-serve):** the same worker serves `forkcaster.xyz` and `warpcats.com` (custom-domain routes in `wrangler.jsonc`). All code is host-agnostic (per-request origin, same-origin fill script, host-only cookie), and every page canonicalizes to the primary: cast pages emit `<link rel="canonical">` + `og:url` from the `PRIMARY_ORIGIN` var (absent when unset — bare workers.dev keeps the pre-dual-serve output), the landing's canonical is baked into `index.html`. Race telemetry carries the request host as a blob for per-domain breakdown. Cookies/badges are per-domain by design.

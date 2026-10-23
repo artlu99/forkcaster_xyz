@@ -26,6 +26,12 @@ export function shell(
 	},
 	clientScript?: string,
 	canonicalUrl?: string,
+	// Profile pages render as og:type "profile"; everything else stays
+	// "article" (the historical default) — byte-identical output.
+	ogType: string = "article",
+	// The casts skeleton page has no JSON twin: it omits the alternate link
+	// instead of advertising an endpoint that would answer HTML.
+	jsonAlternate = true,
 ): string {
 	const canonicalMeta = canonicalUrl
 		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
@@ -33,7 +39,7 @@ export function shell(
 	const meta = og
 		? [
 				`<meta property="og:site_name" content="forkcaster" />`,
-				`<meta property="og:type" content="article" />`,
+				`<meta property="og:type" content="${escapeHtml(ogType)}" />`,
 				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
 				...(canonicalUrl
 					? [`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`]
@@ -68,7 +74,7 @@ export function shell(
 <title>${escapeHtml(title)}</title>
 ${canonicalMeta}
 ${meta}
-<link rel="alternate" type="application/json" href="?format=json" />
+${jsonAlternate ? `<link rel="alternate" type="application/json" href="?format=json" />` : ""}
 <link rel="stylesheet" href="/farcaster-embed.css" />
 <style>
 :root {

@@ -179,6 +179,7 @@ test("GET /api/ returns the agent-facing index", async () => {
 	expect(res.status).toBe(200);
 	expect(await res.json()).toEqual({
 		cast: "/{username}/{hash}?format=json",
+		profile: "/{username}?format=json",
 		raceStats: "/race-stats.json",
 		transparency: "/transparency?format=json",
 	});

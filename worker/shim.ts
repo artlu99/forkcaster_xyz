@@ -15,6 +15,9 @@ export const wcUrl = (username: string, hash: string): string =>
 export const hUrl = (hash: string): string => `${SHIM_BASE}/h/${hash}`;
 export const fUrl = (username: string): string => `${SHIM_BASE}/f/${username}`;
 export const uUrl = (fid: number): string => `${SHIM_BASE}/u/${fid}`;
+export const userUrl = (fid: number): string => `${SHIM_BASE}/user/${fid}`;
+export const castsAndRepliesUrl = (username: string, limit: number): string =>
+	`${SHIM_BASE}/${username}/casts-and-replies?limit=${limit}`;
 export const signedUrl = (fid: number): string => `${SHIM_BASE}/signed/${fid}`;
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
@@ -34,6 +37,23 @@ export type ShimCast = {
 		pfpUrl?: string;
 		bio?: string;
 	};
+};
+
+/**
+ * Hydrated user entity as returned by shim /user/{fid}. Every field except
+ * `fid` is nullable: an unknown fid answers HTTP 200 with the sparse shape
+ * (all fields null), so the miss signal is `username == null` — not a status
+ * code. `proNft` is deliberately typed `unknown` — no non-null sample has
+ * ever been observed, so no shape is assumed (profile pages don't render it).
+ */
+export type ShimUser = {
+	fid?: number;
+	username?: string | null;
+	displayName?: string | null;
+	pfpUrl?: string | null;
+	bio?: string | null;
+	primaryAddress?: string | null;
+	proNft?: unknown;
 };
 
 /** A returned cast is only valid if it resolves the hash that was asked for. */
@@ -132,6 +152,57 @@ export async function getUsernameByFid(
 		| undefined;
 	const username = data?.username;
 	return typeof username === "string" && username !== "" ? username : null;
+}
+
+/**
+ * GET /user/{fid} — the hydrated user entity. undefined on any failure
+ * (non-2xx, parse, thrown): callers treat undefined as "decoration
+ * unavailable" and fail soft. A sparse shape (all nulls) is a real answer,
+ * not an error — callers check `username == null` for the miss verdict.
+ */
+export async function getUserByFid(
+	fid: number,
+	signal: AbortSignal,
+): Promise<ShimUser | undefined> {
+	try {
+		const res = await fetch(userUrl(fid), { signal });
+		if (!res.ok) return undefined;
+		const data = (await res.json().catch(() => undefined)) as
+			| { success?: boolean; user?: ShimUser | null }
+			| undefined;
+		return data?.user ?? undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * GET /{username}/casts-and-replies?limit=N — the N latest casts and
+ * replies, canonical ShimCast rows (unix-SECOND timestamps, raw embeds, no
+ * inline `user` — the author is the requested profile). `success:false`
+ * (shim's "User not found") and any transport failure both resolve to
+ * `ok:false`: the timeline is content that fails soft, never load-bearing
+ * for identity. The distinction is kept so renderers can say "no casts yet"
+ * (ok, empty) apart from "unavailable right now" (!ok).
+ */
+export async function getCastsAndReplies(
+	username: string,
+	limit: number,
+	signal: AbortSignal,
+): Promise<{ casts: ShimCast[]; ok: boolean }> {
+	try {
+		const res = await fetch(castsAndRepliesUrl(username, limit), { signal });
+		if (!res.ok) return { casts: [], ok: false };
+		const data = (await res.json().catch(() => undefined)) as
+			| { success?: boolean; casts?: ShimCast[] }
+			| undefined;
+		if (!data || data.success === false || !Array.isArray(data.casts)) {
+			return { casts: [], ok: false };
+		}
+		return { casts: data.casts, ok: true };
+	} catch {
+		return { casts: [], ok: false };
+	}
 }
 
 /**
