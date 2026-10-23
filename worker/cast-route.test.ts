@@ -317,7 +317,7 @@ test("GET /:username/:hash falls back to a link-only page when Shim is unreachab
 
 // --- Client registry (action row, last-used cookie, logos) ------------------
 //
-// The action row is rendered from worker/clients.ts: one pill per
+// The action row is rendered from worker/client-registry.ts: one pill per
 // registry client with its own logo, the pill matching the fc_client
 // cookie carrying a "last used" badge. Unknown cookie ids render
 // nothing (registry whitelist).

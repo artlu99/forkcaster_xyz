@@ -1,8 +1,10 @@
 // Client registry: the data behind the cast page's client action row —
 // and the URL source for standalone consumers (e.g. the MCP server).
 // Adding a client is a data change only — the renderer (cast-actions.tsx),
-// the last-used cookie and the badge pick it up automatically. No code
-// paths are per-client.
+// the last-used cookie, the /t allow-list, the rank pipeline and the MCP
+// tool enum pick it up automatically. No code paths are per-client; the
+// roster-guard tests in clients.test.ts are the one place that must be
+// updated with the roster, by design.
 //
 // This module is deliberately dependency-free and cookie-free: it is the
 // vendored-into-other-projects surface.

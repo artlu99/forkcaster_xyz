@@ -200,9 +200,11 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// Last-used client + auto-open preference from the single cookie.
 	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
 	// Pill order rides the rank snapshot through a per-isolate TTL store;
-	// getRankSnapshotSoon caps a cold refresh at 150ms so a slow lmdis can
-	// never stall a cast page (registry order on timeout).
-	const rank = await getRankSnapshotSoon(c.env, 150);
+	// getRankSnapshotSoon caps a cold refresh at 400ms — still trivial next
+	// to the 700ms race box, while converting most cold-isolate misses into
+	// hits (a cold lmdis GET is usually one round trip once connected).
+	// Registry order on timeout.
+	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = await renderCastHtml(
 		resolved,
 		username,

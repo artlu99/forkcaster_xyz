@@ -47,8 +47,11 @@ export const mcpHandler = createMcpHandler(createMcpServer);
  */
 export function mcpLandingHtml(): string {
 	const title = "forkcaster — MCP server for Farcaster casts";
+	// Roster mentions stay generic on purpose: a new registry entry must
+	// not require touching this copy. The authoritative list is the tool's
+	// own client enum, derived from the registry.
 	const description =
-		"Resolve any Farcaster cast — by @username, fid, or hash — into shareable links for Farcaster, Firefly, Neynar, Quilcast, and Vibeshift. Public, no auth.";
+		"Resolve any Farcaster cast — by @username, fid, or hash — into shareable links for Farcaster, Quorum, Firefly, Neynar, Quilcast, Vibeshift, etc. Public, no auth.";
 	const endpoint = "https://forkcaster.xyz/mcp";
 	return `<!doctype html>
 <html lang="en">
@@ -100,7 +103,7 @@ h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: v
 <h2>Tool — get_cast_link</h2>
 <ul>
 <li><strong>Identify a cast</strong>: full 40-hex hash on its own, or author (username or fid) + short hash.</li>
-<li><strong>Pick a client</strong>: farcaster, quorum, firefly, neynar, quilcast, vibeshift — or all at once.</li>
+<li><strong>Pick a client</strong>: farcaster, quorum, firefly, neynar, quilcast, vibeshift, etc. — or all at once.</li>
 <li><strong>Get</strong>: verified per-client URLs, the farcaster-canonical URL, and the author's signed status (pass-through — never suppressed).</li>
 </ul>
 <h2>More</h2>
