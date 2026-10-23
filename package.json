@@ -18,6 +18,7 @@
 		"lint": "biome lint .",
 		"deploy": "bun run build && wrangler deploy",
 		"stats": "dotenvx run -- bun scripts/race-stats.ts",
+		"stats:rank": "dotenvx run -- bun scripts/client-rank.ts",
 		"cf-typegen": "wrangler types"
 	},
 	"type": "module",

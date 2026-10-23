@@ -13,8 +13,10 @@ import {
 	mergeClientCookie,
 	parseClientCookie,
 } from "./clients.ts";
+import { getRankSnapshot, getRankSnapshotSoon } from "./client-rank-store.ts";
 import { mcpLandingHtml, mcpHandler } from "./mcp.ts";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
+import { parseTrackEvent, writeTrackEvent } from "./track.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -48,7 +50,34 @@ app.post("/prefs", async (c) => {
 	return c.body(null, 204);
 });
 
-// Reserved single-segment paths (/api/, /transparency, /prefs,
+// Client click-through telemetry (PLAN3): one allow-listed, anonymous
+// event per client selection — slug, kind (pill / auto / go-now),
+// transport, coarse device class, host. No cookies are read here (the
+// first/switch flag is computed client-side BEFORE the click rewrites
+// the cookie); no cast ids, IPs, or identifiers of any kind — the
+// negative list is the privacy design and /transparency declares it.
+// Invalid bodies are indistinguishable from valid ones: 204 either way,
+// no error side-channel.
+app.post("/t", async (c) => {
+	const event = parseTrackEvent(await c.req.text().catch(() => ""));
+	if (event) {
+		try {
+			const dataset = c.env.CLICK_STATS;
+			if (dataset) {
+				c.executionCtx.waitUntil(
+					Promise.resolve(
+						writeTrackEvent(dataset, event, new URL(c.req.url).hostname),
+					),
+				);
+			}
+		} catch {
+			// No executionCtx (tests) — telemetry is best-effort.
+		}
+	}
+	return c.body(null, 204);
+});
+
+// Reserved single-segment paths (/api/, /transparency, /prefs, /t,
 // /race-stats.json, /mcp) are exact-match and registered before the
 // parametric cast route; cast URLs are always two-segment, so a Farcaster
 // user literally named "transparency" is unaffected (/transparency/0x…
@@ -68,15 +97,17 @@ app.get("/transparency", async (c) => {
 	const wantsJson =
 		c.req.query("format") === "json" ||
 		(c.req.header("Accept") ?? "").includes("application/json");
-	// One cacheTtl'd read (per-isolate) feeds the HTML table and the JSON
-	// twin; absent/unreachable snapshot → dashes/coming-soon. Silent.
+	// Two cacheTtl'd reads (per-isolate) feed the HTML page and the JSON
+	// twin; absent/unreachable snapshots → dashes/coming-soon. Silent.
 	const snapshot = await getRaceStatsSnapshot(c.env);
-	if (wantsJson) return c.json(transparencyJson(snapshot));
+	const rank = await getRankSnapshot(c.env);
+	if (wantsJson) return c.json(transparencyJson(snapshot, rank));
 	const primaryOrigin = (c.env as Env | undefined)?.PRIMARY_ORIGIN;
 	return c.html(
 		renderTransparencyHtml({
 			canonicalUrl: primaryOrigin ? `${primaryOrigin}/transparency` : undefined,
 			snapshot,
+			rank,
 		}),
 	);
 });
@@ -168,6 +199,10 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// The last-used client cookie badges the visitor's preferred pill.
 	// Last-used client + auto-open preference from the single cookie.
 	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
+	// Pill order rides the rank snapshot through a per-isolate TTL store;
+	// getRankSnapshotSoon caps a cold refresh at 150ms so a slow lmdis can
+	// never stall a cast page (registry order on timeout).
+	const rank = await getRankSnapshotSoon(c.env, 150);
 	const { status, html } = await renderCastHtml(
 		resolved,
 		username,
@@ -175,6 +210,7 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		prefs,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		c.req.query("noredirect") === "1",
+		rank,
 	);
 	return c.html(html, status);
 });

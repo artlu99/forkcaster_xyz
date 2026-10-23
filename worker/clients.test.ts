@@ -12,7 +12,7 @@ mock.module("react-dom", () => require("preact/compat"));
 mock.module("react/jsx-runtime", () => require("preact/jsx-runtime"));
 mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 
-const { clientPill } = await import("./cast-page.tsx");
+const { clientPill } = await import("./cast-actions.tsx");
 
 import {
 	CLIENTS,

@@ -23,7 +23,7 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 | Cast data | Provider race (`cast-source.ts`) | shim ∥ farcaster.tv ∥ haatz ∥ snap — first validated win; completeness box for HTML, shim-only for JSON; see "Cast source race" below |
 | URL embed cards | unfurl.artlu.workers.dev | called via the `UNFURL` **service binding** (workers.dev→workers.dev fetch is blocked, CF error 1042); `GET /?u={url}` → OG title/description/image (cached, fails open to hostname-only) |
 | Cast embed | react-farcaster-embed | rendering only — `castData` always supplied, never fetches |
-| Live stats | client-side script → farcaster.tv | `LIVE_STATS_SCRIPT` in `cast-page.tsx`; fills the SSR-stripped stats slot from the browser; fails silent (row absent); SSR data path stays Shim-only |
+| Live stats | client-side script → farcaster.tv | `LIVE_STATS_SCRIPT` in `cast-scripts.ts`; fills the SSR-stripped stats slot from the browser; fails silent (row absent); SSR data path stays Shim-only |
 | SSR | preact-render-to-string | after `await FarcasterEmbed({ castData })` |
 | Bundler | Vite 8 | `@preact/preset-vite` + `@cloudflare/vite-plugin` |
 | Lint | Biome | `bun run lint` |
@@ -58,7 +58,11 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── clients.ts             # fc_client cookie binding (last-used + auto-open prefs)
 │   ├── shim.ts                # shim identity client (routes, ShimCast, /wc /h /f /signed)
 │   ├── cast-source.ts         # provider race: shim ∥ haatz ∥ snap ∥ farcaster.tv
-│   ├── cast-page.tsx          # resolve (race) → CastData mapping → SSR / 404 / link fallback
+│   ├── cast-page.tsx          # resolve (race) → render orchestration: SSR / 404 / link fallback
+│   ├── cast-data.ts           # pure Shim → embed-data mapping + embed helpers
+│   ├── cast-actions.tsx       # action row + auto-open banner (server halves)
+│   ├── cast-scripts.ts        # inline client scripts (TRACK/CLIENT/DEEPLINK/AUTO/LIVE_STATS/QUOTE_FILL)
+│   ├── shell.tsx              # shared page frame (head/meta/CSS/footer) — cast pages + /transparency
 │   ├── cast-ref.ts            # MCP cast-ref: zod contract + shim-direct resolution
 │   ├── mcp.ts                 # MCP SDK v2 server factory (get_cast_link) — only SDK import site
 │   ├── cast-route.test.ts     # bun:test; mock.module + exact-URL fetch mock
@@ -70,6 +74,8 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ├── scripts/
 │   ├── race-stats.ts          # offline stats job: AE SQL → snapshot → lmdis (dotenvx env; --dry)
 │   ├── race-stats-lib.ts      # pure query builders (fixture-tested)
+│   ├── client-rank.ts         # offline rank job: CLICK_STATS AE SQL → weighted snapshot → lmdis
+│   ├── client-rank-lib.ts     # pure query builders + weighting (fixture-tested)
 │   └── probe/                 # live-service probes (lmdis, AE SQL, shim timing)
 └── src/                       # landing only (App.tsx)
 ```
@@ -81,7 +87,8 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 | `/` | static asset `index.html` | landing SPA |
 | `/api/` | Hono | `{ "name": "Cloudflare" }` |
 | `/prefs` | Hono | `POST` JSON `{ auto?: "on" \| "off", delay?: 0–5 }` (at least one field) → 204 + Set-Cookie (`fc_client`); delay omitted from the cookie at the default 5s. Auto-open preference write (server cookie — Safari ITP exemption) |
-| `/transparency` | Hono | HTML facts page (what/data/tracking/domains — Domains carries registration expiry + RDAP confirm links — plus race-stats table filled server-side from the lmdis snapshot, "stats as of" line) or JSON twin via `?format=json`/Accept (`racingStats.status: live \| coming-soon`); reserved exact path — cast URLs for a username named `transparency` still work |
+| `/t` | Hono | `POST` beacon (one per client selection): `{ c: slug, k: pill\|auto\|go-now, t?: web\|native, d?: coarse\|fine, f?: first\|switch\|repeat }` → 204 always (invalid = dropped, indistinguishable). Allow-listed against the active registry; one anonymous `CLICK_STATS` datapoint — no cast IDs, no IPs, no identifiers |
+| `/transparency` | Hono | HTML facts page (what/data/tracking/domains — Domains carries registration expiry + RDAP confirm links — plus race-stats and client-rank tables filled server-side from lmdis snapshots, "stats as of" lines) or JSON twin via `?format=json`/Accept (`racingStats.status`/`clientRank.status`: live \| coming-soon); reserved exact path — cast URLs for a username named `transparency` still work |
 | `/race-stats.json` | Hono | raw stats snapshot (same cached read as `/transparency`); 404 when absent; `cache-control: public, max-age=21600` |
 | `/mcp` | Hono → MCP SDK v2 | MCP Streamable HTTP endpoint (POST JSON-RPC; public, no auth). One tool, `get_cast_link`: cast reference (longhash ∥ fid+shorthash ∥ username+shorthash) + target client → client URLs + author signed status; farcaster.xyz is the canonical surface. |
 | `/:username/:hash` (`0x…`) | Hono SSR | HTML: 200 cast card + OG/Twitter meta (title = `DisplayName (@handle)`, description = whitespace-collapsed cast text, 280 chars, image = first image embed else avatar; `summary_large_image` card only when the image is a cast embed image; `og:site_name` = forkcaster) + registry-driven client action row (see "Client registry" below); unsigned author (`/signed/{fid}` false): `requiresSigned` clients (farcaster) suppressed; 404 when Shim reports no such cast; 200 link-only when Shim is unreachable |
@@ -165,6 +172,15 @@ The transparency route reads the snapshot through a per-isolate TTL cache (`work
 
 **Abort telemetry:** race-cut losers are recorded as `provider:abort:<ms>` (not `error`) so public errorRate stays honest — the 700ms box cuts slow completes by design; the 5s hard-timeout still counts as an error. `raceCast` drains pending settles after abort (bounded 25ms) so timing rows never escape incomplete.
 
+## Client rank (click-through stats, /transparency)
+
+Which client people actually open casts with — measured, weighted, published, and used to order the pill row. Pipeline mirrors race stats exactly:
+
+- **Capture** (`POST /t`, allow-listed in `worker/track.ts`): one anonymous datapoint per client selection — slug, kind (`pill` explicit click / `auto` timer-fired redirect / `go-now` explicit open), transport (`native` when the click-time path attempted the app), coarse device class (client-side `matchMedia`, keeping the no-UA-sniffing invariant), host. The `first`/`switch`/`repeat` flag is computed client-side from the visitor's own cookie **before** the click rewrites it — the server never sees it. Invalid bodies are indistinguishable from valid ones (204 always). **Never captured:** which cast, usernames, IPs, UA strings, identifiers — the negative list is the privacy design and `/transparency` declares it. Beacons ride `TRACK_SCRIPT` (`window.__fk`, sendBeacon → keepalive-fetch fallback) called from `CLIENT_SCRIPT` (pills) and `AUTO_SCRIPT` (auto / go-now, incl. the countdown link, which also cancels the pending timer so a manual native attempt isn't re-redirected).
+- **Weighting** (defuses the auto-open feedback loop — auto events echo an earlier choice): first ×1.0, switch ×1.0, go-now ×0.8, repeat ×0.3, auto ×0.1. Score over a trailing 7d window (`bun run stats:rank` → lmdis key `client-rank`, overwrite-only-on-success, same env as `stats`). `total < 100` ⇒ `warmingUp` — counts shown, shares withheld.
+- **Consumption**: `worker/client-rank-store.ts` (same TTL/backoff/stale contract as the race store). `/transparency` reads full-cap and renders the Client choices table + JSON twin `clientRank` (weights are part of the published contract). The cast render path reads through `getRankSnapshotSoon(env, 150)` — a cold lmdis refresh never stalls a page; timeout ⇒ registry order. Pills are **reordered, never hidden** (every offered client renders; registry order is the tiebreak; the registry kill switch outranks popularity).
+- **Disclosure**: the `/transparency` Tracking section declares both counters (`tracking.counters` became `{ pageLoad, clientChoice }` — a declared agent-facing shape change), and the auto-open flow is no longer page-dark (the click event covers it).
+
 ## Client registry (action row, last-used badge)
 
 The cast page's "Open in …" pills are rendered from a data registry, `worker/clients.ts` — adding a client is a data change only.
@@ -178,7 +194,7 @@ The cast page's "Open in …" pills are rendered from a data registry, `worker/c
 
 ## Shim → CastData mapping
 
-Providers return different shapes; `cast-source.ts` normalizes everything onto `ShimCast` (shim's raw Snapchain shape). `toCastData()` in `worker/cast-page.tsx` then adapts it for react-farcaster-embed:
+Providers return different shapes; `cast-source.ts` normalizes everything onto `ShimCast` (shim's raw Snapchain shape). `toCastData()` in `worker/cast-data.ts` then adapts it for react-farcaster-embed:
 
 - `timestamp` is unix **seconds** → multiplied by 1000 (the embed does `new Date(ts)`)
 - `embeds` are untyped `{url}` / `{castId}` items → bucketed into `images` / `urls` / `casts`; image heuristic = `imagedelivery.net` host or image extension. **Quotes are hydrated** through Shim `GET /h/{fullHash}` (depth 1) and mapped like any cast; hydration failure (e.g. pruned casts) drops the quote. URL embeds render as link cards via `openGraph` (see unfurl above)
@@ -197,7 +213,7 @@ Providers return different shapes; `cast-source.ts` normalizes everything onto `
 
 | Task | Touch |
 | --- | --- |
-| Shim fetch / mapping / SSR fallbacks | `worker/cast-page.tsx` |
+| Shim mapping / resolve / SSR renderers | `worker/cast-page.tsx` (+ `cast-data.ts`, `cast-actions.tsx`, `cast-scripts.ts`, `shell.tsx`) |
 | Provider race / cast data sources | `worker/cast-source.ts` |
 | Client roster / action row data | `worker/clients.ts` |
 | Routes | `worker/index.ts` |

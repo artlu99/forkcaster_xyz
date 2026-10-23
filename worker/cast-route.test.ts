@@ -613,7 +613,11 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	const json = await jsonRes.json();
 	expect(json.data.providers).toHaveLength(4);
 	expect(json.racingStats.status).toBe("coming-soon");
-	expect(json.tracking.counters).toContain("No cast IDs");
+	// counters became one entry per counter when click-through tracking
+	// shipped (declared shape change) — both entries keep the negative list.
+	expect(json.tracking.counters.pageLoad).toContain("No cast IDs");
+	expect(json.tracking.counters.clientChoice).toContain("No cast IDs");
+	expect(json.clientRank.status).toBe("coming-soon");
 
 	// A Farcaster user literally named "transparency": two-segment cast
 	// URLs must still hit the cast handler (shim miss → 404, not the
@@ -898,4 +902,210 @@ test("GET /mcp: server card for browsers, 405 for SSE probes", async () => {
 	});
 	expect(sse.status).toBe(405);
 	expect(sse.headers.get("allow")).toBe("POST");
+});
+
+// --- POST /t: client click-through telemetry (PLAN3) ---
+
+type DataPoint = { indexes?: unknown[]; blobs?: unknown[]; doubles?: unknown[] };
+
+function trackEnv(calls: DataPoint[]) {
+	return {
+		CLICK_STATS: {
+			writeDataPoint: (dp: DataPoint) => {
+				calls.push(dp);
+			},
+		},
+	} as unknown as Env;
+}
+
+function trackCtx(): {
+	ctx: { waitUntil: (p: Promise<unknown>) => void };
+	waited: Promise<unknown>[];
+} {
+	const waited: Promise<unknown>[] = [];
+	return {
+		ctx: {
+			waitUntil: (p: Promise<unknown>) => {
+				waited.push(p);
+			},
+		},
+		waited,
+	};
+}
+
+test("POST /t records a valid pill event exactly once, 204 always", async () => {
+	const calls: DataPoint[] = [];
+	const { ctx, waited } = trackCtx();
+	const res = await app.request(
+		"/t",
+		{
+			method: "POST",
+			body: JSON.stringify({
+				c: "firefly",
+				k: "pill",
+				t: "native",
+				d: "coarse",
+				f: "switch",
+			}),
+		},
+		trackEnv(calls),
+		ctx,
+	);
+	expect(res.status).toBe(204);
+	expect(await res.text()).toBe("");
+	await Promise.all(waited);
+	expect(calls).toHaveLength(1);
+	expect(calls[0].indexes).toEqual(["firefly"]);
+	expect(calls[0].blobs).toEqual([
+		"pill:native",
+		"coarse",
+		"switch",
+		"localhost",
+	]);
+});
+
+test("POST /t drops everything off the allow-list — 204, zero rows", async () => {
+	const calls: DataPoint[] = [];
+	const { ctx } = trackCtx();
+	const bodies = [
+		"not json",
+		JSON.stringify({ c: "not-a-client", k: "pill" }),
+		JSON.stringify({ c: "firefly", k: "hover" }),
+		JSON.stringify({ c: "firefly" }),
+		JSON.stringify({ c: "firefly", k: "pill" }).slice(0, 40) + "x".repeat(200),
+		"", // empty body
+	];
+	for (const body of bodies) {
+		const res = await app.request(
+			"/t",
+			{ method: "POST", body },
+			trackEnv(calls),
+			ctx,
+		);
+		expect(res.status).toBe(204);
+	}
+	expect(calls).toHaveLength(0);
+});
+
+test("POST /t without the binding or an executionCtx still 204s (best-effort)", async () => {
+	// No CLICK_STATS binding (bare workers.dev deploys, some tests):
+	const res = await app.request("/t", {
+		method: "POST",
+		body: JSON.stringify({ c: "firefly", k: "pill" }),
+	});
+	expect(res.status).toBe(204);
+});
+
+test("cast pages ship the track helper; auto-open banners carry the slug", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	// TRACK_SCRIPT (the definition) precedes the scripts that call it.
+	expect(body.indexOf("window.__fk = function")).toBeGreaterThanOrEqual(0);
+	expect(body.indexOf("window.__fk = function")).toBeLessThan(
+		body.indexOf("window.__fk({"),
+	);
+	expect(body).toContain('sendBeacon("/t"');
+	expect(body).toContain("(pointer: coarse)");
+	// No cast identifiers anywhere in the telemetry path: the track helper
+	// never references username/hash variables.
+	const track = body.slice(
+		body.indexOf("window.__fk = function"),
+		body.indexOf("</script>", body.indexOf("window.__fk = function")),
+	);
+	expect(track).not.toContain("username");
+	expect(track).not.toContain("hash");
+
+	// Auto-open banners carry the real slug (data-auto-client is the
+	// display title — "Farcaster" ≠ "farcaster").
+	const autoRes = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { Cookie: "fc_client=farcaster|auto-on" },
+	});
+	const autoBody = await autoRes.text();
+	expect(autoBody).toContain('data-auto-slug="farcaster"');
+	expect(autoBody).toContain('data-auto-client="Farcaster"');
+});
+
+// --- rank-ordered pill row (PLAN3 §6) ---
+
+const RANK_SNAPSHOT = {
+	v: 1,
+	generatedAt: "2026-10-23T00:00:00.000Z",
+	window: { hours: 168 },
+	sampled: false,
+	total: 250,
+	warmingUp: false,
+	rows: [
+		{
+			id: "firefly",
+			first: 10,
+			switched: 2,
+			repeat: 5,
+			pill: 17,
+			goNow: 3,
+			auto: 20,
+			score: 21.4,
+			share: 60.1,
+		},
+		{
+			id: "farcaster",
+			first: 1,
+			switched: 0,
+			repeat: 1,
+			pill: 2,
+			goNow: 0,
+			auto: 4,
+			score: 1.7,
+			share: 4.8,
+		},
+	],
+};
+
+test("rank snapshot reorders pills (never hides); null keeps registry order", async () => {
+	const { resetClientRankStore } = await import("./client-rank-store.ts");
+	try {
+		// lmdis serves the rank snapshot; shim serves the cast.
+		globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "https://lmdis.test") {
+				return Response.json({ result: JSON.stringify(RANK_SNAPSHOT) });
+			}
+			if (url === `https://shim.artlu.xyz/wc/zoo/${SHORT_HASH}`) {
+				return Response.json({ success: true, cast: SHIM_CAST });
+			}
+			if (url === "https://shim.artlu.xyz/signed/10215") {
+				return Response.json({ success: true, signed: true });
+			}
+			throw new Error(`Unexpected fetch in test: ${url}`);
+		}) as typeof fetch;
+		resetClientRankStore();
+		const env = { LMDIS_URL: "https://lmdis.test", LMDIS_REST_TOKEN: "tok" };
+		const ranked = await app.request(`/zoo/${SHORT_HASH}`, {}, env);
+		const rankedBody = await ranked.text();
+		// firefly (score 21.4) now precedes farcaster (1.7)…
+		expect(rankedBody.indexOf('data-client="firefly"')).toBeLessThan(
+			rankedBody.indexOf('data-client="farcaster"'),
+		);
+		// …but every client still renders — reordered, never hidden.
+		for (const id of ["farcaster", "quorum", "firefly", "neynar", "quilcast"]) {
+			expect(rankedBody).toContain(`data-client="${id}"`);
+		}
+		// The badge still follows the cookie, not the rank.
+		const fireflyPill = rankedBody.slice(
+			rankedBody.indexOf('data-client="firefly"'),
+		);
+		expect(fireflyPill.slice(0, fireflyPill.indexOf("</a>"))).not.toContain(
+			"last used",
+		);
+
+		// No env (tests / bare deploys): registry order, byte-comparable.
+		resetClientRankStore();
+		const plain = await app.request(`/zoo/${SHORT_HASH}`);
+		const plainBody = await plain.text();
+		expect(plainBody.indexOf('data-client="farcaster"')).toBeLessThan(
+			plainBody.indexOf('data-client="firefly"'),
+		);
+	} finally {
+		resetClientRankStore();
+	}
 });

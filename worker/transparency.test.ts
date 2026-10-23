@@ -150,3 +150,125 @@ test("Domains section: expiry dates + RDAP confirm links on HTML and JSON twin",
 	expect(com?.expires).toBe("2027-10-21");
 	expect(com?.rdap).toBe("https://rdap.verisign.com/com/v1/domain/warpcats.com");
 });
+
+// --- client rank (PLAN3) ---
+
+const RANK: import("./client-rank-store.ts").RankSnapshot = {
+	v: 1,
+	generatedAt: "2026-10-23T00:00:00.000Z",
+	window: { hours: 168 },
+	sampled: false,
+	total: 250,
+	warmingUp: false,
+	rows: [
+		{
+			id: "firefly",
+			first: 10,
+			switched: 2,
+			repeat: 5,
+			pill: 17,
+			goNow: 3,
+			auto: 20,
+			score: 21.4,
+			share: 60.1,
+		},
+		{
+			id: "farcaster",
+			first: 1,
+			switched: 0,
+			repeat: 1,
+			pill: 2,
+			goNow: 0,
+			auto: 4,
+			score: 1.7,
+			share: 4.8,
+		},
+	],
+};
+
+test("rank table: numbers fill the roster, absent clients keep dashes", () => {
+	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
+	expect(html).toContain("Client choices");
+	expect(html).toContain("<td>firefly</td>");
+	expect(html).toContain("<td>21.4</td>");
+	expect(html).toContain("<td>60.1%</td>");
+	// Every active client renders a row — reordered stats never hide anyone.
+	expect(html).toContain("<td>quorum</td>");
+	// The weighting is published next to the numbers (the methodology is
+	// part of the public contract).
+	expect(html).toContain("auto-opens ×0.1");
+	expect(html).toContain("pill order follows this table");
+	expect(html).toContain("rank stats as of");
+});
+
+test("rank table: warming up — counts stay, shares are withheld", () => {
+	const warming = {
+		...RANK,
+		total: 42,
+		warmingUp: true,
+		rows: RANK.rows.map((r) => ({ ...r, share: null })),
+	};
+	const html = renderTransparencyHtml({ rank: warming });
+	expect(html).toContain("<td>21.4</td>"); // counts shown
+	expect(html).not.toContain("<td>60.1%</td>"); // shares withheld
+	expect(html).toContain("shares withheld until 100+ events");
+});
+
+test("rank table: no snapshot — dashes and no as-of line", () => {
+	const html = renderTransparencyHtml({ snapshot: SNAPSHOT });
+	expect(html).toContain("Client choices");
+	expect(html).toContain("<td>firefly</td>");
+	expect(html).not.toContain("rank stats as of");
+});
+
+test("JSON twin: clientRank live with zero-filled roster and published weights", () => {
+	const json = transparencyJson(SNAPSHOT, RANK) as {
+		clientRank: {
+			status: string;
+			total: number;
+			warmingUp: boolean;
+			weights: { first: number; auto: number };
+			clients: Array<{
+				id: string;
+				first: number | null;
+				score: number | null;
+				share: number | null;
+			}>;
+		};
+	};
+	expect(json.clientRank.status).toBe("live");
+	expect(json.clientRank.total).toBe(250);
+	expect(json.clientRank.weights.auto).toBe(0.1);
+	const firefly = json.clientRank.clients.find((c) => c.id === "firefly");
+	expect(firefly?.score).toBe(21.4);
+	expect(firefly?.share).toBe(60.1);
+	// Zero-filled, not missing: quorum was observed zero times.
+	const quorum = json.clientRank.clients.find((c) => c.id === "quorum");
+	expect(quorum?.first).toBe(0);
+	expect(quorum?.score).toBe(0);
+	expect(quorum?.share).toBeNull();
+});
+
+test("JSON twin: clientRank coming-soon with nulls", () => {
+	const json = transparencyJson(SNAPSHOT) as {
+		clientRank: {
+			status: string;
+			window: null;
+			clients: Array<{ id: string; score: number | null }>;
+		};
+	};
+	expect(json.clientRank.status).toBe("coming-soon");
+	expect(json.clientRank.window).toBeNull();
+	expect(json.clientRank.clients.find((c) => c.id === "firefly")?.score).toBeNull();
+});
+
+test("JSON twin: the tracking counters shape declares both datapoints", () => {
+	const json = transparencyJson(SNAPSHOT, RANK) as {
+		tracking: {
+			counters: { pageLoad: string; clientChoice: string };
+		};
+	};
+	expect(json.tracking.counters.pageLoad).toContain("per page load");
+	expect(json.tracking.counters.clientChoice).toContain("per client selection");
+	expect(json.tracking.counters.clientChoice).toContain("No cast IDs");
+});

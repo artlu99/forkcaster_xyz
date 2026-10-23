@@ -1,11 +1,14 @@
 // /transparency — terse, agent-friendly facts about how forkcaster works:
 // what it is, where data comes from, what is and isn't tracked, plus the
-// provider roster and live race telemetry (offline-generated snapshot,
-// read from lmdis through the per-isolate TTL cache; absent → dashes).
-// HTML for humans, JSON for agents (same negotiation as cast pages).
+// provider roster, live race telemetry and the client-rank table (both
+// offline-generated snapshots, read from lmdis through the per-isolate
+// TTL cache; absent → dashes). HTML for humans, JSON for agents (same
+// negotiation as cast pages).
+import type { RankSnapshot, RankRow } from "../scripts/client-rank-lib.ts";
+import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
-import { escapeHtml, shell } from "./cast-page.tsx";
+import { escapeHtml, shell } from "./shell.tsx";
 
 // Public provider roster — names included on purpose (transparency over
 // infra obscurity). Keyed by ProviderId so a roster change in
@@ -73,8 +76,37 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
 }
 
+const WEIGHTS_NOTE = `first picks ×${RANK_WEIGHTS.first} · go-now ×${RANK_WEIGHTS.goNow} · repeats ×${RANK_WEIGHTS.repeat} · auto-opens ×${RANK_WEIGHTS.auto}`;
+
+function rankTable(rank: RankSnapshot | null | undefined): string {
+	const rows = new Map((rank?.rows ?? []).map((r) => [r.id, r]));
+	const body = RANK_IDS.map((id) => {
+		const r: RankRow | undefined = rows.get(id);
+		const share =
+			r?.share != null ? `${r.share}%` : "—";
+		const cells = [
+			id,
+			r ? String(r.first) : "—",
+			r ? String(r.pill) : "—",
+			r ? String(r.goNow) : "—",
+			r ? String(r.auto) : "—",
+			r ? String(r.score) : "—",
+			share,
+		];
+		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
+	}).join("");
+	const asOf =
+		rank == null
+			? ""
+			: `<li>rank stats as of <code>${escapeHtml(rank.generatedAt)}</code> · window ${rank.window.hours}h · ${rank.total} events${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares withheld until ${WARMING_UP_MIN}+ events (warming up)` : ""}</li>`;
+	const weights = `<li>score weights: ${WEIGHTS_NOTE} — auto-opens echo an earlier choice and count ~10× less; pill order follows this table</li>`;
+	const asOfHtml = asOf === "" ? `<ul>${weights}</ul>` : `<ul>${weights}${asOf}</ul>`;
+	return `<table><thead><tr><th>client</th><th>first picks</th><th>explicit</th><th>go-now</th><th>auto</th><th>score</th><th>share</th></tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+}
+
 export function transparencyJson(
 	snapshot?: Snapshot | null,
+	rank?: RankSnapshot | null,
 ): Record<string, unknown> {
 	const nullStats = () => ({
 		wins: null,
@@ -94,8 +126,15 @@ export function transparencyJson(
 				"author signed Farcaster's contract? shim /signed/{fid}; unknown -> fail open",
 		},
 		tracking: {
-			counters:
-				"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
+			// Shape note (declared change, PLAN3 §6): counters was a single
+			// string; it is now one entry per counter so the click-through
+			// datapoint is declared with the same precision as the page-load one.
+			counters: {
+				pageLoad:
+					"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
+				clientChoice:
+					"1 anonymous datapoint per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, host. No cast IDs, no IPs, no identifiers. Raw rows expire in <=90 days.",
+			},
 			cookies:
 				"fc_client only — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
 		},
@@ -130,11 +169,63 @@ export function transparencyJson(
 						host: p.host,
 					})),
 				},
+		clientRank: rank
+			? {
+					status: "live",
+					generatedAt: rank.generatedAt,
+					window: rank.window,
+					sampled: rank.sampled,
+					total: rank.total,
+					warmingUp: rank.warmingUp,
+					// Published methodology (PLAN3 §9): the weighting is part of
+					// the public contract, not an implementation detail.
+					weights: {
+						first: RANK_WEIGHTS.first,
+						switched: RANK_WEIGHTS.switched,
+						repeat: RANK_WEIGHTS.repeat,
+						goNow: RANK_WEIGHTS.goNow,
+						auto: RANK_WEIGHTS.auto,
+					},
+					clients: RANK_IDS.map((id) => {
+						const r = rank.rows.find((row) => row.id === id);
+						return {
+							id,
+							first: r?.first ?? 0,
+							switched: r?.switched ?? 0,
+							repeat: r?.repeat ?? 0,
+							pill: r?.pill ?? 0,
+							goNow: r?.goNow ?? 0,
+							auto: r?.auto ?? 0,
+							score: r?.score ?? 0,
+							// Shares carry meaning only above the warming-up floor.
+							share: rank.warmingUp ? null : (r?.share ?? null),
+						};
+					}),
+				}
+			: {
+					status: "coming-soon",
+					window: null,
+					clients: RANK_IDS.map((id) => ({
+						id,
+						first: null,
+						switched: null,
+						repeat: null,
+						pill: null,
+						goNow: null,
+						auto: null,
+						score: null,
+						share: null,
+					})),
+				},
 	};
 }
 
 export function renderTransparencyHtml(
-	options: { canonicalUrl?: string; snapshot?: Snapshot | null } = {},
+	options: {
+		canonicalUrl?: string;
+		snapshot?: Snapshot | null;
+		rank?: RankSnapshot | null;
+	} = {},
 ): string {
 	const body = `
 <style>
@@ -164,9 +255,14 @@ ${statsTable(options.snapshot)}
 <li>Ban check (has the author signed Farcaster's contract?): shim <code>/signed/{fid}</code>. Unknown → fail open, everything shown.</li>
 </ul>
 
+<h2>Client choices</h2>
+<p>Which client people open casts with. Pill order on cast pages follows this table (a reordering — nothing is ever hidden, and the registry kill switch outranks popularity).</p>
+${rankTable(options.rank)}
+
 <h2>Tracking</h2>
 <ul>
 <li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
+<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
 <li>One cookie: <code>fc_client</code> — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
 <li>JSON version of this page: add <code>?format=json</code>.</li>
 </ul>

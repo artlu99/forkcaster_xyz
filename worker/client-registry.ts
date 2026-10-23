@@ -1,6 +1,6 @@
 // Client registry: the data behind the cast page's client action row —
 // and the URL source for standalone consumers (e.g. the MCP server).
-// Adding a client is a data change only — the renderer (cast-page.tsx),
+// Adding a client is a data change only — the renderer (cast-actions.tsx),
 // the last-used cookie and the badge pick it up automatically. No code
 // paths are per-client.
 //
@@ -16,7 +16,7 @@
 // custom scheme (plus optional Android package id, which switches Android
 // to the intent:// form with a Chrome-native fallback). When a rendered
 // client has one, the pill gains data-scheme/data-intent attributes and
-// DEEPLINK_SCRIPT (cast-page.tsx) attempts the app at click time on
+// DEEPLINK_SCRIPT (cast-scripts.ts) attempts the app at click time on
 // coarse-pointer devices, falling back to the pill's web href. Absent ⇒
 // web-only.
 

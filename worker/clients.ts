@@ -4,7 +4,7 @@
 //
 // Server `Set-Cookie` (POST /prefs) keeps the preference exempt from
 // Safari ITP's ~7-day cap on script-set cookies; pill clicks still write
-// document.cookie directly (CLIENT_SCRIPT in cast-page.tsx).
+// document.cookie directly (CLIENT_SCRIPT in cast-scripts.ts).
 
 /** Cookie that remembers the visitor's last-used client. */
 export const LAST_CLIENT_COOKIE = "fc_client";

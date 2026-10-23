@@ -1,7 +1,16 @@
+// The cast page orchestrator: resolve once, render twice.
+//
+// resolveCast() races providers (cast-source.ts), unfurls URL embeds,
+// hydrates quote embeds, and checks the author signed-state — then
+// renderCastHtml() / renderCastJson() / renderQuotesFragment() render the
+// one result. Supporting modules:
+//   cast-data.ts    — Shim → embed-data mapping (pure)
+//   cast-actions.tsx — action row + auto-open banner (server halves)
+//   cast-scripts.ts — the inline client scripts those halves pair with
+//   shell.tsx       — the page frame (shared with /transparency)
 import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
-import { siGithub, siGithubsponsors, siOpenaccess } from "simple-icons";
-import { iconMark } from "../shared/icon-mark.ts";
+import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	type ProviderId,
 	type ProviderTiming,
@@ -10,66 +19,25 @@ import {
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
-	type ClientDefinition,
-	clientsForPage,
-	deeplinkTargets,
-	findClient,
-	resolveTemplate,
-	type TemplateVars,
-} from "./client-registry.ts";
+	imageUrlsOf,
+	type UnfurlResult,
+	quoteHashesOf,
+	STATS_ROW,
+	toCastData,
+	toDescription,
+	urlEmbedsOf,
+} from "./cast-data.ts";
+import { autoOpenUi, clientActionsHtml } from "./cast-actions.tsx";
 import {
-	type ClientPrefs,
-	clientDelay,
-	LAST_CLIENT_COOKIE,
-	LAST_CLIENT_MAX_AGE,
-} from "./clients.ts";
+	CLIENT_SCRIPT,
+	LIVE_STATS_SCRIPT,
+	QUOTE_FILL_SCRIPT,
+	TRACK_SCRIPT,
+} from "./cast-scripts.ts";
+import type { ClientPrefs } from "./clients.ts";
+import type { TemplateVars } from "./client-registry.ts";
 import { getCastByHash, getSignedStatus, type ShimCast } from "./shim.ts";
-
-type CastData = NonNullable<Parameters<typeof FarcasterEmbed>[0]["castData"]>;
-
-// Cast data is raced across providers (cast-source.ts — shim, haatz, snap,
-// farcaster.tv); shim remains the ban-signal dependency via /signed. Snapchain
-// stores casts regardless of app-level bans, so restricted accounts render
-// here too. farcaster.tv wins are quote-blind and self-heal client-side
-// (QUOTE_FILL_SCRIPT below).
-
-// Shim embeds are raw message items: {url} or {castId} quotes, untyped.
-// Warpcast-hosted cast images live on imagedelivery.net; external images
-// usually carry an image extension. Everything else renders as a link embed.
-function isImageUrl(url: string): boolean {
-	return (
-		/imagedelivery\.net\//i.test(url) ||
-		/\.(png|jpe?g|gif|webp|avif)([?#]|$)/i.test(url)
-	);
-}
-
-// Quote embeds are dropped, not rendered: the bundle reads
-// quote.author.pfp.url unguarded and Shim's message-level embeds carry no
-// hydrated author data, so any quote card would either crash the page or
-// render as an empty shell. URL embeds render as link cards via openGraph.
-function urlOpenGraph(url: string): {
-	url: string;
-	domain: string;
-	title: string;
-} {
-	try {
-		const parsed = new URL(url);
-		return { url, domain: parsed.hostname, title: parsed.hostname };
-	} catch {
-		return { url, domain: "", title: "" };
-	}
-}
-
-// unfurl.artlu.workers.dev enriches URL embeds with Open Graph data
-// (title/description/image); owner-run, cached, CORS-open. Failures fall
-// back to hostname-only cards.
-type UnfurlResult = {
-	ogTitle?: string;
-	twitterTitle?: string;
-	ogDescription?: string;
-	twitterDescription?: string;
-	ogImage?: Array<{ url?: string } | string>;
-};
+import { escapeHtml, shell } from "./shell.tsx";
 
 async function unfurl(
 	url: string,
@@ -111,754 +79,8 @@ async function unfurl(
 // the full hash). Hydrated quotes map through toCastData, which provides the
 // author.pfp the bundle reads unguarded. Hydration failure drops the quote —
 // old casts get pruned from Snapchain when storage lapses.
-async function fetchQuote(hash: string): Promise<ShimCast | undefined> {
+function fetchQuote(hash: string): Promise<ShimCast | undefined> {
 	return getCastByHash(hash, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
-}
-
-function toCastData(
-	cast: ShimCast,
-	unfurled?: Map<string, UnfurlResult | undefined>,
-	quotes?: Array<ShimCast | undefined>,
-): CastData {
-	const images: Array<{
-		type: string;
-		url: string;
-		sourceUrl: string;
-		alt: string;
-	}> = [];
-	const urls: Array<{
-		type: string;
-		openGraph: Record<string, string | boolean>;
-	}> = [];
-	for (const embed of cast.embeds ?? []) {
-		if (embed.castId?.hash) continue;
-		if (embed.url && isImageUrl(embed.url)) {
-			images.push({
-				type: "image",
-				url: embed.url,
-				sourceUrl: embed.url,
-				alt: "",
-			});
-		} else if (embed.url) {
-			urls.push({
-				type: "url",
-				openGraph: openGraphFor(embed.url, unfurled?.get(embed.url)),
-			});
-		}
-	}
-	const quoteCasts: CastData[] = [];
-	for (const quote of quotes ?? []) {
-		// Recursion depth 1: hydrated quotes render without their own quotes.
-		if (quote?.hash) quoteCasts.push(toCastData(quote));
-	}
-	// The embed bundle reads e.recasts.count and e.tags.length unguarded, and
-	// Shim's message data carries no engagement counts — stub them with zeros
-	// so rendering can't crash. The zero-count stats row itself is stripped
-	// from the SSR output after render (STATS_ROW below).
-	return {
-		hash: cast.hash,
-		text: cast.text,
-		timestamp: cast.timestamp === undefined ? undefined : cast.timestamp * 1000,
-		author: {
-			fid: cast.user?.fid,
-			username: cast.user?.username,
-			displayName: cast.user?.displayName,
-			pfp: { url: cast.user?.pfpUrl },
-			profile: cast.user?.bio ? { bio: { text: cast.user.bio } } : undefined,
-		},
-		embeds: { images, urls, casts: quoteCasts },
-		replies: { count: 0 },
-		reactions: { count: 0 },
-		recasts: { count: 0 },
-		tags: [],
-	};
-}
-
-function openGraphFor(
-	url: string,
-	data?: UnfurlResult,
-): Record<string, string | boolean> {
-	const title = data?.ogTitle ?? data?.twitterTitle ?? urlOpenGraph(url).title;
-	const description = data?.ogDescription ?? data?.twitterDescription;
-	const first = data?.ogImage?.[0];
-	const image = typeof first === "string" ? first : first?.url;
-	return {
-		url,
-		domain: urlOpenGraph(url).domain,
-		title,
-		...(description ? { description } : {}),
-		...(image ? { image, useLargeImage: true } : {}),
-	};
-}
-
-// Shared with transparency.tsx — the only escaper for hand-built HTML.
-export function escapeHtml(s: string): string {
-	return s
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
-}
-
-// Collapse newlines/whitespace and truncate for meta description attributes.
-function toDescription(text: string): string {
-	const flat = text.replace(/\s+/g, " ").trim();
-	return flat.length > 280 ? `${flat.slice(0, 279)}…` : flat;
-}
-
-// The bundle renders a replies/recasts/likes row from engagement data the
-// Shim doesn't carry — without the toCastData zero stubs rendering would
-// crash, with them it would always show hardcoded zeros. Strip the row from
-// the SSR output; the Farcaster logo in the same container stays. The stats
-// <ul> is the only <ul> in the card and contains no user text, so matching
-// on the container class is exact. The replacement re-opens the container
-// with data attributes so the client-side live-stats script can find it.
-const STATS_ROW = /(<div class="farcaster-embed-stats">)<ul>[\s\S]*?<\/ul>/;
-
-// Live engagement counts, fetched client-side so the SSR path stays
-// Shim-only and no fake numbers are ever shipped. farcaster.tv (unofficial
-// Warpcast client API) sends access-control-allow-origin: * and answers for
-// unsigned/banned authors too, with exact reply/like/recast counts. Any
-// failure leaves the row absent — stats are decoration, not content. Only
-// the static icons use innerHTML; remote values go through textContent.
-const LIVE_STATS_SCRIPT = `<script>
-(function () {
-  var slot = document.querySelector(".farcaster-embed-stats[data-username]");
-  if (!slot) return;
-  var u = slot.getAttribute("data-username") || "";
-  var h = slot.getAttribute("data-hash") || "";
-  if (!u || !/^0x[0-9a-fA-F]+$/.test(h)) return;
-  fetch("https://farcaster.tv/" + encodeURIComponent(u) + "/" + h)
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (j) {
-      var casts = j && j.result && j.result.casts;
-      if (!casts) return;
-      var c = null;
-      for (var i = casts.length - 1; i >= 0; i--) {
-        if (casts[i] && typeof casts[i].hash === "string" && casts[i].hash.indexOf(h) === 0) {
-          c = casts[i];
-          break;
-        }
-      }
-      if (!c) return;
-      var replies = c.replies && c.replies.count;
-      var recasts = c.combinedRecastCount != null ? c.combinedRecastCount : c.recasts && c.recasts.count;
-      var likes = c.reactions && c.reactions.count;
-      if (replies == null && recasts == null && likes == null) return;
-      var fmt = function (v) {
-        return typeof v === "number" && isFinite(v) ? v.toLocaleString("en-US") : "0";
-      };
-      var icons = {
-        reply: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
-        recast: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.1l4 4-4 4"></path><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8M7 21.9l-4-4 4-4"></path><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"></path></svg>',
-        like: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06 1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>'
-      };
-      var href = "https://farcaster.xyz/" + u + "/" + h;
-      var ul = document.createElement("ul");
-      [[icons.reply, replies], [icons.recast, recasts], [icons.like, likes]].forEach(function (it) {
-        var a = document.createElement("a");
-        a.className = "farcaster-embed-stats-link";
-        a.href = href;
-        a.target = "_blank";
-        a.rel = "noopener";
-        var span = document.createElement("span");
-        span.textContent = fmt(it[1]);
-        a.innerHTML = it[0];
-        a.appendChild(span);
-        var li = document.createElement("li");
-        li.appendChild(a);
-        ul.appendChild(li);
-      });
-      slot.insertBefore(ul, slot.firstChild);
-    })
-    .catch(function () {});
-})();
-</script>`;
-
-// Remembers the visitor's client choice: a delegated click listener
-// writes the cookie value — slug + the existing tail ("|" and everything
-// after it: auto-open flag and optional delay), so pill clicks never
-// clear the preference. The flag and delay are written server-side via
-// POST /prefs (ITP-safe).
-const CLIENT_SCRIPT = `<script>
-(function () {
-  document.addEventListener("click", function (e) {
-    var el = e.target;
-    while (el && el !== document) {
-      var id = el.getAttribute && el.getAttribute("data-client");
-      if (id) {
-        var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
-        var cur = "";
-        try { cur = m ? decodeURIComponent(m[1]) : ""; } catch (err) { cur = m ? m[1] : ""; }
-        var sep = cur.indexOf("|");
-        var tail = sep === -1 ? "" : cur.slice(sep);
-        document.cookie = "${LAST_CLIENT_COOKIE}=" + id + tail +
-          ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax;Secure";
-        return;
-      }
-      el = el.parentNode;
-    }
-  });
-})();
-</script>`;
-
-// Native-target handling for mobile: on coarse-pointer devices, a click
-// on a pill that carries a native target attempts the app first and
-// falls back to the pill's web href if the page is still visible after
-// the attempt (app opened ⇒ page hidden ⇒ no fallback). Android prefers
-// data-intent (Chrome handles the fallback natively); everything else
-// uses data-scheme. Desktop and no-JS visitors just follow the web
-// href; the SSR HTML is byte-identical for every device — no UA
-// sniffing on the server, only a client-side transport choice. Emitted
-// only when at least one rendered client has a native target.
-const DEEPLINK_SCRIPT = `<script>
-(function () {
-  if (!window.matchMedia("(pointer: coarse)").matches) return;
-  var android = /android/i.test(navigator.userAgent);
-  document.addEventListener("click", function (e) {
-    var el = e.target;
-    while (el && el !== document) {
-      var intent = android ? el.getAttribute && el.getAttribute("data-intent") : null;
-      var target = intent || (el.getAttribute && el.getAttribute("data-scheme"));
-      if (target) {
-        e.preventDefault();
-        var opened = false;
-        var hide = function () { opened = true; };
-        document.addEventListener("visibilitychange", hide, { once: true });
-        window.addEventListener("pagehide", hide, { once: true });
-        window.location.href = target;
-        setTimeout(function () {
-          if (!opened && !document.hidden) window.location.href = el.getAttribute("href");
-        }, 1800);
-        return;
-      }
-      el = el.parentNode;
-    }
-  });
-})();
-</script>`;
-
-// Quote-card fill-in for partial wins: farcaster.tv drops quote embeds,
-// so such pages ship without quote cards and this script pulls the
-// shim-resolved SSR fragment (?embeds=quotes) into the page — the same
-// silent-degradation contract as the live-stats script. Bots and no-JS
-// visitors keep the OG-complete page; no server cache is involved.
-const QUOTE_FILL_SCRIPT = `<script>
-(function () {
-  var slot = document.querySelector(".farcaster-embed");
-  if (!slot) return;
-  fetch(location.pathname + "?embeds=quotes")
-    .then(function (r) { return r.ok ? r.text() : null; })
-    .then(function (html) {
-      if (!html || !html.trim()) return;
-      slot.insertAdjacentHTML("afterend", html);
-    })
-    .catch(function () {});
-})();
-</script>`;
-
-// Auto-open flow: for a returning user with a last-used client.
-// - unset: pausable countdown (saved delay, default 5s; 0 redirects
-//   immediately) → redirect.
-// - on: LARGE arming overlay with the same countdown + Pause, then
-//   location.replace().
-// - off: compact status chip that toggles the preference on.
-// Bots never send the cookie and see none of this. Timer cancels on
-// any pill pointerdown.
-const AUTO_SCRIPT = `<script>
-(function () {
-  var box = document.querySelector("[data-auto]");
-  var post = function (auto) {
-    return fetch("/prefs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ auto: auto })
-    }).catch(function () {});
-  };
-  var name = box ? box.getAttribute("data-auto-client") : "";
-  var url = box ? box.getAttribute("data-auto-url") : "";
-  var mode = box ? box.getAttribute("data-auto") : "";
-  // Native targets for the last-used client (server-resolved per cast).
-  // Mobile attempts the app before the web redirect — the web href can be
-  // a homepage stub (quorum), and a timer-driven location.replace() to it
-  // would never open the app. Desktop keeps the plain redirect: schemes
-  // are phone-scoped and stalling auto-open by the fallback window there
-  // buys nothing.
-  var schemeAttr = box ? box.getAttribute("data-auto-scheme") || "" : "";
-  var intentAttr = box ? box.getAttribute("data-auto-intent") || "" : "";
-  var native = null;
-  if (box && window.matchMedia("(pointer: coarse)").matches) {
-    native = /android/i.test(navigator.userAgent) && intentAttr ? intentAttr : schemeAttr || null;
-  }
-  var delay = 5;
-  if (box) {
-    var rawDelay = box.getAttribute("data-auto-delay");
-    if (rawDelay === "0" || rawDelay === "1" || rawDelay === "2" || rawDelay === "3" || rawDelay === "4" || rawDelay === "5") {
-      delay = Number(rawDelay);
-    }
-  }
-  var prefOn = mode === "on" || mode === "unset";
-  var opening = function (tail) {
-    if (delay === 0) return "Opening <strong>" + name + "</strong> now" + tail;
-    return "Opening <strong>" + name + '</strong> in <span class="auto-secs">' + delay + "</span>s" + tail;
-  };
-  var chip = function (pressed) {
-    return '<button class="pill auto-chip" data-auto-toggle aria-pressed="' +
-      (pressed ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
-      (pressed ? "On" : "Off") + '</button>';
-  };
-  var settings = '<a class="auto-settings" href="/">settings</a>';
-  // One choice per view: Pause. Settings (Turn off / toggle) appear only
-  // in the calm paused view, never during the redirect window.
-  var views = {
-    countdown: function () {
-      // data-scheme/data-intent let DEEPLINK_SCRIPT's delegated click
-      // handler attempt the app when the anchor is tapped manually (its
-      // fallback is the anchor href — the same web URL).
-      return '<a class="auto-go" href="' + url + '"' +
-        (schemeAttr ? ' data-scheme="' + schemeAttr + '"' : '') +
-        (intentAttr ? ' data-intent="' + intentAttr + '"' : '') +
-        '>' + opening(" \u2192") + "</a>" +
-        '<button class="pill" data-auto-action="pause">Pause</button>';
-    },
-    paused: function () {
-      return '<span class="auto-status">Paused \u2014 ' +
-        (prefOn ? "auto-open is on; next casts open in <strong>" + name + "</strong>" : "pick a client below") +
-        '</span>' +
-        '<button class="pill" data-auto-action="go">Go now</button>' +
-        (prefOn ? '<button class="pill" data-auto-action="off">Turn off auto-open</button>' : '') +
-        settings;
-    },
-    arming: function () {
-      return '<p class="auto-overlay-title">' + opening("\u2026") + "</p>" +
-        '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p>';
-    },
-    stayed: function () {
-      return '<span class="auto-status">Auto-open is on \u2014 next casts open in <strong>' + name + '</strong></span>' +
-        chip(true) + settings;
-    },
-    off: function () {
-      return '<span class="auto-status">Auto-open is off</span>' + chip(false) + settings;
-    }
-  };
-  var apply = function (view) {
-    box.className = view === "arming" ? "auto-overlay" : "auto-banner";
-    box.innerHTML = views[view]();
-  };
-  var fired = false;
-  var timer = null;
-  var tick = null;
-  var cancelAll = function () {
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (tick) { clearInterval(tick); tick = null; }
-  };
-  // Every redirect path (delay-0, timer expiry, Go now) funnels through
-  // open(): native attempt when the last-used client has a target and
-  // this is a phone, web redirect otherwise. The 2.5s visibility window
-  // mirrors DEEPLINK_SCRIPT but runs longer — a timer fire has no user
-  // gesture anchoring the navigation, and cold starts (Quorum's RN +
-  // WASM boot, expo-updates check-on-launch) can outrun 1.8s.
-  var open = function () {
-    if (fired) return;
-    fired = true;
-    if (!native) {
-      location.replace(url);
-      return;
-    }
-    var opened = false;
-    var hide = function () { opened = true; };
-    document.addEventListener("visibilitychange", hide, { once: true });
-    window.addEventListener("pagehide", hide, { once: true });
-    window.location.href = native;
-    setTimeout(function () {
-      if (!opened && !document.hidden) location.replace(url);
-    }, 2500);
-  };
-  var secsLeft = delay;
-  var startTimer = function () {
-    if (delay === 0) {
-      open();
-      return;
-    }
-    secsLeft = delay;
-    tick = setInterval(function () {
-      secsLeft -= 1;
-      if (secsLeft <= 0) {
-        cancelAll();
-        open();
-        return;
-      }
-      var s = box.querySelector(".auto-secs");
-      if (s) s.textContent = String(secsLeft);
-    }, 1000);
-  };
-  var pause = function () { cancelAll(); apply("paused"); };
-  var goNow = function () {
-    cancelAll();
-    open();
-  };
-  var turnOff = function () {
-    cancelAll();
-    prefOn = false;
-    if (tick) { clearInterval(tick); tick = null; }
-    post("off").then(function () { apply("off"); });
-  };
-  if (box) {
-    box.addEventListener("click", function (e) {
-      var t = e.target && e.target.closest ? e.target.closest("[data-auto-toggle]") : null;
-      if (t) {
-        var target = prefOn ? "off" : "on";
-        cancelAll();
-        post(target).then(function () {
-          prefOn = target === "on";
-          apply(prefOn ? "stayed" : "off");
-        });
-        return;
-      }
-      var a = e.target && e.target.closest ? e.target.closest("[data-auto-action]") : null;
-      if (!a) return;
-      var action = a.getAttribute("data-auto-action");
-      if (action === "pause") pause();
-      else if (action === "go") goNow();
-      else if (action === "off") turnOff();
-    });
-    document.addEventListener("pointerdown", function (e) {
-      var n = e.target;
-      while (n && n !== document) {
-        if (n.classList && n.classList.contains("actions")) {
-          if (mode === "unset" || mode === "on") pause();
-          return;
-        }
-        n = n.parentNode;
-      }
-    }, true);
-  }
-  if (mode === "on") {
-    apply("arming");
-    startTimer();
-  }
-  if (mode === "unset") {
-    apply("countdown");
-    startTimer();
-  }
-})();
-</script>`;
-
-function autoOpenUi(
-	prefs: ClientPrefs,
-	signed: boolean,
-	vars: TemplateVars,
-	noredirect: boolean,
-): { html: string; script?: string } {
-	if (!prefs.slug) return { html: "" };
-	const last = clientsForPage(signed, vars).find((c) => c.id === prefs.slug);
-	if (!last?.web) return { html: "" };
-	const url = escapeHtml(resolveTemplate(last.web, vars));
-	const name = escapeHtml(last.title);
-	const delay = clientDelay(prefs);
-	// Native-aware redirect: when the last-used client ships a deeplink,
-	// the banner carries the resolved targets so AUTO_SCRIPT attempts the
-	// app before falling back to the web href — for quorum that href is a
-	// homepage stub, and a plain location.replace() would never open the
-	// app (the deterministic "redirect lands on the website" bug).
-	const targets = last.deeplink ? deeplinkTargets(last, vars) : {};
-	const nativeMeta = targets.scheme
-		? ` data-auto-scheme="${escapeHtml(targets.scheme)}"` +
-			(targets.intent ? ` data-auto-intent="${escapeHtml(targets.intent)}"` : "")
-		: "";
-	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-delay="${delay}"${nativeMeta}`;
-	const opening =
-		delay === 0
-			? `Opening <strong>${name}</strong> now`
-			: `Opening <strong>${name}</strong> in <span class="auto-secs">${delay}</span>s`;
-	const open = `<div class="auto-overlay" role="alert" data-auto="on" ${meta}>`;
-	const banner = (status: string, mode: string) =>
-		`<div class="auto-banner" aria-live="polite" data-auto="${mode}" ${meta}><span class="auto-status">${status}</span>`;
-	// On: LARGE abort overlay. The script redirects when the wait elapses
-	// (immediately at 0).
-	if (!noredirect && prefs.auto === "on") {
-		return {
-			html:
-				open +
-				`<p class="auto-overlay-title">${opening}\u2026</p>` +
-				`<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p></div>`,
-			script: AUTO_SCRIPT,
-		};
-	}
-	// Unset: pausable countdown for the saved wait. The script replaces
-	// this status with a link to the client.
-	if (!noredirect && prefs.auto === undefined) {
-		return {
-			html:
-				banner(`${opening} \u2192`, "unset") +
-				`<button class="pill" data-auto-action="pause">Pause</button></div>`,
-			script: AUTO_SCRIPT,
-		};
-	}
-	// OFF state, or the ?noredirect escape: status + two-way chip.
-	const status = noredirect
-		? prefs.auto === "on"
-			? "Auto-open: On \u2014 this page won't redirect"
-			: "Auto-open: Off"
-		: "Auto-open is off";
-	const pressed = prefs.auto === "on" ? "true" : "false";
-	const label = prefs.auto === "on" ? "On" : "Off";
-	return {
-		html:
-			banner(status, noredirect ? "noredirect" : "off") +
-			`<button class="pill auto-chip" data-auto-toggle aria-pressed="${pressed}" title="Toggle auto-open">Auto-open: ${label}</button>` +
-			`<a class="auto-settings" href="/">settings</a></div>`,
-		script: AUTO_SCRIPT,
-	};
-}
-
-// Exported for clients.test.ts (pill markup with/without native targets).
-export function clientPill(
-	client: ClientDefinition,
-	vars: TemplateVars,
-	isLast: boolean,
-): string {
-	const href = resolveTemplate(client.web as string, vars);
-	const targets = deeplinkTargets(client, vars);
-	const native =
-		(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
-		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "");
-	return (
-		`<a class="pill client-pill" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${native}>` +
-		`<img class="pill-logo" src="${escapeHtml(client.logoUrl)}" alt="" width="16" height="16" />` +
-		`${escapeHtml(client.title)}` +
-		(isLast ? `<span class="pill-badge">last used</span>` : "") +
-		`</a>`
-	);
-}
-
-// The "Open in …" action row, rendered from the client registry. One
-// pill per client; the pill whose id matches the last-used cookie
-// carries the badge. Suppression (signed rule, unsatisfied placeholders
-// like {fid}) is decided by clientsForPage; here signed is already
-// reduced to pass/fail-open.
-function clientActionsHtml(
-	vars: TemplateVars,
-	signed: boolean,
-	lastClientId: string | undefined,
-): string {
-	const last = findClient(lastClientId);
-	const offered = clientsForPage(signed, vars);
-	const pills = offered
-		.map((client) =>
-			clientPill(client, vars, last !== undefined && client.id === last.id),
-		)
-		.join("\n");
-	// The mobile deeplink script ships only when a rendered client
-	// actually has a native target — zero bytes otherwise.
-	const hasNative = offered.some(
-		(client) => Object.keys(deeplinkTargets(client, vars)).length > 0,
-	);
-	return `<p class="actions">${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
-}
-
-export function shell(
-	title: string,
-	bodyHtml: string,
-	og?: {
-		ogTitle: string;
-		description?: string;
-		image?: string;
-		largeImage?: boolean;
-	},
-	clientScript?: string,
-	canonicalUrl?: string,
-): string {
-	const canonicalMeta = canonicalUrl
-		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
-		: "";
-	const meta = og
-		? [
-				`<meta property="og:site_name" content="forkcaster" />`,
-				`<meta property="og:type" content="article" />`,
-				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
-				...(canonicalUrl
-					? [`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`]
-					: []),
-				`<meta name="twitter:card" content="${og.largeImage && og.image ? "summary_large_image" : "summary"}" />`,
-				`<meta name="twitter:title" content="${escapeHtml(og.ogTitle)}" />`,
-				og.description
-					? `<meta property="og:description" content="${escapeHtml(og.description)}" />`
-					: "",
-				og.description
-					? `<meta name="twitter:description" content="${escapeHtml(og.description)}" />`
-					: "",
-				og.image
-					? `<meta property="og:image" content="${escapeHtml(og.image)}" />`
-					: "",
-				og.image
-					? `<meta property="og:image:alt" content="${escapeHtml(og.ogTitle)}" />`
-					: "",
-				og.image
-					? `<meta name="twitter:image" content="${escapeHtml(og.image)}" />`
-					: "",
-			]
-				.filter(Boolean)
-				.join("\n")
-		: "";
-	// Title is escaped: it embeds the route's percent-decoded username.
-	return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${escapeHtml(title)}</title>
-${canonicalMeta}
-${meta}
-<link rel="alternate" type="application/json" href="?format=json" />
-<link rel="stylesheet" href="/farcaster-embed.css" />
-<style>
-:root {
-  color-scheme: light dark;
-  --bg: #fbfbfa;
-  --ink: #101014;
-  --muted: #77747e;
-  --line: #e8e6e3;
-  --accent: #7f32e3;
-  --accent-soft: #ede7fa;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e0e12;
-    --ink: #f0eff2;
-    --muted: #77747e;
-    --line: #26262c;
-    --accent: #c1b0ff;
-    --accent-soft: #241c38;
-  }
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font: 16px/1.6 system-ui, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-.site-header, main, .site-footer {
-  max-width: 672px;
-  margin: 0 auto;
-  padding-inline: 20px;
-}
-.site-header { padding-top: 24px; padding-bottom: 20px; }
-.wordmark {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-  text-decoration: none;
-}
-.wordmark:hover { color: var(--ink); }
-.wordmark b { color: var(--accent); font-weight: 600; }
-main { padding-bottom: 8px; }
-.notice { color: var(--muted); font-size: 14px; margin: 18px 0 0; }
-.actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 0; }
-.pill {
-  display: inline-block;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 8px 16px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 500;
-  transition: border-color 0.15s ease, background-color 0.15s ease,
-    color 0.15s ease;
-}
-.pill:hover, .pill:focus-visible {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: transparent;
-}
-.client-pill {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.pill-logo {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  flex: none;
-}
-.pill-badge {
-  position: absolute;
-  top: -8px;
-  right: 10px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  line-height: 1.4;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--bg);
-  pointer-events: none;
-}
-.site-footer {
-  margin-top: 20px;
-  padding-top: 14px;
-  padding-bottom: 32px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.site-footer a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  text-decoration: none;
-}
-.site-footer svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-.site-footer a:hover, .site-footer a:focus-visible { color: var(--ink); }
-.auto-banner, .auto-overlay {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  border: 1px solid var(--accent); background: var(--accent-soft);
-  border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px;
-}
-.auto-banner .auto-go { color: var(--ink); text-decoration: none; }
-.auto-banner .auto-go:hover { color: var(--accent); }
-.auto-banner .auto-settings, .auto-overlay .auto-settings,
-.auto-chip[href="/"] { color: var(--muted); font-size: 12px; text-decoration: none; }
-.auto-overlay { border-width: 2px; border-radius: 12px; padding: 22px; }
-.auto-overlay-title { font-size: 30px; font-weight: 700; margin: 0 0 12px; }
-.auto-overlay-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
-.auto-overlay .pill { font-size: 18px; padding: 10px 22px; }
-.auto-banner .pill, .auto-overlay .pill { cursor: pointer; }
-</style>
-</head>
-<body>
-<header class="site-header">
-  <a class="wordmark" href="/">forkcaster<b>.</b></a>
-</header>
-<main>
-${bodyHtml}
-</main>
-<footer class="site-footer">
-  <a href="https://github.com/artlu99/forkcaster_xyz">${iconMark(siGithub.svg)}MIT license</a>
-  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${iconMark(siGithubsponsors.svg)}Contributing</a>
-  <a href="/transparency">${iconMark(siOpenaccess.svg)}Transparency</a>
-</footer>
-${clientScript ?? ""}
-</body>
-</html>`;
 }
 
 function castPage(
@@ -875,6 +97,7 @@ function castPage(
 	partial = false,
 	primaryOrigin?: string,
 	noredirect = false,
+	rank?: RankSnapshot | null,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -884,7 +107,7 @@ function castPage(
 		signed === false
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
 			: "";
-	const actions = clientActionsHtml(vars, signed, prefs.slug);
+	const actions = clientActionsHtml(vars, signed, prefs.slug, rank);
 	// Dual-serve canonicalization: every host renders the same page, but
 	// points at the primary origin so link equity and unfurlers agree.
 	// The full hash additionally dedupes short/long variants of the same
@@ -897,7 +120,7 @@ function castPage(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`${auto.html}${cardHtml}${notice}${actions}`,
 		og,
-		`${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${auto.script ?? ""}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${auto.script ?? ""}`,
 		canonicalUrl,
 	);
 }
@@ -907,6 +130,7 @@ function linkOnlyPage(
 	hash: string,
 	slug?: string,
 	noredirect = false,
+	rank?: RankSnapshot | null,
 ): string {
 	// No provider resolved the cast: signed state is unknown, which fails
 	// open — every registry client is offered. The route hash is used as-is
@@ -927,9 +151,10 @@ function linkOnlyPage(
 			{ username, hash, fullHash: hash },
 			true,
 			slug,
+			rank,
 		)}`,
 		undefined,
-		`${CLIENT_SCRIPT}${auto.script ?? ""}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${auto.script ?? ""}`,
 	);
 }
 
@@ -938,39 +163,8 @@ function notFoundPage(username: string, hash: string): string {
 	// reaches the body (the title is escaped inside shell()).
 	return shell(
 		`${username}/${hash} · forkcaster`,
-		`<p class="notice">Cast not found: ${escapeHtml(username)}/${hash}. The username or hash may be wrong, or the cast was deleted.</p>`,
+		`<p class="notice">Cast not found: ${escapeHtml(username)}/${escapeHtml(hash)}. The username or hash may be wrong, or the cast was deleted.</p>`,
 	);
-}
-
-// URL embeds destined for unfurl enrichment: deduped, capped at 3.
-// Shared by resolve (which performs the unfurls) and the JSON renderer
-// (which must describe exactly the same list).
-function urlEmbedsOf(cast: ShimCast): string[] {
-	return Array.from(
-		new Set(
-			(cast.embeds ?? [])
-				.map((embed) => embed.url)
-				.filter((u): u is string => typeof u === "string" && !isImageUrl(u)),
-		),
-	).slice(0, 3);
-}
-
-// Quote embeds destined for Shim /h hydration: capped at 3. Same sharing
-// story as urlEmbedsOf: resolve hydrates, the JSON renderer pairs against
-// the results position by position.
-function quoteHashesOf(cast: ShimCast): string[] {
-	return (cast.embeds ?? [])
-		.map((embed) => embed.castId?.hash)
-		.filter((h): h is string => typeof h === "string")
-		.slice(0, 3);
-}
-
-// Image embed URLs in embed order. The HTML renderer uses the first for
-// og:image; the JSON renderer lists all of them.
-function imageUrlsOf(cast: ShimCast): string[] {
-	return (cast.embeds ?? [])
-		.map((embed) => embed.url)
-		.filter((u): u is string => typeof u === "string" && isImageUrl(u));
 }
 
 // Everything both renderers need, fetched once ("resolve once, render
@@ -1084,6 +278,7 @@ export async function renderCastHtml(
 	prefs: ClientPrefs = {},
 	primaryOrigin?: string,
 	noredirect = false,
+	rank?: RankSnapshot | null,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, hash) };
@@ -1091,7 +286,7 @@ export async function renderCastHtml(
 	if (resolved.kind === "unreachable") {
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, prefs.slug, noredirect),
+			html: linkOnlyPage(username, hash, prefs.slug, noredirect, rank),
 		};
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
@@ -1141,13 +336,14 @@ export async function renderCastHtml(
 				partial,
 				primaryOrigin,
 				noredirect,
+				rank,
 			),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, prefs.slug, noredirect),
+			html: linkOnlyPage(username, hash, prefs.slug, noredirect, rank),
 		};
 	}
 }
