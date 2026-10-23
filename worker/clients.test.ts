@@ -171,7 +171,9 @@ describe("client cookie", () => {
 describe("clientsForPage", () => {
 	test("skips clients with unsatisfied optional placeholders ({fid})", () => {
 		// Vibeshift needs the cast originator's fid (castFid): with no fid
-		// in the vars it is skipped, the rest stay.
+		// in the vars it is skipped, the rest stay. Linkcast is absent from
+		// both lists too: it is link-gated, and these calls pass no gate
+		// argument (unknown ⇒ hidden — see the gate describe below).
 		const withoutFid = clientsForPage(true, {
 			...VARS,
 			fid: undefined,
@@ -212,6 +214,7 @@ describe("clientsForPage", () => {
 			"quilcast",
 			"neynar",
 			"vibeshift",
+			"linkcast",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -345,6 +348,23 @@ describe("roster native targets", () => {
 	});
 });
 
+test("linkcast's web route emits the site-canonical bare hex", () => {
+	const linkcast = findClient("linkcast");
+	expect(linkcast).toBeDefined();
+	// Verified live (Oct 2026): /cast/<40 bare hex> is the site's own
+	// spelling and the 0x-prefixed form renders identically — the pill
+	// emits {fullHashRaw}. Web-only (no assetlinks.json, no scheme), so
+	// no native data attributes ship.
+	const html = clientPill(linkcast as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://linkcast.xyz/cast/895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="linkcast"');
+	expect(html).toContain('src="/logos/linkcast.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -459,10 +479,18 @@ describe("external-link gate", () => {
 		}
 	});
 
-	test("no roster client is link-gated today (the ordered-list tests pass no gate arg)", () => {
-		for (const client of CLIENTS) {
-			expect(client.requiresExternalLinks).toBeUndefined();
-		}
+	test("linkcast is the roster's one link-gated client — by contract", () => {
+		// Guards against ACCIDENTAL gating: exactly one entry may set
+		// requiresExternalLinks. Linkcast's gate rests on the product
+		// contract (links-only feed), not its implementation — the /cast/
+		// route renders any cast today (see the registry comment).
+		expect(
+			CLIENTS.filter((c) => c.requiresExternalLinks).map((c) => c.id),
+		).toEqual(["linkcast"]);
+		// Fail-closed on the real entry: unknown cast state hides the pill.
+		expect(
+			blockedByLinkGate(findClient("linkcast") as ClientDefinition, undefined),
+		).toBe(true);
 	});
 
 	test("CLIENT_HOSTS derives www-stripped web hosts in registry order", () => {
@@ -473,6 +501,7 @@ describe("external-link gate", () => {
 			"quilcast.com",
 			"explorer.neynar.com",
 			"vibeshift.onchain.cooking",
+			"linkcast.xyz",
 		]);
 	});
 });

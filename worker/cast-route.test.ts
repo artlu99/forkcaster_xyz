@@ -20,7 +20,6 @@ mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 
 const { app } = await import("./index.ts");
 
-import { CLIENTS, type ClientDefinition } from "./client-registry.ts";
 
 const CAST_TEXT = "omg so relevant!";
 const SHORT_HASH = "0x895ecc74";
@@ -1138,39 +1137,28 @@ test("rank snapshot reorders pills (never hides); null keeps registry order", as
 	}
 });
 
-// The external-link gate, end to end, against the canonical casts: a
-// `requiresExternalLinks` client (fixture, pushed/popped — no roster
-// entry uses the flag today) renders its pill only on casts that carry
-// an external URL embed. kenny/0xa26d1f38 is the canonical with-link
-// cast (one x.com embed, signed author); zoo/0x895ecc74 is the house
-// cast (image-only — genuinely link-less; the REAL no-external canonical
-// is decent-artlu/0xbb54368f, quote-only, but its route fixture models a
-// URL embed for the unfurl-fallback path, so it can't play this role).
-test("link gate: gated client pill only on casts with an external link", async () => {
-	const GATED: ClientDefinition = {
-		id: "gate-links",
-		title: "GateLinks",
-		logoUrl: "/logos/farcaster.svg",
-		web: "https://links.test/c/{fullHashRaw}",
-		requiresExternalLinks: true,
-	};
-	CLIENTS.push(GATED);
-	try {
-		// Image-only cast: nothing external ⇒ pill hidden.
-		const noLinks = await app.request("/zoo/0x895ecc74");
-		expect(noLinks.status).toBe(200);
-		expect(await noLinks.text()).not.toContain('data-client="gate-links"');
+// The external-link gate, end to end, against the canonical casts:
+// linkcast — the roster's one requiresExternalLinks client, gated by the
+// links-only contract (see the registry comment) — renders its pill only
+// on casts that carry an external URL embed. kenny/0xa26d1f38 is the
+// canonical with-link cast (one x.com embed, signed author);
+// zoo/0x895ecc74 is the house cast (image-only — genuinely link-less;
+// the REAL no-external canonical is decent-artlu/0xbb54368f, quote-only,
+// but its route fixture models a URL embed for the unfurl-fallback path,
+// so it can't play this role).
+test("link gate: linkcast pill only on casts with an external link", async () => {
+	// Image-only cast: nothing external ⇒ pill hidden.
+	const noLinks = await app.request("/zoo/0x895ecc74");
+	expect(noLinks.status).toBe(200);
+	expect(await noLinks.text()).not.toContain('data-client="linkcast"');
 
-		// Cast with an external URL embed ⇒ pill offered.
-		const withLink = await app.request("/kenny/0xa26d1f38");
-		expect(withLink.status).toBe(200);
-		const body = await withLink.text();
-		expect(body).toContain('data-client="gate-links"');
-		// {fullHashRaw} of kenny's cast, bare hex, no 0x.
-		expect(body).toContain(
-			'href="https://links.test/c/a26d1f3861326cf24977995ec9dd24145e87a2fb"',
-		);
-	} finally {
-		CLIENTS.pop();
-	}
+	// Cast with an external URL embed ⇒ pill offered.
+	const withLink = await app.request("/kenny/0xa26d1f38");
+	expect(withLink.status).toBe(200);
+	const body = await withLink.text();
+	expect(body).toContain('data-client="linkcast"');
+	// {fullHashRaw} of kenny's cast, bare hex, no 0x.
+	expect(body).toContain(
+		'href="https://linkcast.xyz/cast/a26d1f3861326cf24977995ec9dd24145e87a2fb"',
+	);
 });

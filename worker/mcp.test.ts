@@ -102,7 +102,7 @@ describe("protocol", () => {
 		const tool = tools.find((t) => t.name === "get_cast_link");
 		expect(tool).toBeDefined();
 		const schema = JSON.stringify(tool?.inputSchema);
-		for (const id of ["farcaster", "quorum", "firefly", "neynar", "quilcast", "vibeshift", "all"]) {
+		for (const id of ["farcaster", "quorum", "firefly", "neynar", "quilcast", "vibeshift", "linkcast", "all"]) {
 			expect(schema).toContain(id);
 		}
 	});

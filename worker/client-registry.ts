@@ -166,6 +166,32 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/vibeshift.png",
 		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}&castFid={fid}",
 	},
+	// Linkcast is a links-only view of Farcaster: "Farcaster, but only the
+	// links… a live feed of every cast that shares a link" (ghostlinkz.eth's
+	// announcement cast, linkcast.xyz/cast/ad85a07ee52e2c3c9ee0b5d8dbcea44cf47fb185).
+	// Per-cast format VERIFIED live (Oct 2026): the site's own routes are
+	// /cast/<40 bare hex> (homepage cast links use that spelling) and the
+	// 0x-prefixed form renders identically — live checks rendered the right
+	// cast at both /cast/895ecc74… and /cast/0x895ecc74… (zoo/0x895ecc74),
+	// so the template emits the site-canonical bare hex via {fullHashRaw}.
+	// No native app: linkcast.xyz has no assetlinks.json and no deeplink
+	// scheme anywhere → web-only. requiresSigned stays unset: the
+	// known-unsigned author's cast (decent-artlu/0xbb54368f) renders.
+	// requiresExternalLinks is set BY CONTRACT, not implementation: the
+	// product is the links-only feed, but the /cast/ route currently
+	// renders any cast (gate canonical decent-artlu/0xbb54368f — no
+	// embeds — renders with no ineligible notice; kenny/0xa26d1f38 renders
+	// with its x.com card). Owner's call: build to the contract — the pill
+	// appears only on casts that could plausibly exist in Linkcast's feed,
+	// i.e. casts known to carry an external URL embed; if Linkcast ever
+	// reports per-cast ineligibility, the entry already matches it.
+	{
+		id: "linkcast",
+		title: "Linkcast",
+		logoUrl: "/logos/linkcast.svg",
+		web: "https://linkcast.xyz/cast/{fullHashRaw}",
+		requiresExternalLinks: true,
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>
