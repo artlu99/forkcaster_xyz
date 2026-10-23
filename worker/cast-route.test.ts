@@ -679,6 +679,29 @@ test("auto-open unset: countdown banner; ON: single-Pause arming; OFF: chip", as
 	expect(offBody).not.toContain('class="auto-overlay"');
 });
 
+test("auto-open for a scheme-only client carries native targets (quorum)", async () => {
+	// quorum's web href is a homepage stub — the redirect must attempt the
+	// app first. The banner carries the server-resolved native targets for
+	// AUTO_SCRIPT's timer-driven open, and the countdown's anchor carries
+	// data-scheme so DEEPLINK_SCRIPT handles manual taps too.
+	const res = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=quorum" },
+	});
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain('data-auto="unset"');
+	expect(body).toContain(
+		'data-auto-scheme="quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo"',
+	);
+	expect(body).toContain(
+		'data-auto-intent="intent://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end"',
+	);
+	// The countdown anchor is client-rendered (apply("countdown") builds
+	// the banner), so only AUTO_SCRIPT's wiring is visible in the raw HTML.
+	expect(body).toContain(`' data-scheme="' + schemeAttr + '"'`);
+	expect(body).toContain(`' data-intent="' + intentAttr + '"` + `'`);
+});
+
 test("no cookie: no auto-open markup at all (bots and first-timers)", async () => {
 	const res = await app.request(`/zoo/${SHORT_HASH}`);
 	expect(res.status).toBe(200);

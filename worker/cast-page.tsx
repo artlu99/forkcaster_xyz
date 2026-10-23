@@ -379,6 +379,18 @@ const AUTO_SCRIPT = `<script>
   var name = box ? box.getAttribute("data-auto-client") : "";
   var url = box ? box.getAttribute("data-auto-url") : "";
   var mode = box ? box.getAttribute("data-auto") : "";
+  // Native targets for the last-used client (server-resolved per cast).
+  // Mobile attempts the app before the web redirect — the web href can be
+  // a homepage stub (quorum), and a timer-driven location.replace() to it
+  // would never open the app. Desktop keeps the plain redirect: schemes
+  // are phone-scoped and stalling auto-open by the fallback window there
+  // buys nothing.
+  var schemeAttr = box ? box.getAttribute("data-auto-scheme") || "" : "";
+  var intentAttr = box ? box.getAttribute("data-auto-intent") || "" : "";
+  var native = null;
+  if (box && window.matchMedia("(pointer: coarse)").matches) {
+    native = /android/i.test(navigator.userAgent) && intentAttr ? intentAttr : schemeAttr || null;
+  }
   var delay = 5;
   if (box) {
     var rawDelay = box.getAttribute("data-auto-delay");
@@ -401,7 +413,13 @@ const AUTO_SCRIPT = `<script>
   // in the calm paused view, never during the redirect window.
   var views = {
     countdown: function () {
-      return '<a class="auto-go" href="' + url + '">' + opening(" \u2192") + "</a>" +
+      // data-scheme/data-intent let DEEPLINK_SCRIPT's delegated click
+      // handler attempt the app when the anchor is tapped manually (its
+      // fallback is the anchor href — the same web URL).
+      return '<a class="auto-go" href="' + url + '"' +
+        (schemeAttr ? ' data-scheme="' + schemeAttr + '"' : '') +
+        (intentAttr ? ' data-intent="' + intentAttr + '"' : '') +
+        '>' + opening(" \u2192") + "</a>" +
         '<button class="pill" data-auto-action="pause">Pause</button>';
     },
     paused: function () {
@@ -435,15 +453,32 @@ const AUTO_SCRIPT = `<script>
     if (timer) { clearTimeout(timer); timer = null; }
     if (tick) { clearInterval(tick); tick = null; }
   };
-  var go = function () {
+  // Every redirect path (delay-0, timer expiry, Go now) funnels through
+  // open(): native attempt when the last-used client has a target and
+  // this is a phone, web redirect otherwise. The 2.5s visibility window
+  // mirrors DEEPLINK_SCRIPT but runs longer — a timer fire has no user
+  // gesture anchoring the navigation, and cold starts (Quorum's RN +
+  // WASM boot, expo-updates check-on-launch) can outrun 1.8s.
+  var open = function () {
     if (fired) return;
     fired = true;
-    location.replace(url);
+    if (!native) {
+      location.replace(url);
+      return;
+    }
+    var opened = false;
+    var hide = function () { opened = true; };
+    document.addEventListener("visibilitychange", hide, { once: true });
+    window.addEventListener("pagehide", hide, { once: true });
+    window.location.href = native;
+    setTimeout(function () {
+      if (!opened && !document.hidden) location.replace(url);
+    }, 2500);
   };
   var secsLeft = delay;
   var startTimer = function () {
     if (delay === 0) {
-      go();
+      open();
       return;
     }
     secsLeft = delay;
@@ -451,8 +486,7 @@ const AUTO_SCRIPT = `<script>
       secsLeft -= 1;
       if (secsLeft <= 0) {
         cancelAll();
-        fired = true;
-        location.replace(url);
+        open();
         return;
       }
       var s = box.querySelector(".auto-secs");
@@ -462,8 +496,7 @@ const AUTO_SCRIPT = `<script>
   var pause = function () { cancelAll(); apply("paused"); };
   var goNow = function () {
     cancelAll();
-    fired = true;
-    location.replace(url);
+    open();
   };
   var turnOff = function () {
     cancelAll();
@@ -524,7 +557,17 @@ function autoOpenUi(
 	const url = escapeHtml(resolveTemplate(last.web, vars));
 	const name = escapeHtml(last.title);
 	const delay = clientDelay(prefs);
-	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-delay="${delay}"`;
+	// Native-aware redirect: when the last-used client ships a deeplink,
+	// the banner carries the resolved targets so AUTO_SCRIPT attempts the
+	// app before falling back to the web href — for quorum that href is a
+	// homepage stub, and a plain location.replace() would never open the
+	// app (the deterministic "redirect lands on the website" bug).
+	const targets = last.deeplink ? deeplinkTargets(last, vars) : {};
+	const nativeMeta = targets.scheme
+		? ` data-auto-scheme="${escapeHtml(targets.scheme)}"` +
+			(targets.intent ? ` data-auto-intent="${escapeHtml(targets.intent)}"` : "")
+		: "";
+	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-delay="${delay}"${nativeMeta}`;
 	const opening =
 		delay === 0
 			? `Opening <strong>${name}</strong> now`
