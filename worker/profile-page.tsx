@@ -177,6 +177,8 @@ const PROFILE_STYLE = `<style>
 .profile-title { font-size: 22px; font-weight: 700; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
 .profile-handle { color: var(--muted); margin: 2px 0 0; }
 .profile-bio { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+.profile-bio a { color: var(--accent); text-decoration: none; }
+.profile-bio a:hover, .profile-bio a:focus-visible { text-decoration: underline; }
 .profile-facts { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
 .profile-facts code { font-size: 12px; }
 .profile-address { display: inline-flex; align-items: center; gap: 6px; }
@@ -262,6 +264,28 @@ function unavailablePage(username: string, key = username): string {
  * a proven miss, 503 when shim is unreachable (no fail-open content source
  * for identity, unlike casts).
  */
+/**
+ * Linkify explicit http(s) URLs in the collapsed bio — the one approved
+ * exception to the plain-text bio (owner request). Everything else stays
+ * inert escaped text: @mentions/#channels are graph features and remain
+ * plain. Trailing punctuation (.,;:!?)"' etc.) is not part of the link —
+ * bios end sentences with URLs. Every emitted character is escaped; the
+ * URL is both the href and its own visible text.
+ */
+function renderBio(bio: string): string {
+	const flat = bio.replace(/\s+/g, " ").trim();
+	return flat
+		.split(/(https?:\/\/\S+)/)
+		.map((segment, index) => {
+			if (index % 2 === 0 || segment === "") return escapeHtml(segment);
+			// URL segment: peel trailing punctuation off into plain text.
+			const trimmed = segment.replace(/[.,;:!?)\]}'"]+$/, "");
+			const suffix = segment.slice(trimmed.length);
+			return `<a href="${escapeHtml(trimmed)}" target="_blank" rel="noopener">${escapeHtml(trimmed)}</a>${escapeHtml(suffix)}`;
+		})
+		.join("");
+}
+
 export function renderProfileHtml(
 	profile: ResolvedProfile,
 	username: string,
@@ -314,7 +338,7 @@ ${avatar}
 <div class="profile-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
 <p class="profile-handle">@${escapeHtml(handle)}</p>
-${bio ? `<p class="profile-bio">${escapeHtml(bio)}</p>` : ""}
+${bio ? `<p class="profile-bio">${renderBio(bio)}</p>` : ""}
 <ul class="profile-facts">${facts.join("")}</ul>
 </div>
 </div>

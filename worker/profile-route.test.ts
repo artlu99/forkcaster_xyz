@@ -31,7 +31,7 @@ const USER = {
 	username: USERNAME,
 	displayName: "Ultra",
 	pfpUrl: "https://cdn.artlu.xyz/2R6cZrpTizY",
-	bio: "Bass Ackwards.",
+	bio: "Bass Ackwards. https://decent-artlu.farchiver.xyz/browse/decent-artlu/",
 	primaryAddress: ADDRESS,
 	proNft: null,
 };
@@ -107,6 +107,11 @@ test("profile page renders the full hydrated entity as the identity card", async
 	expect(body).toContain("<title>decent-artlu · forkcaster</title>");
 	expect(body).toContain("@decent-artlu");
 	expect(body).toContain("Bass Ackwards.");
+	// Bio URLs linkify (owner-approved exception to the plain-text bio):
+	// the URL is href and its own text, new tab, noopener.
+	expect(body).toContain(
+		'<a href="https://decent-artlu.farchiver.xyz/browse/decent-artlu/" target="_blank" rel="noopener">https://decent-artlu.farchiver.xyz/browse/decent-artlu/</a>',
+	);
 	expect(body).toContain(`src="${USER.pfpUrl}"`);
 	expect(body).toContain(`fid ${FID}`);
 	// Address: truncated display, full address in title + copy payload,
@@ -151,6 +156,46 @@ test("profile page renders the full hydrated entity as the identity card", async
 	expect(body).not.toContain("data-auto");
 	expect(body).not.toContain("fc_client=");
 	expect(body).not.toContain("farcaster.tv");
+});
+
+test("profile bio linkifies explicit URLs; punctuation, graph tokens, and hostile URLs stay inert", async () => {
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: {
+				fid: FID,
+				username: USERNAME,
+				displayName: "Ultra",
+				pfpUrl: USER.pfpUrl,
+				bio: `find me at https://example.com/path. also @friend and #channel, or (https://nested.test/x) — and https://evil.test/" onmouseover="alert(1)`,
+			},
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
+	});
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	const bioStart = body.indexOf('<p class="profile-bio">');
+	const bioEnd = body.indexOf("</p>", bioStart) + 4;
+	const bio = body.slice(bioStart, bioEnd);
+
+	// Trailing period is NOT part of the link; the parenthesized URL keeps
+	// its closing paren outside the anchor.
+	expect(bio).toContain(
+		'<a href="https://example.com/path" target="_blank" rel="noopener">https://example.com/path</a>.',
+	);
+	expect(bio).toContain(
+		'(<a href="https://nested.test/x" target="_blank" rel="noopener">https://nested.test/x</a>)',
+	);
+	// Mentions/channels are graph features — they stay inert plain text.
+	expect(bio).toContain("also @friend and #channel");
+	// Exactly the three safe anchors in the bio.
+	expect((bio.match(/<a /g) ?? []).length).toBe(3);
+	// The hostile URL is inert: quote payload never breaks the attribute.
+	expect(bio).not.toContain('" onmouseover=');
+	expect(bio).toContain('href="https://evil.test/" target="_blank"');
 });
 
 test("profile page emits canonical + og:url under PRIMARY_ORIGIN, neither without", async () => {
@@ -308,7 +353,9 @@ test("?format=json returns the availability-gated profile body", async () => {
 	expect(body.username).toBe(USERNAME);
 	expect(body.fid).toBe(FID);
 	expect(body.displayName).toBe("Ultra");
-	expect(body.bio).toBe("Bass Ackwards.");
+	expect(body.bio).toBe(
+		"Bass Ackwards. https://decent-artlu.farchiver.xyz/browse/decent-artlu/",
+	);
 	expect(body.pfp).toBe(USER.pfpUrl);
 	expect(body.primaryAddress).toBe(ADDRESS);
 	// unix-SECOND shim timestamps → ISO, same convention as the cast JSON.
