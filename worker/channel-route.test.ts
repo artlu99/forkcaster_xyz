@@ -385,6 +385,24 @@ test("garbage ids 404 with ZERO upstream fetches", async () => {
 	expect(calls).toBe(0);
 });
 
+test("channel trailing slashes 301 to the same shape minus the slash, search preserved", async () => {
+	let calls = 0;
+	globalThis.fetch = mock(async () => {
+		calls++;
+		throw new Error("Unexpected fetch in test");
+	}) as typeof fetch;
+
+	const plain = await app.request("/channel/Farcaster/?utm=x");
+	expect(plain.status).toBe(301);
+	expect(plain.headers.get("location")).toBe("/channel/farcaster?utm=x");
+
+	const alias = await app.request(`/~/channel/${CHANNEL_ID}/`);
+	expect(alias.status).toBe(301);
+	expect(alias.headers.get("location")).toBe(`/~/channel/${CHANNEL_ID}`);
+
+	expect(calls).toBe(0);
+});
+
 test("uppercase ids lowercase before lookup", async () => {
 	const res = await app.request("/channel/Farcaster");
 	expect(res.status).toBe(200);

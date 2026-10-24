@@ -211,6 +211,26 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 
+// Trailing slashes ride the site-wide 301 policy (same shape, minus the
+// slash, search preserved) — without these, /channel/{id}/ 404s because
+// the profile trailing-slash routes only match single segments.
+app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}/", (c) => {
+	const id = gateChannelId(c.req.param().id);
+	if (id === null) {
+		return c.body(null, 404);
+	}
+	const search = new URL(c.req.url).search;
+	return c.redirect(`/channel/${id}${search}`, 301);
+});
+app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}/", (c) => {
+	const id = gateChannelId(c.req.param().id);
+	if (id === null) {
+		return c.body(null, 404);
+	}
+	const search = new URL(c.req.url).search;
+	return c.redirect(`/~/channel/${id}${search}`, 301);
+});
+
 app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const { username, hash } = c.req.param();
 	// SSR fragment for the quote fill-in script (partial, quote-blind wins).
