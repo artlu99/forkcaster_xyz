@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { siGithub, siGithubsponsors, siModelcontextprotocol, siOpenaccess } from 'simple-icons'
 import { iconMark } from '../shared/icon-mark.ts'
 // Dependency-free — same parser the worker uses for the cookie, and the
-// registry's read-only per-kind summary line (PLAN7 §13).
+// registry's read-only per-kind summary line.
 import { LAST_CLIENT_COOKIE, parseClientCookie } from '../worker/clients.ts'
 import { kindSummary } from '../worker/client-registry.ts'
 import './App.css'
@@ -84,7 +84,7 @@ function AutoToggle() {
 }
 
 function KindSummary() {
-  // Read-only per-kind line (PLAN7 §13): what the cookie remembers per
+  // Read-only per-kind line: what the cookie remembers per
   // surface — "Casts: Quorum · Profiles: inherits casts → Quorum".
   // Nothing without a cookie; nothing here writes.
   const [line, setLine] = useState<string | undefined>(undefined)

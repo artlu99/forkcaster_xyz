@@ -39,7 +39,7 @@ export interface ClientPrefs {
 	/**
 	 * Per-route-kind last-used slugs (v3 tail segments `p:`/`f:`). An
 	 * unset kind inherits the cast slug when capable — flat, never another
-	 * kind's choice (PLAN7 §5). Channels stay stateless: no `c:` segment
+	 * kind's choice. Channels stay stateless: no `c:` segment
 	 * exists.
 	 */
 	kinds?: ClientKindPrefs;

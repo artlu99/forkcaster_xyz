@@ -22,7 +22,7 @@ import { AUTO_SCRIPT, DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import { escapeHtml } from "./shell.tsx";
 
 // Exported for clients.test.ts (pill markup with/without native targets).
-// `kind` parameterizes the pill for the non-cast rows (PLAN7 phase 2):
+// `kind` parameterizes the pill for the non-cast rows:
 // the target resolves from the client's profile/feed entry and the anchor
 // carries data-kind for the client script's segment write. Absent (cast)
 // = the existing fields, byte-identical markup.
@@ -48,9 +48,9 @@ export function clientPill(
 	);
 }
 
-// The action row. Cast mode (no `route`): the pre-PLAN7 row — one pill
+// The action row. Cast mode (no `route`): one pill
 // per clientsForPage entry, signed/link gates, {fid} gating, rank order.
-// Route mode (PLAN7 phase 2): offered = clientsForRoute(kind, vars,
+// Route mode: offered = clientsForRoute(kind, vars,
 // signed) — capability + the signed rule, fail-open — the row publishes
 // data-kind and data-resolved (the badge's client, which the client
 // script's first/switch/repeat compares against), and every pill carries
@@ -108,7 +108,7 @@ export function clientActionsHtml(
 // - on: LARGE abort overlay. The script redirects when the wait elapses
 //   (immediately at 0).
 // - off (or ?noredirect): status + two-way chip.
-// Route mode (PLAN7 phase 2) resolves over the kind's offered set via
+// Route mode resolves over the kind's offered set via
 // flat inheritance (resolveLastUsed) and emits data-auto-noun (the
 // script's copy: "next profiles open in …") + data-auto-kind (the /t
 // route blob). Cast mode: byte-identical to the pre-phase-2 banner.
@@ -134,7 +134,7 @@ export function autoOpenUi(
 		);
 	}
 	if (last === undefined || !last.web) {
-		// Idle chip (PLAN7 §13): auto-open is armed but nothing resolves
+		// Idle chip: auto-open is armed but nothing resolves
 		// for this route — the last-used client can't serve this kind, is
 		// signed/link-gated out, or the cast lacks a needed placeholder.
 		// Name the armed client in ONE server-rendered line instead of

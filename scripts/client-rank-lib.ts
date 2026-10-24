@@ -3,9 +3,21 @@
 // SQL conventions verified against the live AE dialect (see race-stats-lib.ts):
 // sumIf/sum with _sample_interval weights, position() syntax, no CONCAT.
 //
-// Weighting (PLAN3 §3) exists to defuse the auto-open feedback loop: auto
+// Weighting exists to defuse the auto-open feedback loop: auto
 // events echo an earlier choice, so they count ~10x less than a deliberate
 // first choice. Weights are published next to the numbers on /transparency.
+//
+// Deferred, trigger-based (deliberately not built — each has a trigger):
+// per-device-class pill ordering (~4 weeks of genuinely diverging
+// coarse/fine ranks; needs a client-side reorder script to keep SSR
+// byte-identical — the snapshot already carries the device split); a
+// `native-fallback` /t sub-kind (only on a concrete scheme-quality
+// question — one more enum value plus a branch in the auto-open script);
+// `pref-on`/`pref-off` datapoints from POST /prefs (the first
+// server-side, non-click-time event — keep out until the transparency
+// disclosure needs it); all-time totals (joint with the race-stats
+// follow-up: lmdis HINCR accumulation with watermark-derived deltas, so
+// a failed run can't double-count).
 
 import { CLIENTS } from "../worker/client-registry.ts";
 
@@ -44,7 +56,7 @@ export function buildRankTotalsQuery(hours: number): string {
 	return `SELECT sum(_sample_interval) AS total, max(_sample_interval) AS maxSampleInterval FROM CLICK_STATS WHERE ${buildRankWindow(hours)}`;
 }
 
-/** The client-rank snapshot contract — see PLAN3 §6 and /transparency. */
+/** The client-rank snapshot contract — published on /transparency. */
 export type RankRow = {
 	id: string;
 	/** Explicit pill picks with no saved client (`first` flag). */

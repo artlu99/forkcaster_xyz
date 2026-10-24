@@ -512,7 +512,7 @@ describe("external-link gate", () => {
 	});
 });
 
-describe("kind targets (PLAN7 phase 1)", () => {
+describe("kind targets", () => {
 	// The registry is the single source of truth for verified client URL
 	// facts. The cast fields (web/deeplink) ARE the cast target; profile,
 	// feed, and channel targets are additive. Provenance lives in the
@@ -538,7 +538,7 @@ describe("kind targets (PLAN7 phase 1)", () => {
 		const farcaster = findClient("farcaster") as ClientDefinition;
 		// Profile + feed = farcaster.xyz's own username shape (the URL the
 		// linktree's way out always used). Signed-gated via the client-level
-		// requiresSigned flag — the fork's rule, generalized (§3).
+		// requiresSigned flag — the fork's rule, generalized.
 		expect(targetFor(farcaster, "profile")).toEqual({
 			web: "https://farcaster.xyz/{username}",
 		});
@@ -546,7 +546,7 @@ describe("kind targets (PLAN7 phase 1)", () => {
 			web: "https://farcaster.xyz/{username}",
 		});
 		// Channel: the ~/ is load-bearing (bare form resolves as a profile
-		// for the user "channel") — source-verified, PLAN6 §8.
+		// for the user "channel") — source-verified.
 		expect(targetFor(farcaster, "channel")).toEqual({
 			web: "https://farcaster.xyz/~/channel/{channelId}",
 			deeplink: {
@@ -583,7 +583,7 @@ describe("kind targets (PLAN7 phase 1)", () => {
 		// Feed — VERIFIED (Oct 2026): the profileFid deep link IS the feed
 		// surface (SocialFeedModal pushes ProfileView, which renders the
 		// user's cast list via useFarcasterProfile) — profile and feed are
-		// one merged surface in Quorum (PLAN7 §2), identical templates,
+		// one merged surface in Quorum, identical templates,
 		// one provenance comment (the registry's). The list shows
 		// top-level casts (the profile filters replies out — source
 		// comment, quoted there); same stub/pointer/account caveats.
@@ -656,11 +656,11 @@ describe("kind targets (PLAN7 phase 1)", () => {
 		);
 	});
 
-	test("route-mode pills carry the target's pointer scope (PLAN6 §8 pattern)", () => {
+	test("route-mode pills carry the target's pointer scope", () => {
 		// The registry promises pointer scoping (ClientTarget.pointer) and
 		// the channel row renders it — the stateful row must too, or a
 		// coarse-only homepage-stub pill flings desktop users at a
-		// marketing page (the exact outcome PLAN7 §11.3 rejects).
+		// marketing page — the homepage-fling outcome the design rejects).
 		const vars: TemplateVars = { username: "decent-artlu", fid: 3319217 };
 		const quorum = findClient("quorum") as ClientDefinition;
 		expect(clientPill(quorum, vars, false, "profile")).toContain(
@@ -745,7 +745,7 @@ describe("kind targets (PLAN7 phase 1)", () => {
 	});
 });
 
-describe("cookie v3 — per-kind slugs (PLAN7 phase 2)", () => {
+describe("cookie v3 — per-kind slugs", () => {
 	test("kind segments parse alongside the legacy tail", () => {
 		const prefs = parseClientCookie("farcaster|auto-on|d3|p:firefly|f:linkcast");
 		expect(prefs.slug).toBe("farcaster");
@@ -797,7 +797,7 @@ describe("cookie v3 — per-kind slugs (PLAN7 phase 2)", () => {
 	});
 });
 
-describe("resolveLastUsed — flat inheritance (PLAN7 §5)", () => {
+describe("resolveLastUsed — flat inheritance", () => {
 	const vars: TemplateVars = { username: "zoo", fid: 10215 };
 	const offered = clientsForRoute("profile", vars, true);
 
@@ -833,7 +833,7 @@ describe("resolveLastUsed — flat inheritance (PLAN7 §5)", () => {
 	});
 });
 
-describe("auto-open idle chip (PLAN7 §13)", () => {
+describe("auto-open idle chip", () => {
 	// auto=on but nothing resolves for this route: the non-redirect gets
 	// ONE server-rendered line naming the armed client — never silence,
 	// never a script (nothing times out, nothing opens).
@@ -904,7 +904,7 @@ describe("auto-open idle chip (PLAN7 §13)", () => {
 	});
 });
 
-describe("kindSummary — the landing's read-only per-kind line (PLAN7 §13)", () => {
+describe("kindSummary — the landing's read-only per-kind line", () => {
 	test("no remembered state: no line at all", () => {
 		expect(kindSummary({})).toBeUndefined();
 	});

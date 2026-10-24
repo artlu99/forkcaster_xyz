@@ -79,7 +79,7 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 
 const WEIGHTS_NOTE = `first picks ×${RANK_WEIGHTS.first} · go-now ×${RANK_WEIGHTS.goNow} · repeats ×${RANK_WEIGHTS.repeat} · auto-opens ×${RANK_WEIGHTS.auto}`;
 
-// Client coverage (PLAN7 phase 3): the capability matrix, straight from
+// Client coverage: the capability matrix, straight from
 // the registry — clients × route kinds. A — means "not verified yet",
 // never "never"; the table cannot drift from client-registry.ts because
 // it IS the registry.
@@ -157,7 +157,7 @@ export function transparencyJson(
 				"author signed Farcaster's contract? shim /signed/{fid}; unknown -> fail open",
 		},
 		tracking: {
-			// Shape note (declared change, PLAN3 §6): counters was a single
+			// Shape note (declared change): counters was a single
 			// string; it is now one entry per counter so the click-through
 			// datapoint is declared with the same precision as the page-load one.
 			counters: {
@@ -169,7 +169,7 @@ export function transparencyJson(
 			cookies:
 				"fc_client only — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
 		},
-		// Capability matrix (PLAN7 phase 3): the registry's coverage, public.
+		// Capability matrix: the registry's coverage, public.
 		clients: CLIENT_COVERAGE,
 		domains: {
 			canonical: "https://forkcaster.xyz",
@@ -210,8 +210,10 @@ export function transparencyJson(
 					sampled: rank.sampled,
 					total: rank.total,
 					warmingUp: rank.warmingUp,
-					// Published methodology (PLAN3 §9): the weighting is part of
-					// the public contract, not an implementation detail.
+					// Published methodology (the standing rules: pills are reordered, never
+					// hidden — the kill switch outranks rank; rank is never a placement
+					// product): the weighting is part of the public contract, not an
+					// implementation detail.
 					weights: {
 						first: RANK_WEIGHTS.first,
 						switched: RANK_WEIGHTS.switched,

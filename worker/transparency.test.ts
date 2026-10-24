@@ -152,7 +152,7 @@ test("Domains section: expiry dates + RDAP confirm links on HTML and JSON twin",
 	expect(com?.rdap).toBe("https://rdap.verisign.com/com/v1/domain/warpcats.com");
 });
 
-// --- client rank (PLAN3) ---
+// --- client rank ---
 
 const RANK: import("./client-rank-store.ts").RankSnapshot = {
 	v: 1,
@@ -274,7 +274,7 @@ test("JSON twin: the tracking counters shape declares both datapoints", () => {
 	expect(json.tracking.counters.clientChoice).toContain("No cast IDs");
 });
 
-// --- client coverage + phase-2 tracking copy (PLAN7 phase 3) ---
+// --- client coverage + tracking copy ---
 
 test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
@@ -284,7 +284,7 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 		"<td>farcaster</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
 	// quorum: every kind — the feed target verified Oct 2026 (the profile
-	// deep link IS the cast-list surface, PLAN7 §2 merged surface).
+	// deep link IS the cast-list surface — the merged surface).
 	expect(html).toContain(
 		"<td>quorum</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);

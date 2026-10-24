@@ -77,7 +77,7 @@ app.post("/prefs", async (c) => {
 	return c.body(null, 204);
 });
 
-// Client click-through telemetry (PLAN3): one allow-listed, anonymous
+// Client click-through telemetry: one allow-listed, anonymous
 // event per client selection — slug, kind (pill / auto / go-now),
 // transport, coarse device class, host. No cookies are read here (the
 // first/switch flag is computed client-side BEFORE the click rewrites
@@ -156,7 +156,7 @@ app.get("/api/", (c) =>
 	}),
 );
 
-// Channel landing pages (PLAN6). The literal `~/channel` prefix is
+// Channel landing pages. The literal `~/channel` prefix is
 // registered BEFORE the two-segment cast route: Hono matches in
 // registration order, so even a hash-shaped id (/~/channel/0xabc…) routes
 // here rather than to the cast handler. The bare /channel/{id} alias is
@@ -164,8 +164,8 @@ app.get("/api/", (c) =>
 // through to the cast route — which un-shadows casts belonging to a
 // Farcaster user literally named "channel" (the tradeoff /transparency
 // still carries). Waypoint law, identity-only: the recent-casts
-// skeleton is deferred until a cheap feed exists (shim's measured 8–15s+,
-// PLAN6 §4); one stateless script (the trio's DEEPLINK_SCRIPT), zero
+// skeleton is deferred until a cheap feed exists (shim's channel feed
+// measured 8–15s+ cold); one stateless script (the trio's DEEPLINK_SCRIPT), zero
 // cookies, zero telemetry. The charset gate
 // 404s garbage with zero upstream fetches; ids lowercase before lookup.
 const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9._-]{1,30}$/;
@@ -310,12 +310,12 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	return c.html(html, status);
 });
 
-// Profile landing pages (PLAN4) — the FIRST parametric single-segment route,
+// Profile landing pages — the FIRST parametric single-segment route,
 // registered LAST: Hono matches in registration order, so every exact
 // reserved route above and the two-segment cast route keep winning (a
 // Farcaster user literally named "transparency" is shadowed — the same
 // accepted tradeoff the cast route documents). Waypoint law: identity card
-// + the stateful client layer (PLAN7 phase 2 — menu, badge, auto-open). The
+// + the stateful client layer (menu, badge, auto-open). The
 // charset gate and bot-path denylist 404 garbage with zero upstream fetches —
 // every shim call costs a lookup, so noise never leaves the worker.
 const PROFILE_BOT_PATHS = new Set([
@@ -389,7 +389,7 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		);
 	}
 	// The last-used client cookie + the rank snapshot + ?noredirect feed
-	// the stateful layer (PLAN7 phase 2): badge, banner, pill order.
+	// the stateful layer: badge, banner, pill order.
 	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
 	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = renderProfileHtml(
@@ -425,7 +425,7 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// follows the signed state.
 		signed: true,
 	});
-	// Stateful layer (PLAN7 phase 2): prefs + rank + ?noredirect, same
+	// Stateful layer: prefs + rank + ?noredirect, same
 	// wiring as the cast and profile routes.
 	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
 	const rank = await getRankSnapshotSoon(c.env, 400);

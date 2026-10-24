@@ -746,7 +746,7 @@ test("no cookie: no auto-open markup at all (bots and first-timers)", async () =
 test("signed suppression gates auto-open: suppressed client never redirects, idle chip explains", async () => {
 	// decent-artlu is unsigned; farcaster requires signing → the ON cookie
 	// targeting farcaster must not arm any redirect — and the idle chip
-	// names Farcaster as the armed-but-unoffered client (PLAN7 §13).
+	// names Farcaster as the armed-but-unoffered client.
 	const res = await app.request("/decent-artlu/0xbb54368f", {
 		headers: { cookie: "fc_client=farcaster|auto-on" },
 	});
@@ -936,7 +936,7 @@ test("GET /mcp: server card for browsers, 405 for SSE probes", async () => {
 	expect(sse.headers.get("allow")).toBe("POST");
 });
 
-// --- POST /t: client click-through telemetry (PLAN3) ---
+// --- POST /t: client click-through telemetry ---
 
 type DataPoint = { indexes?: unknown[]; blobs?: unknown[]; doubles?: unknown[] };
 
@@ -1059,7 +1059,7 @@ test("cast pages ship the track helper; auto-open banners carry the slug", async
 	expect(autoBody).toContain('data-auto-client="Farcaster"');
 });
 
-// --- rank-ordered pill row (PLAN3 §6) ---
+// --- rank-ordered pill row ---
 
 const RANK_SNAPSHOT = {
 	v: 1,

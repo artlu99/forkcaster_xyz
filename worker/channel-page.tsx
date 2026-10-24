@@ -1,13 +1,14 @@
-// Channel landing pages — resolve once, render twice (PLAN6).
+// Channel landing pages — resolve once, render twice.
 //
 // Waypoint law: identity is the page, lists are skeletons (never feeds —
-// here: no list at all until shim grows a cheap one, PLAN6 §4), interaction
+// here: no list at all until shim grows a cheap one — shim's channel
+// feed measured 8–15s+ cold), interaction
 // lives in the clients. The identity card surfaces exactly the entity
 // api.farcaster.xyz /v1/channel returns, parsed by worker/warpcast.ts —
 // empty-prone fields render nothing, never faked, and nothing beyond it is
 // fetched. Engagement counts (follower/member) are withheld from HTML and
-// carried in the JSON twin (PLAN6 §5). The way out is a hand-verified pill
-// trio (PLAN6 §8): no auto-open, no last-used memory, no telemetry — the
+// carried in the JSON twin. The way out is a hand-verified pill
+// trio: no auto-open, no last-used memory, no telemetry — the
 // only script is the cast row's DEEPLINK_SCRIPT, reused for click-time
 // native attempts precisely because it carries no state.
 //
@@ -67,10 +68,10 @@ const CHANNEL_STYLE = `<style>
 </style>`;
 
 // The way out (owner call: desktop = Farcaster + Firefly; phones add
-// Quorum). The trio renders from the REGISTRY (PLAN7 phase 1): each
+// Quorum). The trio renders from the REGISTRY: each
 // client's channel target carries its verified URL/scheme/package facts
-// (per-target provenance in client-registry.ts; the full verification
-// record is PLAN6 §8). Statelessness is the law here (PLAN6 §6): the row
+// (per-target provenance in client-registry.ts — the full verification
+// record lives there). Statelessness is the law here: the row
 // is logo-less markup with no data-client, no badge, no beacon — the href
 // is the only thing that ever leaves the page.
 function channelActionsHtml(id: string, external: string | null): string {
@@ -199,8 +200,8 @@ ${channelActionsHtml(id, external)}`;
  * Agent JSON twin (?format=json) — strict statuses like the cast/profile
  * JSON: 404 on the API's authoritative miss, 503 + Retry-After when
  * unreachable. Availability-gated fields appear only when their data
- * exists; this is where the engagement counts live (HTML withholds them,
- * PLAN6 §5), alongside the routing data HTML doesn't carry (parentUrl,
+ * exists; this is where the engagement counts live (HTML withholds them),
+ * alongside the routing data HTML doesn't carry (parentUrl,
  * pinnedCastHash, moderatorFids).
  */
 export function renderChannelJson(

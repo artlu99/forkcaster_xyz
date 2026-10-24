@@ -82,12 +82,13 @@ export interface ClientDefinition {
 	/** Native app target — activates the mobile scheme attempt. Absent ⇒ web-only. */
 	deeplink?: DeeplinkTarget;
 	/**
-	 * Non-cast targets (PLAN7): the capability matrix. The registry is the
+	 * Non-cast targets: the capability matrix. The registry is the
 	 * single source of truth for verified per-thing URL facts — renderers
 	 * resolve through targetFor/targetDeeplinkTargets and keep only their
 	 * own markup. A kind without a target means "this client cannot show
 	 * this thing" — such clients are absent from that kind's row, never
-	 * stubbed (PLAN7 §11.3).
+	 * stubbed: a homepage stub for an incapable client is the
+	 * homepage-fling outcome the design rejects.
 	 */
 	profile?: ClientTarget;
 	feed?: ClientTarget;
@@ -218,7 +219,7 @@ export const CLIENTS: ClientDefinition[] = [
 		// screen renders the user's CAST LIST: SocialFeedModal mounts
 		// ProfileView, whose useFarcasterProfile({fid}) returns { author,
 		// casts, fetchNextPage }. Profile and feed are one merged surface
-		// in Quorum (PLAN7 §2) — identical templates, this comment covers
+		// in Quorum — identical templates, this comment covers
 		// both. Caveat, quoted from the hook: "its user-casts feed includes
 		// replies, which the profile filters out" — the list shows
 		// top-level casts only; replies live one tap deeper in thread
@@ -259,7 +260,7 @@ export const CLIENTS: ClientDefinition[] = [
 		// (farcasterChannelId=…) screen. The web href is the owner-confirmed
 		// channel/farcaster/{id} route (network infix is part of their path;
 		// Vercel's bot checkpoint blocks curl verification). Profile/feed
-		// targets: STILL UNKNOWN (re-checked Oct 2026, PLAN7 §13) — the iOS
+		// targets: STILL UNKNOWN (re-checked Oct 2026) — the iOS
 		// AASA (firefly.social/.well-known/apple-app-site-association,
 		// appID 7LFDZ96332.io.mask.Mask) claims /profile/*, but a path claim
 		// is not a route format (username? fid? network-infixed?); the web
@@ -307,7 +308,7 @@ export const CLIENTS: ClientDefinition[] = [
 	// (neynarxyz/explorer: [identifier] page matches /^0x[a-f0-9]{40}$/
 	// into NetworkResponse → NeynarCastCard). The pill keeps the original
 	// URL — it still lands on the cast through the redirect. NO
-	// profile/feed route exists (PLAN7 §13): non-cast identifiers there
+	// profile/feed route exists: non-cast identifiers there
 	// are search queries (a fid query titles "FID n" and ships no profile
 	// data server-side — a search page, not a profile).
 	{
@@ -320,7 +321,7 @@ export const CLIENTS: ClientDefinition[] = [
 	// cast originator's fid (castFid) alongside the hash, so the entry is
 	// {fid}-gated — skipped on fid-less surfaces (e.g. the link-only
 	// fallback page). castHash wants the full 40 hex, hence {fullHash}.
-	// Profile/feed (PLAN7 §13, checked Oct 2026): no surface found — the
+	// Profile/feed (checked Oct 2026): no surface found — the
 	// served bundle carries no profile/user route vocabulary beyond the
 	// ?view=cast shape, so there is nothing to verify into an entry.
 	{
@@ -348,8 +349,8 @@ export const CLIENTS: ClientDefinition[] = [
 	// appears only on casts that could plausibly exist in Linkcast's feed,
 	// i.e. casts known to carry an external URL embed; if Linkcast ever
 	// reports per-cast ineligibility, the entry already matches it.
-	// Profile route: none (linkcast.xyz/{username} 404s, Oct 2026,
-	// PLAN7 §13) — the product is the links feed, cast-kind only.
+	// Profile route: none (linkcast.xyz/{username} 404s, Oct 2026) —
+	// the product is the links feed, cast-kind only.
 	{
 		id: "linkcast",
 		title: "Linkcast",
@@ -397,7 +398,7 @@ export const ROUTE_KINDS: readonly RouteKind[] = [
 
 /**
  * The last-used client for a NON-CAST route kind, resolved against the
- * route's offered set (PLAN7 §5): the kind's own slug when capable, else
+ * route's offered set: the kind's own slug when capable, else
  * the CAST slug when capable — FLAT inheritance, another kind's choice
  * never carries — else nothing (no banner, badgeless menu). Stale slugs
  * self-heal: resolution only ever returns members of `offered`.
@@ -419,7 +420,7 @@ export function resolveLastUsed(
 }
 
 /**
- * The landing's read-only per-kind preference line (PLAN7 §13): the
+ * The landing's read-only per-kind preference line: the
  * cookie carries per-kind slugs only the routes can see — one string
  * makes the system inspectable ("Casts: Quorum · Profiles: Firefly ·
  * Feeds: inherits casts → Quorum"). Mirrors flat resolution honestly:
@@ -628,8 +629,9 @@ export function pointerClass(target: ClientTarget): string {
  * suppresses, and channel routes run no /signed check at all, so
  * everything fails open there. requiresExternalLinks deliberately does
  * NOT apply — it gates on cast embed data, which no other route has.
- * Phase 1 renders these statelessly (PLAN7): no cookie, no badge, no
- * rank, no beacons — the stateful layer arrives per kind in phase 2.
+ * clientsForRoute itself is stateless: no cookie, no badge, no rank,
+ * no beacons — the calling renderer adds the stateful layer
+ * (profile/feed) or stays stateless (channel).
  */
 export function clientsForRoute(
 	kind: "profile" | "feed" | "channel",

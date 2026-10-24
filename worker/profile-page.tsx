@@ -1,12 +1,11 @@
-// Profile landing pages — resolve once, render twice (PLAN4; stateful
-// layer PLAN7 phase 2).
+// Profile landing pages — resolve once, render twice.
 //
 // Waypoint law: identity is the page, lists are skeletons (never feeds),
 // interaction lives in the clients. Concretely: the identity card surfaces
 // exactly the hydrated entity shim /user/{fid} returns — empty-prone fields
 // render nothing, never faked, and nothing beyond it is fetched — and the
 // cast list is bare routing matter into the cast waypoints. The client
-// layer is stateful (PLAN7 phase 2): the menu is the way out, the badge
+// layer is stateful: the menu is the way out, the badge
 // marks the flat resolution (own kind slug, else the cast slug), and
 // first/switch/repeat + the route kind flow through /t. The JSON twin
 // stays personalization-free.
@@ -244,7 +243,7 @@ const PROFILE_STYLE = `<style>
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
 .profile-empty { color: var(--muted); font-size: 14px; }
 /* Pointer-class pill scoping: registry targets may carry a fine/coarse
-   pointer scope (PLAN7) — the scoped pills ship in the SSR HTML
+   pointer scope — the scoped pills ship in the SSR HTML
    (byte-identical for every device, no UA sniffing) and CSS picks.
    pointer:none devices see both — a graceful default. */
 @media (pointer: coarse) { .fine-only { display: none; } }
@@ -289,7 +288,7 @@ function unavailablePage(username: string, key = username): string {
 
 /**
  * HTML: identity card (the whole hydrated entity) + routing skeleton,
- * plus the stateful client layer (menu, badge, banner — PLAN7 phase 2).
+ * plus the stateful client layer (menu, badge, banner).
  * The JSON twin (?format=json) stays cookie-free. Lenient toward
  * decoration, strict about identity: 404 for a proven miss, 503 when shim
  * is unreachable (no fail-open content source for identity, unlike casts).
@@ -344,7 +343,7 @@ export function renderProfileHtml(
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
 
-	// The stateful layer (PLAN7 phase 2): the menu IS the way out —
+	// The stateful layer: the menu IS the way out —
 	// offered = profile-capable clients (farcaster suppressed for
 	// known-unsigned via requiresSigned, fail-open; unknown fails open and
 	// offers it). The badge and the banner follow the flat resolution:
@@ -578,10 +577,10 @@ export async function renderCastsHtml(
 						: "Recent casts are unavailable right now."
 				}</p>`;
 
-	// The stateful layer (PLAN7 phase 2): the feed row + banner resolve
-	// over the feed kind — farcaster is the only seeded feed target, so
-	// the menu is one pill wide today (unsigned suppresses it entirely;
-	// the notice explains). Flat inheritance from the cast slug.
+	// The stateful layer: the feed row + banner resolve over the feed
+	// kind — farcaster + quorum are the seeded feed targets (quorum
+	// coarse-only/scheme-only; unsigned suppresses farcaster entirely
+	// and the notice explains). Flat inheritance from the cast slug.
 	const vars: TemplateVars = { username: handle, fid };
 	const resolved = resolveLastUsed(
 		prefs,

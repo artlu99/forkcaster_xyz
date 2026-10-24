@@ -1,8 +1,8 @@
-// Client click-through telemetry (PLAN3): validation + the Analytics
+// Client click-through telemetry: validation + the Analytics
 // Engine write for POST /t. Kept separate from index.ts so the allow-list
 // is unit-testable without Hono.
 //
-// One row per user intent, nothing else (PLAN3 §1): client slug, choice
+// One row per user intent, nothing else: client slug, choice
 // kind (explicit pick vs auto-open), coarse device class, host. NO cast
 // ids, usernames, IPs, UA strings, or identifiers of any kind — the
 // negative list is the privacy design and /transparency declares it.
@@ -38,7 +38,7 @@ export const FIRST_FLAGS = ["first", "switch", "repeat"] as const;
 export type FirstFlag = (typeof FIRST_FLAGS)[number];
 
 /**
- * The route kind the click happened on (PLAN7 phase 2): cast, profile,
+ * The route kind the click happened on: cast, profile,
  * feed. Absent/invalid normalizes to `cast` — historically true (pre-r
  * events were casts) and the same normalize-to-default discipline as
  * transport/device. Coarse, carries no identifiers; channels are

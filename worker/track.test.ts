@@ -117,7 +117,7 @@ describe("trackBlobs (the declared negative list, in blob form)", () => {
 	});
 });
 
-describe("route blob (PLAN7 phase 2)", () => {
+describe("route blob", () => {
 	test("absent/invalid r normalizes to cast; valid passes", () => {
 		expect(parseTrackEvent(VALID)?.route).toBe("cast");
 		expect(

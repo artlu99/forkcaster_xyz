@@ -1,5 +1,5 @@
 /**
- * Profile route integration tests (PLAN4).
+ * Profile route integration tests.
  *
  * Same contract as cast-route.test.ts: `app.request(...)`, globalThis.fetch
  * mocked and routed by exact shim URL — unexpected URLs throw, which is how
@@ -149,7 +149,7 @@ test("profile page renders the full hydrated entity as the identity card", async
 		'<link rel="alternate" type="application/json" href="?format=json" />',
 	);
 	// Waypoint law: the identity card is the page. The stateful layer
-	// (PLAN7 phase 2) ships the menu + scripts; still no auto-open for a
+	// ships the menu + scripts; still no auto-open for a
 	// cookieless visitor, no feed reading, no engagement surface.
 	expect(body).toContain("data-copy");
 	expect(body).toContain("window.__fk");
@@ -569,7 +569,7 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
-	// The feed row (phase 2): stateful pills — farcaster plus Quorum, the
+	// The feed row: stateful pills — farcaster plus Quorum, the
 	// two verified feed targets (Quorum's coarse-only pill scoped by the
 	// target's pointer class).
 	expect(body).toContain('data-client="farcaster" data-kind="feed"');
@@ -926,7 +926,7 @@ test("profile auto-open: an incapable cast slug resolves nothing to open — the
 	});
 	const body = await res.text();
 	// linkcast has no profile target: flat inheritance finds nothing ⇒ no
-	// redirect fires — and the non-redirect is EXPLAINED (PLAN7 §13 idle
+	// redirect fires — and the non-redirect is EXPLAINED (the idle
 	// chip): the armed client is named, the menu below is the way out.
 	// No redirect targets, no arming overlay, and the menu renders
 	// without a badge. (The attribute form: the bare string also appears

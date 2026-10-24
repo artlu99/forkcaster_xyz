@@ -69,7 +69,7 @@ export const LIVE_STATS_SCRIPT = `<script>
 })();
 </script>`;
 
-// Click-through telemetry helper (PLAN3): one anonymous event per client
+// Click-through telemetry helper: one anonymous event per client
 // selection, sent fire-and-forget to POST /t — client slug, choice kind,
 // transport, coarse device class. No cast ids, no identifiers; failure is
 // silent by contract (same degradation as the live-stats script). Emitted
@@ -95,7 +95,7 @@ export const TRACK_SCRIPT = `<script>
 </script>`;
 
 // Remembers the visitor's client choice: a delegated click listener
-// writes the cookie — kind-aware (PLAN7 phase 2). Cast clicks keep the
+// writes the cookie — kind-aware. Cast clicks keep the
 // head-and-tail shape (slug first, everything from the first "|"
 // preserved: auto flag, delay, kind segments). Kind clicks (pills carry
 // data-kind="profile"/"feed") replace/append their own p:/f: segment and
@@ -234,7 +234,7 @@ export const AUTO_SCRIPT = `<script>
   // buys nothing.
   var schemeAttr = box ? box.getAttribute("data-auto-scheme") || "" : "";
   var intentAttr = box ? box.getAttribute("data-auto-intent") || "" : "";
-  // Route kind (PLAN7 phase 2): the banner carries data-auto-noun for the
+  // Route kind: the banner carries data-auto-noun for the
   // copy below and data-auto-kind for the telemetry's route blob. Cast
   // pages emit neither — the defaults keep their output identical.
   var noun = box ? box.getAttribute("data-auto-noun") || "casts" : "casts";
