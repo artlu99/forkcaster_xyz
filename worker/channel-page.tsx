@@ -144,8 +144,12 @@ ${facts.length > 0 ? `<ul class="channel-facts">${facts.join("")}</ul>` : ""}
 			description.slice(0, 280) || `The /${id} channel on Farcaster`,
 		...(ch.imageUrl ? { image: ch.imageUrl } : {}),
 	};
+	// Canonical + og:url carry the /~/channel/{id} shape — the form
+	// farcaster.xyz itself canonicalizes to (warpcast.com 301s there), so
+	// forkcaster mirrors it; /channel/{id} stays the bare alias that also
+	// resolves (owner call, ship-day QA).
 	const canonicalUrl = primaryOrigin
-		? `${primaryOrigin}/channel/${encodeURIComponent(id)}`
+		? `${primaryOrigin}/~/channel/${encodeURIComponent(id)}`
 		: undefined;
 	return {
 		status: 200,

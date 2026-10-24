@@ -241,24 +241,26 @@ test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropp
 	expect(evilBody).not.toContain('rel="noopener noreferrer"');
 });
 
-test("both URL shapes render the same page; canonical always carries /channel/{id}", async () => {
-	const alias = await app.request(`/~/channel/${CHANNEL_ID}`, undefined, {
+test("both URL shapes render the same page; canonical always carries /~/channel/{id}", async () => {
+	// The /~/ form is canonical — farcaster.xyz's own channel URL shape
+	// (warpcast.com 301s there); /channel/{id} is the bare alias.
+	const bare = await app.request(`/channel/${CHANNEL_ID}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
-	expect(alias.status).toBe(200);
-	const aliasBody = await alias.text();
-	expect(aliasBody).toContain("Discussions about Farcaster on Farcaster (meta!)");
-	expect(aliasBody).toContain(
-		`<link rel="canonical" href="https://forkcaster.xyz/channel/${CHANNEL_ID}" />`,
+	expect(bare.status).toBe(200);
+	const bareBody = await bare.text();
+	expect(bareBody).toContain("Discussions about Farcaster on Farcaster (meta!)");
+	expect(bareBody).toContain(
+		`<link rel="canonical" href="https://forkcaster.xyz/~/channel/${CHANNEL_ID}" />`,
 	);
-	expect(aliasBody).toContain(
-		`<meta property="og:url" content="https://forkcaster.xyz/channel/${CHANNEL_ID}" />`,
+	expect(bareBody).toContain(
+		`<meta property="og:url" content="https://forkcaster.xyz/~/channel/${CHANNEL_ID}" />`,
 	);
 
-	const plain = await app.request(`/channel/${CHANNEL_ID}`);
-	const plainBody = await plain.text();
-	expect(plainBody).not.toContain("canonical");
-	expect(plainBody).not.toContain("og:url");
+	const alias = await app.request(`/~/channel/${CHANNEL_ID}`);
+	const aliasBody = await alias.text();
+	expect(aliasBody).not.toContain("canonical");
+	expect(aliasBody).not.toContain("og:url");
 });
 
 // --- Identity verdicts: strict statuses in BOTH variants ----------------------

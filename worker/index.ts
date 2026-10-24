@@ -206,8 +206,8 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 }
 
 // Both farcaster.xyz URL shapes render the same page; canonical + og:url
-// always carry the /channel/{id} form (the /~/ shape is an alias, not a
-// second identity).
+// always carry the /~/channel/{id} form — farcaster.xyz's own channel URL
+// shape — with /channel/{id} the bare alias that also resolves.
 app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 
