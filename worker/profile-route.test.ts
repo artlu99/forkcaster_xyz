@@ -572,11 +572,12 @@ test("casts-and-replies forks the way out for unsigned accounts too", async () =
 	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu">');
 	expect(body).not.toContain(">Open on Farcaster</a>");
 	expect(body).toContain(
-		'class="fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>',
+		`class="fine-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
 	);
 	expect(body).toContain(
-		`class="coarse-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
+		'class="coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?profileFid=3319217',
 	);
+	expect(body).toContain("Open in Quorum</a>");
 	expect(body).toContain("read-only on farcaster.xyz");
 	// The cards themselves are unaffected.
 	expect(body).toContain("first cast");
@@ -659,14 +660,22 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	expect(body).not.toContain(">Open on Farcaster</a>");
 	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu"');
 	// The hardcoded unsigned way out: BOTH pills ship in the SSR HTML (no
-	// UA sniffing), CSS picks by pointer class. Quilcast deep-links the
-	// owner-provided /u/ profile route.
+	// UA sniffing), CSS picks by pointer class. Assignment (revised):
+	// Quilcast desktop (/u/ profile route), Quorum mobile (source-verified
+	// profile deep link, attempted via DEEPLINK_SCRIPT with the homepage
+	// stub as the no-app fallback).
 	expect(body).toContain(
-		'class="pill fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>',
+		`class="pill fine-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
 	);
 	expect(body).toContain(
-		`class="pill coarse-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
+		'class="pill coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu"',
 	);
+	expect(body).toContain(
+		"data-intent=\"intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end\"",
+	);
+	expect(body).toContain("Open in Quorum</a>");
+	// DEEPLINK_SCRIPT ships with the unsigned pills.
+	expect(body).toContain("(pointer: coarse)");
 	expect(body).toContain("read-only on farcaster.xyz");
 	// The identity card is otherwise unchanged.
 	expect(body).toContain("Bass Ackwards.");

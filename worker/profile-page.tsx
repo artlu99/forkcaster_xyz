@@ -26,7 +26,7 @@ import {
 	type UnfurlResult,
 } from "./cast-data.ts";
 import { hardenBlankTargets, unfurl } from "./cast-page.tsx";
-import { LIVE_STATS_SCRIPT } from "./cast-scripts.ts";
+import { LIVE_STATS_SCRIPT, DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import {
 	getCastsAndReplies,
 	getCastByHash,
@@ -204,15 +204,29 @@ function isAddress(value: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
-// Hardcoded unsigned-client destinations (owner-directed) — NOT
-// registry-driven; the unsigned way out is a profile-surface affordance.
-// Quorum desktop keeps the homepage stub (the verified desktop target —
-// source-verified profile deep links exist but are mobile-scheme-only and
-// device-unverified, see below); Quilcast mobile uses the owner-provided
-// /u/ profile route.
-const QUORUM_DESKTOP_URL = "https://www.quorummessenger.com/";
+// Hardcoded unsigned-client destinations (owner-directed; assignment
+// revised: Quorum MOBILE, Quilcast DESKTOP) — NOT registry-driven; the
+// unsigned way out is a profile-surface affordance.
+// - Quilcast desktop: the owner-provided /u/ profile route (plain web).
+// - Quorum mobile: the SOURCE-VERIFIED profile deep link (quorum-mobile
+//   app/(tabs)/feed/index.tsx `initialProfile` → SocialFeedModal profile
+//   screen; profileFid required, profileUsername optional). Attempted via
+//   the cast page's DEEPLINK_SCRIPT machinery (data-scheme on iOS/other,
+//   Android intent:// form with a Chrome-native fallback), so the pill's
+//   href — the homepage stub — is only the no-app fallback.
+const QUORUM_FALLBACK_URL = "https://www.quorummessenger.com/";
 const quilcastProfileUrl = (handle: string): string =>
 	`https://quilcast.com/u/${encodeURIComponent(handle)}`;
+const quorumProfileTargets = (
+	fid: number,
+	handle: string,
+): { scheme: string; intent: string } => {
+	const query = `profileFid=${fid}&profileUsername=${encodeURIComponent(handle)}`;
+	return {
+		scheme: `quorummobile://feed?${query}`,
+		intent: `intent://feed?${query}#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=${encodeURIComponent(QUORUM_FALLBACK_URL)};end`,
+	};
+};
 
 function addressFacts(address: string): string {
 	const truncated = `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -276,24 +290,17 @@ export function renderProfileHtml(
 	// The way out depends on the ban signal: signed === false means the
 	// account is read-only on farcaster.xyz — "Open on Farcaster" would be
 	// futile, so unsigned visitors get the hardcoded non-signer clients
-	// instead (Quorum on desktop — the flagship client for non-signers —
-	// Quilcast on mobile). Both pills ship; CSS picks by pointer. Unknown
-	// (shim down / no answer) fails open: Farcaster stays offered.
-	//
-	// Destinations are hardcoded (owner-directed), not registry-driven:
-	// - Quorum desktop: the homepage stub — the verified desktop target
-	//   (quorum-mobile registers quorummobile:// on iOS/Android only, and
-	//   source-verified profile deep links exist but are device-unverified:
-	//   quorummobile://feed?profileFid={fid}&profileUsername={username}
-	//   seeds SocialFeedModal's nav stack with a profile screen;
-	//   profileUsername is optional, fid is required — see
-	//   app/(tabs)/feed/index.tsx initialProfile).
-	// - Quilcast mobile: the owner-provided /u/ profile route.
+	// instead (Quilcast on desktop — the /u/ profile route — Quorum on
+	// mobile via its source-verified profile deep link, attempted through
+	// the cast page's DEEPLINK_SCRIPT with the homepage stub as the no-app
+	// fallback). Both pills ship; CSS picks by pointer. Unknown (shim down
+	// / no answer) fails open: Farcaster stays offered.
+	const quorumTargets = quorumProfileTargets(fid, handle);
 	const actions =
 		profile.signed === false
 			? `<p class="actions">
-<a class="pill fine-only" href="${QUORUM_DESKTOP_URL}">Open in Quorum</a>
-<a class="pill coarse-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>
+<a class="pill fine-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>
+<a class="pill coarse-only" href="${QUORUM_FALLBACK_URL}" data-scheme="${escapeHtml(quorumTargets.scheme)}" data-intent="${escapeHtml(quorumTargets.intent)}">Open in Quorum</a>
 </p>
 <p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
 			: `<p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>`;
@@ -328,7 +335,12 @@ ${actions}
 			`${handle} · forkcaster`,
 			body,
 			og,
-			COPY_SCRIPT,
+			// Copy helper always; DEEPLINK_SCRIPT only when the unsigned pills
+			// ship (it attempts Quorum's profile deep link on phones, with
+			// the homepage stub as the no-app fallback).
+			profile.signed === false
+				? COPY_SCRIPT + DEEPLINK_SCRIPT
+				: COPY_SCRIPT,
 			canonicalUrl,
 			"profile",
 		),
@@ -496,11 +508,12 @@ export async function renderCastsHtml(
 				}</p>`;
 
 	// Same ban-signal fork as the profile: unsigned ⇒ the hardcoded
-	// non-signer clients in the head line (Quorum desktop / Quilcast
-	// mobile), never Farcaster.
+	// non-signer clients in the head line (Quilcast desktop / Quorum
+	// mobile via its profile deep link), never Farcaster.
+	const quorumTargets = quorumProfileTargets(fid, handle);
 	const wayOut =
 		signed === false
-			? `<a class="fine-only" href="${QUORUM_DESKTOP_URL}">Open in Quorum</a> · <a class="coarse-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>`
+			? `<a class="fine-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a> · <a class="coarse-only" href="${QUORUM_FALLBACK_URL}" data-scheme="${escapeHtml(quorumTargets.scheme)}" data-intent="${escapeHtml(quorumTargets.intent)}">Open in Quorum</a>`
 			: `<a href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a>`;
 
 	const body = `
@@ -529,9 +542,12 @@ ${listHtml}`;
 			`${key} · forkcaster`,
 			body,
 			og,
-			// The live-stats script fills one slot per card; nothing else —
+			// The live-stats script fills one slot per card; DEEPLINK_SCRIPT
+			// rides along when the unsigned head ships Quorum's deep link —
 			// no pills, no telemetry, no auto-open on this surface.
-			LIVE_STATS_SCRIPT,
+			signed === false
+				? LIVE_STATS_SCRIPT + DEEPLINK_SCRIPT
+				: LIVE_STATS_SCRIPT,
 			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.
