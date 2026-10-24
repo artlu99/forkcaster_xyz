@@ -322,6 +322,44 @@ test("shim unreachable ⇒ 503 + Retry-After (HTML error page; JSON error body)"
 
 // --- Timeline fails soft: never a 404 once identity is proven -----------------
 
+test("identity call retries once on a shim blip, then renders", async () => {
+	let fidCalls = 0;
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/f/${USERNAME}`) {
+			fidCalls++;
+			if (fidCalls === 1) throw new Error("transient blip");
+			return Response.json({ success: true, fid: FID });
+		}
+		if (url === `https://shim.artlu.xyz/user/${FID}`) {
+			return Response.json({ success: true, user: USER });
+		}
+		if (url === `https://shim.artlu.xyz/signed/${FID}`) {
+			return Response.json({ success: true, signed: true });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+	expect(fidCalls).toBe(2);
+	expect(await res.text()).toContain("Bass Ackwards.");
+});
+
+test("/f HTTP 500 is an outage (503 after retry), never a false 404", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		if (String(input) === `https://shim.artlu.xyz/f/${USERNAME}`) {
+			return new Response("boom", { status: 500 });
+		}
+		throw new Error(`Unexpected fetch in test: ${String(input)}`);
+	}) as typeof fetch;
+	const json = await app.request(`/${USERNAME}?format=json`);
+	expect(json.status).toBe(503);
+	expect(json.headers.get("retry-after")).toBe("60");
+	expect(await json.json()).toEqual({
+		error: "profile data temporarily unavailable",
+	});
+});
+
 test("timeline failure fails soft: JSON carries the note, the identity page is untouched", async () => {
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },

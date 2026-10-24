@@ -43,6 +43,29 @@ import { escapeHtml, shell } from "./shell.tsx";
 /** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
 export const TIMELINE_LIMIT = 10;
 
+/**
+ * Profile surfaces tolerate a longer shim window than casts: a slow
+ * identity is a slower page, a failed identity is a 503 — and shim is
+ * measured bursty (Oct 2026: /f hung >10s roughly 1-in-10 even for a hot
+ * username, then recovered; /user regularly ran 4.5–5.6s against the old
+ * 5s cast-route cap). One retry rides each load-bearing call; decoration
+ * (/signed) stays single-shot.
+ */
+const PROFILE_TIMEOUT_MS = 8_000;
+
+async function withOneRetry<T>(
+	fn: (signal: AbortSignal) => Promise<T>,
+	retryOnValue?: (value: T) => boolean,
+): Promise<T> {
+	try {
+		const first = await fn(AbortSignal.timeout(PROFILE_TIMEOUT_MS));
+		if (!retryOnValue?.(first)) return first;
+	} catch {
+		// Transport/timeout — retry below.
+	}
+	return fn(AbortSignal.timeout(PROFILE_TIMEOUT_MS));
+}
+
 /** casts-and-replies rows add reply parenting on top of the canonical shape. */
 type ProfileCast = ShimCast & {
 	parentCastId?: { fid?: number; hash?: string };
@@ -79,22 +102,31 @@ export async function resolveProfile(
 		? getCastsAndReplies(
 				username,
 				TIMELINE_LIMIT,
-				AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+				AbortSignal.timeout(PROFILE_TIMEOUT_MS),
 			)
 		: null;
 	let fid: number | undefined;
 	try {
-		fid = await getFidByUsername(
-			username,
-			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+		fid = await withOneRetry((signal) =>
+			getFidByUsername(username, signal),
 		);
 	} catch {
 		return { kind: "unreachable" };
 	}
 	if (fid === undefined) return { kind: "not-found" };
+	// Entity and ban signal are independent once the fid is known — fire
+	// together. The entity retries (undefined = visible degradation); the
+	// signed check fails open single-shot.
+	const entityPromise = withOneRetry(
+		(signal) => getUserByFid(fid, signal),
+		(resolved) => resolved === undefined,
+	);
+	const signedPromise = opts.signed
+		? getSignedStatus(fid, AbortSignal.timeout(PROFILE_TIMEOUT_MS))
+		: null;
 	let user: ShimUser | undefined;
 	try {
-		user = await getUserByFid(fid, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
+		user = await entityPromise;
 	} catch {
 		user = undefined;
 	}
@@ -105,12 +137,18 @@ export async function resolveProfile(
 	if (opts.signed) {
 		// The ban signal rides the same trust seat as identity (shim).
 		// getSignedStatus never throws; unknown (null) fails open.
-		signed = await getSignedStatus(
-			fid,
-			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-		);
+		signed = (await signedPromise) ?? null;
 	}
-	const timeline = castsPromise ? await castsPromise : null;
+	let timeline = castsPromise ? await castsPromise : null;
+	// The timeline is content that fails soft — one retry on a failed call
+	// makes the "unavailable" note rare instead of routine.
+	if (timeline && !timeline.ok) {
+		timeline = await getCastsAndReplies(
+			username,
+			TIMELINE_LIMIT,
+			AbortSignal.timeout(PROFILE_TIMEOUT_MS),
+		).catch(() => timeline);
+	}
 	return {
 		kind: "found",
 		// Entity failure fails soft: a username-only card still proves identity.

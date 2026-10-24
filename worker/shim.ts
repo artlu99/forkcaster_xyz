@@ -129,7 +129,13 @@ export async function getFidByUsername(
 	signal: AbortSignal,
 ): Promise<number | undefined> {
 	const res = await fetch(fUrl(username), { signal });
-	if (!res.ok) return undefined;
+	// A shim non-2xx is an outage signal, NOT a miss — it propagates so
+	// callers can distinguish "no such username" (undefined) from "shim is
+	// wrong right now" (throw ⇒ retriable/unreachable). Network rejections
+	// already propagate.
+	if (!res.ok) {
+		throw new Error(`shim /f HTTP ${res.status}`);
+	}
 	const data = (await res.json().catch(() => undefined)) as
 		| { success?: boolean; fid?: number }
 		| undefined;
