@@ -44,7 +44,6 @@ export type FirstFlag = (typeof FIRST_FLAGS)[number];
  * transport/device. Coarse, carries no identifiers; channels are
  * stateless and never emit.
  */
-export const ROUTES = ROUTE_KINDS;
 export type RouteBlob = RouteKind;
 
 /** Maximum beacon body size — real events are ~60 bytes. */
@@ -85,8 +84,8 @@ export function parseTrackEvent(raw: string): TrackEvent | null {
 	// The first-flag is only meaningful for pill clicks.
 	const first =
 		kind === KIND_PILL ? (FIRST_FLAGS.find((f) => f === b.f) ?? "") : "";
-	// Absent/invalid route normalizes to cast (see ROUTES).
-	const route = ROUTES.find((r) => r === b.r) ?? "cast";
+	// Absent/invalid route normalizes to cast (see ROUTE_KINDS).
+	const route = ROUTE_KINDS.find((r) => r === b.r) ?? "cast";
 	return { slug: b.c, kind, transport, device, first, route };
 }
 

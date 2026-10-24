@@ -341,7 +341,7 @@ export const CLIENT_HOSTS: string[] = CLIENTS.filter(
 
 /** The kind vocabulary in one place — track.ts's `r` blob validates
  * against this; renderers pass it, never a second enum. */
-export const ROUTE_KINDS: RouteKind[] = [
+export const ROUTE_KINDS: readonly RouteKind[] = [
 	"cast",
 	"profile",
 	"feed",

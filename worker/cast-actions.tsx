@@ -9,7 +9,6 @@ import {
 	type ClientTarget,
 	clientsForPage,
 	clientsForRoute,
-	deeplinkTargets,
 	findClient,
 	resolveLastUsed,
 	resolveTemplate,
@@ -48,8 +47,8 @@ export function clientPill(
 	);
 }
 
-// The action row. Cast mode (no `route`): unchanged — one pill per
-// clientsForPage entry, signed/link gates, {fid} gating, rank order.
+// The action row. Cast mode (no `route`): the pre-PLAN7 row — one pill
+// per clientsForPage entry, signed/link gates, {fid} gating, rank order.
 // Route mode (PLAN7 phase 2): offered = clientsForRoute(kind, vars,
 // signed) — capability + the signed rule, fail-open — the row publishes
 // data-kind and data-resolved (the badge's client, which the client
@@ -84,13 +83,18 @@ export function clientActionsHtml(
 		)
 		.join("\n");
 	// The mobile deeplink script ships only when a rendered client
-	// actually has a native target — zero bytes otherwise.
-	const hasNative = offered.some((client) => {
-		const targets = route
-			? targetDeeplinkTargets(targetFor(client, route.kind) as ClientTarget, vars)
-			: deeplinkTargets(client, vars);
-		return Object.keys(targets).length > 0;
-	});
+	// actually has a native target — zero bytes otherwise. Offered clients
+	// always have the kind's target (the gate guarantees it), hence the
+	// assertion.
+	const hasNative = offered.some(
+		(client) =>
+			Object.keys(
+				targetDeeplinkTargets(
+					targetFor(client, route?.kind ?? "cast") as ClientTarget,
+					vars,
+				),
+			).length > 0,
+	);
 	const rowAttrs = route
 		? ` data-kind="${route.kind}"${route.resolvedId ? ` data-resolved="${escapeHtml(route.resolvedId)}"` : ""}`
 		: "";
@@ -133,10 +137,9 @@ export function autoOpenUi(
 	// the banner carries the resolved targets so AUTO_SCRIPT attempts the
 	// app before falling back to the web href — for quorum that href is a
 	// homepage stub, and a plain location.replace() would never open the
-	// app (the deterministic "redirect lands on the website" bug).
-	const target = route
-		? (targetFor(last, route.kind) as ClientTarget)
-		: { web: last.web as string, deeplink: last.deeplink };
+	// app (the deterministic "redirect lands on the website" bug). The
+	// web href was checked above, so the target exists.
+	const target = targetFor(last, route?.kind ?? "cast") as ClientTarget;
 	const url = escapeHtml(resolveTemplate(target.web, vars));
 	const name = escapeHtml(last.title);
 	const delay = clientDelay(prefs);

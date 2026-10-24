@@ -56,7 +56,7 @@ import {
 import { collapseText, escapeHtml, shell } from "./shell.tsx";
 
 /** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
-export const TIMELINE_LIMIT = 10;
+const TIMELINE_LIMIT = 10;
 
 /**
  * Profile surfaces tolerate a longer shim window than casts: a slow
@@ -185,7 +185,7 @@ const COPY_ICON = `<svg ${ICON_ATTRS} class="icon-copy"><rect x="9" y="9" width=
 const CHECK_ICON = `<svg ${ICON_ATTRS} class="icon-check"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
 
 /**
- * The one client script a profile ships: write the full address to the
+ * The copy-address helper: write the full address to the
  * clipboard on copy-button click (secure-context API with an execCommand
  * fallback), flip to the check mark briefly. ES5, fail-silent — same
  * contract as the cast page's inline scripts.
