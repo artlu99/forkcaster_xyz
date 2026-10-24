@@ -346,6 +346,29 @@ test("Accept: application/json negotiates JSON; */* stays HTML", async () => {
 
 // --- Routing gates: reserved paths win; noise 404s without upstream calls -----
 
+test("trailing-slash forms 301 to the canonical non-slash URLs (query preserved, zero fetches)", async () => {
+	globalThis.fetch = repliesMock();
+	const profile = await app.request(`/${USERNAME}/`);
+	expect(profile.status).toBe(301);
+	expect(profile.headers.get("location")).toBe(`/${USERNAME}`);
+
+	const casts = await app.request(`/${USERNAME}/casts-and-replies/`);
+	expect(casts.status).toBe(301);
+	expect(casts.headers.get("location")).toBe(`/${USERNAME}/casts-and-replies`);
+
+	// The query string rides the redirect (?format=json survives).
+	const negotiated = await app.request(`/${USERNAME}/?format=json`);
+	expect(negotiated.headers.get("location")).toBe(`/${USERNAME}?format=json`);
+
+	// Gate still applies on the slash forms.
+	const gated = await app.request(`/${"a".repeat(21)}/`);
+	expect(gated.status).toBe(404);
+
+	// Purely syntactic: zero upstream fetches anywhere in this test.
+	const fetchMock = globalThis.fetch as ReturnType<typeof mock>;
+	expect(fetchMock.mock.calls.length).toBe(0);
+});
+
 test("bot paths and non-username shapes 404 with ZERO upstream fetches", async () => {
 	let calls = 0;
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {

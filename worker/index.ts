@@ -253,6 +253,29 @@ function gateProfileUsername(raw: string): string | null {
 	return raw.toLowerCase();
 }
 
+// Trailing-slash normalization (owner ask): the parametric patterns above
+// are exact, so /{username}/ and /{username}/casts-and-replies/ would
+// otherwise 404. 301 to the canonical non-slash forms — syntactic and
+// permanent, so the redirect is safely cacheable — with the query string
+// riding along (?format=json survives). Zero upstream fetches: the gate
+// runs, the redirect answers.
+app.get("/:username{[a-zA-Z0-9._-]{1,20}}/", (c) => {
+	const username = gateProfileUsername(c.req.param().username);
+	if (username === null) {
+		return c.body(null, 404);
+	}
+	const search = new URL(c.req.url).search;
+	return c.redirect(`/${username}${search}`, 301);
+});
+app.get("/:username{[a-zA-Z0-9._-]{1,20}}/casts-and-replies/", (c) => {
+	const username = gateProfileUsername(c.req.param().username);
+	if (username === null) {
+		return c.body(null, 404);
+	}
+	const search = new URL(c.req.url).search;
+	return c.redirect(`/${username}/casts-and-replies${search}`, 301);
+});
+
 app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {
