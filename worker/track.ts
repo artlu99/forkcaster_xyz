@@ -7,7 +7,7 @@
 // ids, usernames, IPs, UA strings, or identifiers of any kind — the
 // negative list is the privacy design and /transparency declares it.
 
-import { CLIENTS, findClient } from "./client-registry.ts";
+import { CLIENTS, findClient, ROUTE_KINDS, type RouteKind } from "./client-registry.ts";
 
 /** Explicit pill click on the action row. */
 export const KIND_PILL = "pill";
@@ -29,11 +29,23 @@ export type DeviceClass = (typeof DEVICES)[number];
 /**
  * First-choice flag, computed client-side from the fc_client cookie
  * BEFORE the click rewrites it: `first` = no slug saved yet, `switch` =
- * differs from the saved slug, `repeat` = same slug. Auto/go-now events
- * omit it (the client is the saved slug by construction).
+ * differs from the saved slug, `repeat` = same slug. On kind routes the
+ * comparison runs against the row's RESOLVED client (data-resolved —
+ * what the badge showed), not the raw cookie. Auto/go-now events omit it
+ * (the client is the saved slug by construction).
  */
 export const FIRST_FLAGS = ["first", "switch", "repeat"] as const;
 export type FirstFlag = (typeof FIRST_FLAGS)[number];
+
+/**
+ * The route kind the click happened on (PLAN7 phase 2): cast, profile,
+ * feed. Absent/invalid normalizes to `cast` — historically true (pre-r
+ * events were casts) and the same normalize-to-default discipline as
+ * transport/device. Coarse, carries no identifiers; channels are
+ * stateless and never emit.
+ */
+export const ROUTES = ROUTE_KINDS;
+export type RouteBlob = RouteKind;
 
 /** Maximum beacon body size — real events are ~60 bytes. */
 export const MAX_BODY_BYTES = 128;
@@ -44,6 +56,7 @@ export interface TrackEvent {
 	transport: Transport;
 	device: DeviceClass | "";
 	first: FirstFlag | "";
+	route: RouteBlob;
 }
 
 /**
@@ -72,19 +85,24 @@ export function parseTrackEvent(raw: string): TrackEvent | null {
 	// The first-flag is only meaningful for pill clicks.
 	const first =
 		kind === KIND_PILL ? (FIRST_FLAGS.find((f) => f === b.f) ?? "") : "";
-	return { slug: b.c, kind, transport, device, first };
+	// Absent/invalid route normalizes to cast (see ROUTES).
+	const route = ROUTES.find((r) => r === b.r) ?? "cast";
+	return { slug: b.c, kind, transport, device, first, route };
 }
 
 /** Placeholder for a field that is validly absent (AE blobs are strings). */
 const ABSENT = "-";
 
-/** The AE row shape (CLICK_STATS): index = slug, blobs = detail, host last. */
+/** The AE row shape (CLICK_STATS): index = slug; blobs = detail with the
+ * route kind APPENDED last — existing blob positions never shift (the
+ * offline stats scripts query them by index). */
 export function trackBlobs(event: TrackEvent, host: string): string[] {
 	return [
 		`${event.kind}:${event.transport}`,
 		event.device === "" ? ABSENT : event.device,
 		event.first === "" ? ABSENT : event.first,
 		host,
+		event.route,
 	];
 }
 

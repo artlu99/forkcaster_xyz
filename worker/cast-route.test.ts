@@ -990,6 +990,7 @@ test("POST /t records a valid pill event exactly once, 204 always", async () => 
 		"coarse",
 		"switch",
 		"localhost",
+		"cast",
 	]);
 });
 

@@ -339,6 +339,38 @@ export const CLIENT_HOSTS: string[] = CLIENTS.filter(
 		.replace(/^www\./, ""),
 );
 
+/** The kind vocabulary in one place — track.ts's `r` blob validates
+ * against this; renderers pass it, never a second enum. */
+export const ROUTE_KINDS: RouteKind[] = [
+	"cast",
+	"profile",
+	"feed",
+	"channel",
+];
+
+/**
+ * The last-used client for a NON-CAST route kind, resolved against the
+ * route's offered set (PLAN7 §5): the kind's own slug when capable, else
+ * the CAST slug when capable — FLAT inheritance, another kind's choice
+ * never carries — else nothing (no banner, badgeless menu). Stale slugs
+ * self-heal: resolution only ever returns members of `offered`.
+ * Structural prefs on purpose: the registry stays dependency-free
+ * (clients.ts's ClientPrefs satisfies this shape).
+ */
+export function resolveLastUsed(
+	prefs: { slug?: string; kinds?: { profile?: string; feed?: string } },
+	kind: "profile" | "feed",
+	offered: ClientDefinition[],
+): ClientDefinition | undefined {
+	const own = prefs.kinds?.[kind];
+	if (own !== undefined) {
+		const hit = offered.find((client) => client.id === own);
+		if (hit !== undefined) return hit;
+	}
+	if (prefs.slug === undefined) return undefined;
+	return offered.find((client) => client.id === prefs.slug);
+}
+
 /**
  * The eligibility gate shared by the pill row (clientsForPage) and the
  * MCP tool (buildAll + get_cast_link): a requiresExternalLinks client is

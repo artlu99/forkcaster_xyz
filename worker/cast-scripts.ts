@@ -95,9 +95,13 @@ export const TRACK_SCRIPT = `<script>
 </script>`;
 
 // Remembers the visitor's client choice: a delegated click listener
-// writes the cookie value — slug + the existing tail ("|" and everything
-// after it: auto-open flag and optional delay), so pill clicks never
-// clear the preference. The flag and delay are written server-side via
+// writes the cookie — kind-aware (PLAN7 phase 2). Cast clicks keep the
+// head-and-tail shape (slug first, everything from the first "|"
+// preserved: auto flag, delay, kind segments). Kind clicks (pills carry
+// data-kind="profile"/"feed") replace/append their own p:/f: segment and
+// keep every other segment. first/switch/repeat: cast compares the cast
+// head; kind routes compare the row's RESOLVED client (data-resolved —
+// what the badge showed). The flag and delay are written server-side via
 // POST /prefs (ITP-safe).
 export const CLIENT_SCRIPT = `<script>
 (function () {
@@ -109,20 +113,34 @@ export const CLIENT_SCRIPT = `<script>
         var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
         var cur = "";
         try { cur = m ? decodeURIComponent(m[1]) : ""; } catch (err) { cur = m ? m[1] : ""; }
-        var sep = cur.indexOf("|");
-        var tail = sep === -1 ? "" : cur.slice(sep);
-        // First-choice flag, computed BEFORE the rewrite: no saved slug =
-        // "first", a different one = "switch", same = "repeat". This is
-        // the pure popularity signal (a deliberate new choice) and it is
-        // computed from the visitor's own cookie — the server never sees it.
-        var prev = sep === -1 ? cur : cur.slice(0, sep);
-        var flag = cur === "" ? "first" : (prev === id ? "repeat" : "switch");
-        document.cookie = "${LAST_CLIENT_COOKIE}=" + id + tail +
+        var kind = el.getAttribute("data-kind") || "cast";
+        var row = el.closest ? el.closest("[data-resolved]") : null;
+        var resolved = row ? row.getAttribute("data-resolved") || "" : "";
+        var flag;
+        var value;
+        if (kind === "cast") {
+          var sep = cur.indexOf("|");
+          var tail = sep === -1 ? "" : cur.slice(sep);
+          var prev = sep === -1 ? cur : cur.slice(0, sep);
+          flag = prev === "" ? "first" : (prev === id ? "repeat" : "switch");
+          value = id + tail;
+        } else {
+          var letter = kind.charAt(0);
+          var parts = cur.split("|");
+          var rest = [];
+          for (var i = 1; i < parts.length; i++) {
+            if (parts[i].indexOf(letter + ":") !== 0) rest.push(parts[i]);
+          }
+          rest.push(letter + ":" + id);
+          value = (parts[0] || "") + (rest.length ? "|" + rest.join("|") : "");
+          flag = resolved === "" ? "first" : (resolved === id ? "repeat" : "switch");
+        }
+        document.cookie = "${LAST_CLIENT_COOKIE}=" + value +
           ";path=/;max-age=${LAST_CLIENT_MAX_AGE};SameSite=Lax;Secure";
         var nativeTarget = window.matchMedia &&
           window.matchMedia("(pointer: coarse)").matches &&
           (el.getAttribute("data-scheme") || el.getAttribute("data-intent"));
-        if (window.__fk) window.__fk({ c: id, k: "pill", t: nativeTarget ? "native" : "web", f: flag });
+        if (window.__fk) window.__fk({ c: id, k: "pill", r: kind, t: nativeTarget ? "native" : "web", f: flag });
         return;
       }
       el = el.parentNode;
@@ -216,6 +234,11 @@ export const AUTO_SCRIPT = `<script>
   // buys nothing.
   var schemeAttr = box ? box.getAttribute("data-auto-scheme") || "" : "";
   var intentAttr = box ? box.getAttribute("data-auto-intent") || "" : "";
+  // Route kind (PLAN7 phase 2): the banner carries data-auto-noun for the
+  // copy below and data-auto-kind for the telemetry's route blob. Cast
+  // pages emit neither — the defaults keep their output identical.
+  var noun = box ? box.getAttribute("data-auto-noun") || "casts" : "casts";
+  var routeKind = box ? box.getAttribute("data-auto-kind") || "cast" : "cast";
   var native = null;
   if (box && window.matchMedia("(pointer: coarse)").matches) {
     native = /android/i.test(navigator.userAgent) && intentAttr ? intentAttr : schemeAttr || null;
@@ -225,7 +248,7 @@ export const AUTO_SCRIPT = `<script>
   // mirrors what open() will actually attempt. Auto events echo an
   // earlier choice; the rank weighting on the server discounts them.
   var fk = function (kind) {
-    if (window.__fk && slug) window.__fk({ c: slug, k: kind, t: native ? "native" : "web" });
+    if (window.__fk && slug) window.__fk({ c: slug, k: kind, r: routeKind, t: native ? "native" : "web" });
   };
   var delay = 5;
   if (box) {
@@ -260,7 +283,7 @@ export const AUTO_SCRIPT = `<script>
     },
     paused: function () {
       return '<span class="auto-status">Paused \u2014 ' +
-        (prefOn ? "auto-open is on; next casts open in <strong>" + name + "</strong>" : "pick a client below") +
+        (prefOn ? "auto-open is on; next " + noun + " open in <strong>" + name + "</strong>" : "pick a client below") +
         '</span>' +
         '<button class="pill" data-auto-action="go">Go now</button>' +
         (prefOn ? '<button class="pill" data-auto-action="off">Turn off auto-open</button>' : '') +
@@ -271,7 +294,7 @@ export const AUTO_SCRIPT = `<script>
         '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p>';
     },
     stayed: function () {
-      return '<span class="auto-status">Auto-open is on \u2014 next casts open in <strong>' + name + '</strong></span>' +
+      return '<span class="auto-status">Auto-open is on \u2014 next ' + noun + ' open in <strong>' + name + '</strong></span>' +
         chip(true) + settings;
     },
     off: function () {

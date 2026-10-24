@@ -148,13 +148,13 @@ test("profile page renders the full hydrated entity as the identity card", async
 	expect(body).toContain(
 		'<link rel="alternate" type="application/json" href="?format=json" />',
 	);
-	// Waypoint law: zero telemetry/personalization surface. The copy helper
-	// is the page's ONLY script — no pills, no auto-open, no beacons.
+	// Waypoint law: the identity card is the page. The stateful layer
+	// (PLAN7 phase 2) ships the menu + scripts; still no auto-open for a
+	// cookieless visitor, no feed reading, no engagement surface.
 	expect(body).toContain("data-copy");
-	expect(body).not.toContain("window.__fk");
-	expect(body).not.toContain("data-client");
+	expect(body).toContain("window.__fk");
+	expect(body).toContain('data-client="farcaster" data-kind="profile"');
 	expect(body).not.toContain("data-auto");
-	expect(body).not.toContain("fc_client=");
 	expect(body).not.toContain("farcaster.tv");
 });
 
@@ -564,14 +564,15 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 	expect(res.headers.get("content-type") ?? "").toContain("text/html");
 
 	const body = await res.text();
-	// Key-form title; head with the way out (profile + Farcaster).
+	// Key-form title; head keeps the internal Profile link.
 	expect(body).toContain(
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
-	expect(body).toContain(
-		`href="https://farcaster.xyz/${USERNAME}">Open on Farcaster</a>`,
-	);
+	// The feed row (phase 2): stateful pills — farcaster is the only client
+	// with a verified feed target, so today the menu is one pill wide.
+	expect(body).toContain('data-client="farcaster" data-kind="feed"');
+	expect(body).not.toContain('data-client="quorum"');
 	// The OG preview is IDENTICAL to the profile's (entity-backed card);
 	// canonical stays on this page's own URL.
 	expect(body).toContain(
@@ -598,10 +599,11 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 	expect(body).toContain("example.com");
 	// The unhydrated quote (no /h mock) is dropped, not rendered broken.
 	expect(body).not.toContain("quote-embeds");
-	// No identity card, no pills/telemetry/auto-open, no advertised twin.
+	// No identity card, no advertised twin. The feed row is stateful now:
+	// pills + telemetry ship; no cookie ⇒ no banner.
 	expect(body).not.toContain('class="profile-card"');
-	expect(body).not.toContain("data-client");
-	expect(body).not.toContain("window.__fk");
+	expect(body).toContain("data-client");
+	expect(body).toContain("window.__fk");
 	expect(body).not.toContain("data-auto");
 	expect(body).not.toContain('rel="alternate"');
 });
@@ -659,10 +661,11 @@ test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 	expect(await empty.text()).toContain("No casts yet.");
 });
 
-test("casts-and-replies forks the way out for unsigned accounts too", async () => {
-	// Same ban-signal fork as the profile: unsigned ⇒ Quorum desktop /
-	// Quilcast mobile in the head, never Farcaster. The embed cards keep
-	// their own Show-on-Farcaster links (embed law — unaffected).
+test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
+	// Signed suppression extends to kind targets (fail-open): unsigned ⇒
+	// the farcaster feed pill is suppressed. No other client has a feed
+	// target yet, so the row is empty — the notice explains. The embed
+	// cards keep their own Show-on-Farcaster links (embed law — unaffected).
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
@@ -680,13 +683,7 @@ test("casts-and-replies forks the way out for unsigned accounts too", async () =
 	// the trailing-quote substring only matches the head).
 	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu">');
 	expect(body).not.toContain(">Open on Farcaster</a>");
-	expect(body).toContain(
-		`class="fine-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
-	);
-	expect(body).toContain(
-		'class="coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?profileFid=3319217',
-	);
-	expect(body).toContain("Open in Quorum</a>");
+	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).toContain("read-only on farcaster.xyz");
 	// The cards themselves are unaffected.
 	expect(body).toContain("first cast");
@@ -743,9 +740,11 @@ test("signed-check unavailable fails open: Farcaster stays offered", async () =>
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	expect(body).toContain(">Open on Farcaster</a>");
-	expect(body).not.toContain("Open in Quorum");
-	expect(body).not.toContain("Open in Quilcast");
+	// Fail-open menu: farcaster offered alongside the capable unsigned
+	// clients, no notice.
+	expect(body).toContain('data-client="farcaster" data-kind="profile"');
+	expect(body).toContain('data-client="quilcast" data-kind="profile"');
+	expect(body).toContain('data-client="quorum" data-kind="profile"');
 	expect(body).not.toContain("read-only on farcaster.xyz");
 });
 
@@ -765,26 +764,26 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	// Farcaster is not offered at all.
-	expect(body).not.toContain(">Open on Farcaster</a>");
+	// Farcaster is not offered at all (requiresSigned extends to kind
+	// targets; every other signed state fails open and offers it).
+	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu"');
-	// The hardcoded unsigned way out: BOTH pills ship in the SSR HTML (no
-	// UA sniffing), CSS picks by pointer class. Assignment (revised):
-	// Quilcast desktop (/u/ profile route), Quorum mobile (source-verified
-	// profile deep link, attempted via DEEPLINK_SCRIPT with the homepage
-	// stub as the no-app fallback).
+	// The menu IS the way out now: stateful pills, registry-ordered (no
+	// rank snapshot reaches the test env), logos and pointer scopes from
+	// the targets, native attempts through the row's DEEPLINK_SCRIPT.
+	// Registry order: quorum first, quilcast second.
 	expect(body).toContain(
-		`class="pill fine-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
+		'class="pill client-pill" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
 	);
+	expect(body).toContain("/logos/quorum.png");
+	expect(body).toContain(">Quorum</a>");
 	expect(body).toContain(
-		'class="pill coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu"',
+		`class="pill client-pill" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
 	);
-	expect(body).toContain(
-		"data-intent=\"intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end\"",
-	);
-	expect(body).toContain("Open in Quorum</a>");
-	// DEEPLINK_SCRIPT ships with the unsigned pills.
+	expect(body).toContain(">Quilcast</a>");
+	// DEEPLINK_SCRIPT ships with the row; telemetry scripts too.
 	expect(body).toContain("(pointer: coarse)");
+	expect(body).toContain("window.__fk");
 	expect(body).toContain("read-only on farcaster.xyz");
 	// The identity card is otherwise unchanged.
 	expect(body).toContain("Bass Ackwards.");
@@ -880,4 +879,81 @@ test("alias: non-0x shapes never match the route (no upstream calls)", async () 
 	}) as typeof fetch;
 	expect((await app.request("/~/conversations/nothex")).status).toBe(404);
 	expect(calls).toBe(0);
+});
+
+// --- Phase 2: the stateful layer (badge + auto-open on the user routes) -------
+
+const signedTrueMock = () =>
+	shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: true },
+	});
+
+test("profile menu: the badge marks the resolved client (kind slug outranks cast slug)", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}`, {
+		headers: { Cookie: "fc_client=farcaster|p:quilcast" },
+	});
+	const body = await res.text();
+	// Resolution = the kind's own slug; the row publishes it for the
+	// client script's first/switch/repeat and the badge.
+	expect(body).toContain('data-resolved="quilcast"');
+	const quilcast = body.indexOf('data-client="quilcast"');
+	const farcaster = body.indexOf('data-client="farcaster"');
+	expect(body.slice(quilcast, quilcast + 400)).toContain("pill-badge");
+	expect(body.slice(farcaster, farcaster + 400)).not.toContain("pill-badge");
+});
+
+test("profile auto-open: flat cast inheritance arms the overlay", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}`, {
+		headers: { Cookie: "fc_client=farcaster|auto-on" },
+	});
+	const body = await res.text();
+	expect(body).toContain('data-auto="on"');
+	expect(body).toContain('data-auto-noun="profiles"');
+	expect(body).toContain('data-auto-kind="profile"');
+	expect(body).toContain(`data-auto-url="https://farcaster.xyz/${USERNAME}"`);
+	expect(body).toContain('data-auto-slug="farcaster"');
+});
+
+test("profile auto-open: an incapable cast slug resolves nothing — no banner, badgeless menu", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}`, {
+		headers: { Cookie: "fc_client=linkcast|auto-on" },
+	});
+	const body = await res.text();
+	// linkcast has no profile target: flat inheritance finds nothing ⇒ no
+	// banner at all, and the menu renders without a badge. (The attribute
+	// form: the bare string also appears inside CLIENT_SCRIPT.)
+	expect(body).not.toContain("data-auto-url");
+	expect(body).not.toContain('data-resolved="');
+	expect(body).toContain('data-client="farcaster" data-kind="profile"');
+});
+
+test("profile auto-open: ?noredirect=1 renders the chip, never the overlay", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}?noredirect=1`, {
+		headers: { Cookie: "fc_client=farcaster|auto-on" },
+	});
+	const body = await res.text();
+	expect(body).toContain('data-auto="noredirect"');
+	expect(body).not.toContain('data-auto="on"');
+});
+
+test("unsigned profile: capable kind slugs still auto-open", async () => {
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: false },
+	});
+	const res = await app.request(`/${USERNAME}`, {
+		headers: { Cookie: "fc_client=linkcast|p:quilcast|auto-on" },
+	});
+	const body = await res.text();
+	// quilcast's profile target is unsigned-friendly; the incapable cast
+	// slug (linkcast) never fires — flat, own kind first.
+	expect(body).toContain(`data-auto-url="https://quilcast.com/u/${USERNAME}"`);
+	expect(body).toContain('data-auto-slug="quilcast"');
 });

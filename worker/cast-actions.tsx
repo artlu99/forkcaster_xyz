@@ -6,10 +6,15 @@
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	type ClientDefinition,
+	type ClientTarget,
 	clientsForPage,
+	clientsForRoute,
 	deeplinkTargets,
 	findClient,
+	resolveLastUsed,
 	resolveTemplate,
+	targetDeeplinkTargets,
+	targetFor,
 	type TemplateVars,
 } from "./client-registry.ts";
 import { type ClientPrefs, clientDelay } from "./clients.ts";
@@ -17,18 +22,25 @@ import { AUTO_SCRIPT, DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import { escapeHtml } from "./shell.tsx";
 
 // Exported for clients.test.ts (pill markup with/without native targets).
+// `kind` parameterizes the pill for the non-cast rows (PLAN7 phase 2):
+// the target resolves from the client's profile/feed entry and the anchor
+// carries data-kind for the client script's segment write. Absent (cast)
+// = the existing fields, byte-identical markup.
 export function clientPill(
 	client: ClientDefinition,
 	vars: TemplateVars,
 	isLast: boolean,
+	kind?: "profile" | "feed",
 ): string {
-	const href = resolveTemplate(client.web as string, vars);
-	const targets = deeplinkTargets(client, vars);
+	const target = targetFor(client, kind ?? "cast") as ClientTarget;
+	const href = resolveTemplate(target.web, vars);
+	const targets = targetDeeplinkTargets(target, vars);
 	const native =
 		(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
 		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "");
+	const kindAttr = kind === undefined ? "" : ` data-kind="${kind}"`;
 	return (
-		`<a class="pill client-pill" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${native}>` +
+		`<a class="pill client-pill" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${kindAttr}${native}>` +
 		`<img class="pill-logo" src="${escapeHtml(client.logoUrl)}" alt="" width="16" height="16" />` +
 		`${escapeHtml(client.title)}` +
 		(isLast ? `<span class="pill-badge">last used</span>` : "") +
@@ -36,27 +48,26 @@ export function clientPill(
 	);
 }
 
-// The "Open in …" action row, rendered from the client registry. One
-// pill per client; the pill whose id matches the last-used cookie
-// carries the badge. Suppression (signed rule, unsatisfied placeholders
-// like {fid}, and the external-link gate) is decided by clientsForPage;
-// here signed is already reduced to pass/fail-open and externalLinks is
-// the cast's known gate state (undefined = unknown ⇒ fail-closed).
-//
-// Rank ordering (PLAN3): when a rank snapshot is available, pills are
-// reordered by weighted score — a reordering, never a hiding (every
-// offered client still renders), with registry order as the stable
-// tiebreak so a quiet week can't scramble the row. Null snapshot ⇒
-// registry order, byte-identical to the pre-rank render.
+// The action row. Cast mode (no `route`): unchanged — one pill per
+// clientsForPage entry, signed/link gates, {fid} gating, rank order.
+// Route mode (PLAN7 phase 2): offered = clientsForRoute(kind, vars,
+// signed) — capability + the signed rule, fail-open — the row publishes
+// data-kind and data-resolved (the badge's client, which the client
+// script's first/switch/repeat compares against), and every pill carries
+// data-kind. Rank ordering applies to both modes: reordered, never
+// hidden — on kinds the client can serve.
 export function clientActionsHtml(
 	vars: TemplateVars,
-	signed: boolean,
+	signed: boolean | null,
 	lastClientId: string | undefined,
 	rank?: RankSnapshot | null,
 	externalLinks?: boolean,
+	route?: { kind: "profile" | "feed"; resolvedId?: string },
 ): string {
-	const last = findClient(lastClientId);
-	const offered = clientsForPage(signed, vars, externalLinks);
+	const last = findClient(route ? route.resolvedId : lastClientId);
+	const offered = route
+		? clientsForRoute(route.kind, vars, signed)
+		: clientsForPage(signed === true, vars, externalLinks);
 	const scoreById = new Map((rank?.rows ?? []).map((row) => [row.id, row.score]));
 	const positionById = new Map(offered.map((client, i) => [client.id, i]));
 	const ordered =
@@ -69,15 +80,21 @@ export function clientActionsHtml(
 				);
 	const pills = ordered
 		.map((client) =>
-			clientPill(client, vars, last !== undefined && client.id === last.id),
+			clientPill(client, vars, last !== undefined && client.id === last.id, route?.kind),
 		)
 		.join("\n");
 	// The mobile deeplink script ships only when a rendered client
 	// actually has a native target — zero bytes otherwise.
-	const hasNative = offered.some(
-		(client) => Object.keys(deeplinkTargets(client, vars)).length > 0,
-	);
-	return `<p class="actions">${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
+	const hasNative = offered.some((client) => {
+		const targets = route
+			? targetDeeplinkTargets(targetFor(client, route.kind) as ClientTarget, vars)
+			: deeplinkTargets(client, vars);
+		return Object.keys(targets).length > 0;
+	});
+	const rowAttrs = route
+		? ` data-kind="${route.kind}"${route.resolvedId ? ` data-resolved="${escapeHtml(route.resolvedId)}"` : ""}`
+		: "";
+	return `<p class="actions"${rowAttrs}>${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
 }
 
 // Auto-open flow: for a returning user with a last-used client.
@@ -86,32 +103,54 @@ export function clientActionsHtml(
 // - on: LARGE abort overlay. The script redirects when the wait elapses
 //   (immediately at 0).
 // - off (or ?noredirect): status + two-way chip.
+// Route mode (PLAN7 phase 2) resolves over the kind's offered set via
+// flat inheritance (resolveLastUsed) and emits data-auto-noun (the
+// script's copy: "next profiles open in …") + data-auto-kind (the /t
+// route blob). Cast mode: byte-identical to the pre-phase-2 banner.
 export function autoOpenUi(
 	prefs: ClientPrefs,
-	signed: boolean,
+	signed: boolean | null,
 	vars: TemplateVars,
 	noredirect: boolean,
 	externalLinks?: boolean,
+	route?: { kind: "profile" | "feed"; noun: string },
 ): { html: string; script?: string } {
-	if (!prefs.slug) return { html: "" };
-	const last = clientsForPage(signed, vars, externalLinks).find(
-		(c) => c.id === prefs.slug,
-	);
+	let last: ClientDefinition | undefined;
+	if (route !== undefined) {
+		last = resolveLastUsed(
+			prefs,
+			route.kind,
+			clientsForRoute(route.kind, vars, signed),
+		);
+	} else {
+		if (prefs.slug === undefined) return { html: "" };
+		last = clientsForPage(signed === true, vars, externalLinks).find(
+			(c) => c.id === prefs.slug,
+		);
+	}
 	if (!last?.web) return { html: "" };
-	const url = escapeHtml(resolveTemplate(last.web, vars));
-	const name = escapeHtml(last.title);
-	const delay = clientDelay(prefs);
 	// Native-aware redirect: when the last-used client ships a deeplink,
 	// the banner carries the resolved targets so AUTO_SCRIPT attempts the
 	// app before falling back to the web href — for quorum that href is a
 	// homepage stub, and a plain location.replace() would never open the
 	// app (the deterministic "redirect lands on the website" bug).
-	const targets = last.deeplink ? deeplinkTargets(last, vars) : {};
+	const target = route
+		? (targetFor(last, route.kind) as ClientTarget)
+		: { web: last.web as string, deeplink: last.deeplink };
+	const url = escapeHtml(resolveTemplate(target.web, vars));
+	const name = escapeHtml(last.title);
+	const delay = clientDelay(prefs);
+	const targets = target.deeplink
+		? targetDeeplinkTargets(target, vars)
+		: {};
 	const nativeMeta = targets.scheme
 		? ` data-auto-scheme="${escapeHtml(targets.scheme)}"` +
 			(targets.intent ? ` data-auto-intent="${escapeHtml(targets.intent)}"` : "")
 		: "";
-	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-slug="${escapeHtml(last.id)}" data-auto-delay="${delay}"${nativeMeta}`;
+	const routeMeta = route
+		? ` data-auto-noun="${route.noun}" data-auto-kind="${route.kind}"`
+		: "";
+	const meta = `data-auto-url="${url}" data-auto-client="${name}" data-auto-slug="${escapeHtml(last.id)}" data-auto-delay="${delay}"${nativeMeta}${routeMeta}`;
 	const opening =
 		delay === 0
 			? `Opening <strong>${name}</strong> now`

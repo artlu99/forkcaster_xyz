@@ -26,6 +26,7 @@ import {
 	findClient,
 	missingVars,
 	pointerClass,
+	resolveLastUsed,
 	resolveTemplate,
 	targetDeeplinkTargets,
 	targetFor,
@@ -36,7 +37,6 @@ import {
 	parseClientCookie,
 	serializeClientCookie,
 } from "./clients.ts";
-
 const VARS = {
 	username: "zoo",
 	hash: "0x895ecc74",
@@ -693,5 +693,93 @@ describe("kind targets (PLAN7 phase 1)", () => {
 		]);
 		// fullHashRaw derives from fullHash — optional-safe now.
 		expect(missingVars("{fullHashRaw}", {})).toEqual(["fullHashRaw"]);
+	});
+});
+
+describe("cookie v3 — per-kind slugs (PLAN7 phase 2)", () => {
+	test("kind segments parse alongside the legacy tail", () => {
+		const prefs = parseClientCookie("farcaster|auto-on|d3|p:firefly|f:linkcast");
+		expect(prefs.slug).toBe("farcaster");
+		expect(prefs.auto).toBe("on");
+		expect(prefs.delay).toBe(3);
+		expect(prefs.kinds).toEqual({ profile: "firefly", feed: "linkcast" });
+	});
+
+	test("v1/v2 cookies parse with kinds unset (bidirectional compat)", () => {
+		expect(parseClientCookie("linkcast|auto-off")).toEqual({
+			slug: "linkcast",
+			auto: "off",
+		});
+		expect(parseClientCookie("linkcast")?.kinds).toBeUndefined();
+		// %7C wire form decodes before segmenting.
+		expect(parseClientCookie("farcaster%7Cp:firefly")).toEqual({
+			slug: "farcaster",
+			kinds: { profile: "firefly" },
+		});
+	});
+
+	test("unknown segments are ignored — no c: segment exists (channels stateless)", () => {
+		const prefs = parseClientCookie("farcaster|c:quorum|p:firefly");
+		expect(prefs.kinds).toEqual({ profile: "firefly" });
+		expect(serializeClientCookie(prefs)).toBe("farcaster|p:firefly");
+	});
+
+	test("serialize round-trips: flags, delay, then p/f in fixed order", () => {
+		expect(
+			serializeClientCookie({
+				slug: "farcaster",
+				auto: "on",
+				delay: 2,
+				kinds: { profile: "firefly", feed: "linkcast" },
+			}),
+		).toBe("farcaster|auto-on|d2|p:firefly|f:linkcast");
+		expect(
+			serializeClientCookie({ slug: "farcaster", kinds: { feed: "linkcast" } }),
+		).toBe("farcaster|f:linkcast");
+	});
+
+	test("merge preserves kind segments (prefs writes only touch auto/delay)", () => {
+		expect(mergeClientCookie("farcaster|auto-on|p:firefly", { auto: "off" })).toBe(
+			"farcaster|auto-off|p:firefly",
+		);
+		expect(mergeClientCookie("farcaster|p:firefly", { delay: 0 })).toBe(
+			"farcaster|d0|p:firefly",
+		);
+	});
+});
+
+describe("resolveLastUsed — flat inheritance (PLAN7 §5)", () => {
+	const vars: TemplateVars = { username: "zoo", fid: 10215 };
+	const offered = clientsForRoute("profile", vars, true);
+
+	test("the kind's own slug wins when capable", () => {
+		expect(
+			resolveLastUsed({ slug: "quorum", kinds: { profile: "quilcast" } }, "profile", offered)
+				?.id,
+		).toBe("quilcast");
+	});
+
+	test("unset kind inherits the cast slug (flat — never another kind's)", () => {
+		expect(resolveLastUsed({ slug: "quorum" }, "profile", offered)?.id).toBe(
+			"quorum",
+		);
+		// Firefly has no profile target: a feed-only choice never carries.
+		expect(
+			resolveLastUsed({ slug: "quorum", kinds: { feed: "firefly" } }, "profile", offered)
+				?.id,
+		).toBe("quorum");
+	});
+
+	test("stale/ incapable slugs fall through, then to none", () => {
+		// Own slug firefly lost its target → cast slug quorum still capable.
+		expect(
+			resolveLastUsed({ slug: "quorum", kinds: { profile: "firefly" } }, "profile", offered)
+				?.id,
+		).toBe("quorum");
+		// Neither resolves → undefined (no banner, badgeless menu).
+		expect(
+			resolveLastUsed({ slug: "linkcast", kinds: { profile: "firefly" } }, "profile", offered),
+		).toBeUndefined();
+		expect(resolveLastUsed({}, "profile", offered)).toBeUndefined();
 	});
 });

@@ -1,12 +1,15 @@
-// Profile landing pages — resolve once, render twice (PLAN4).
+// Profile landing pages — resolve once, render twice (PLAN4; stateful
+// layer PLAN7 phase 2).
 //
 // Waypoint law: identity is the page, lists are skeletons (never feeds),
 // interaction lives in the clients. Concretely: the identity card surfaces
 // exactly the hydrated entity shim /user/{fid} returns — empty-prone fields
 // render nothing, never faked, and nothing beyond it is fetched — and the
-// cast list is bare routing matter into the cast waypoints. No pills, no
-// auto-open, no cookies, no telemetry; the only client script on the page
-// is the copy-address helper.
+// cast list is bare routing matter into the cast waypoints. The client
+// layer is stateful (PLAN7 phase 2): the menu is the way out, the badge
+// marks the flat resolution (own kind slug, else the cast slug), and
+// first/switch/repeat + the route kind flow through /t. The JSON twin
+// stays personalization-free.
 //
 // Identity verdict: shim /f/{username} (fid) — the canonical identity
 // source, same seat as everywhere else. Entity (/user/{fid}) and timeline
@@ -26,15 +29,19 @@ import {
 	type UnfurlResult,
 } from "./cast-data.ts";
 import { hardenBlankTargets, unfurl } from "./cast-page.tsx";
-import { LIVE_STATS_SCRIPT, DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import {
-	findClient,
-	pointerClass,
-	resolveTemplate,
-	targetDeeplinkTargets,
-	targetFor,
+	LIVE_STATS_SCRIPT,
+	TRACK_SCRIPT,
+	CLIENT_SCRIPT,
+} from "./cast-scripts.ts";
+import { clientActionsHtml, autoOpenUi } from "./cast-actions.tsx";
+import {
+	clientsForRoute,
+	resolveLastUsed,
 	type TemplateVars,
 } from "./client-registry.ts";
+import type { ClientPrefs } from "./clients.ts";
+import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	getCastsAndReplies,
 	getCastByHash,
@@ -236,9 +243,10 @@ const PROFILE_STYLE = `<style>
 .profile-copy.profile-copied .icon-copy { display: none; }
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
 .profile-empty { color: var(--muted); font-size: 14px; }
-/* Unsigned way out: both pills ship in the SSR HTML (byte-identical for
-   every device — no UA sniffing); CSS picks by pointer class. pointer:none
-   devices see both — a graceful default. */
+/* Pointer-class pill scoping: registry targets may carry a fine/coarse
+   pointer scope (PLAN7) — the scoped pills ship in the SSR HTML
+   (byte-identical for every device, no UA sniffing) and CSS picks.
+   pointer:none devices see both — a graceful default. */
 @media (pointer: coarse) { .fine-only { display: none; } }
 @media (pointer: fine) { .coarse-only { display: none; } }
 .casts-page-head { margin: 8px 0 0; }
@@ -250,48 +258,6 @@ const PROFILE_STYLE = `<style>
 /** An address renders (linked, truncated) only in honest shapes; garbage stays text. */
 function isAddress(value: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(value);
-}
-
-/**
- * One unsigned-way-out pill, resolved from the REGISTRY (PLAN7 phase 1):
- * the URL/scheme/package facts live in the client's profile target — this
- * renderer keeps only the curated presentation (which two clients, which
- * order, which label), because the fork is a profile-surface affordance,
- * not a menu. The registry-driven menu replaces this head in phase 2.
- * `baseClass` differs per surface: the profile page's pills are
- * `pill fine-only`, the casts page's head links are bare `fine-only`.
- * Markup matches the pre-registry fork byte-for-byte: logo-less, scheme
- * before intent, native attempts via the cast page's DEEPLINK_SCRIPT
- * (data-scheme on iOS/other, Android intent:// with a Chrome-native
- * fallback — the href, quorum's homepage stub, is only the no-app
- * fallback).
- */
-function forkPill(
-	clientId: string,
-	vars: TemplateVars,
-	label: string,
-	baseClass: string,
-): string {
-	const client = findClient(clientId);
-	const target = client && targetFor(client, "profile");
-	if (client === undefined || target === undefined) return "";
-	const targets = targetDeeplinkTargets(target, vars);
-	const cls = [baseClass, pointerClass(target).trim()]
-		.filter(Boolean)
-		.join(" ");
-	return `<a class="${cls}" href="${escapeHtml(resolveTemplate(target.web, vars))}"` +
-		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "") +
-		(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
-		`>${escapeHtml(label)}</a>`;
-}
-
-/** The signed branch's "Open on Farcaster" href, resolved from the registry. */
-function profileTargetHref(clientId: string, vars: TemplateVars): string {
-	const client = findClient(clientId);
-	const target = client && targetFor(client, "profile");
-	return client === undefined || target === undefined
-		? ""
-		: resolveTemplate(target.web, vars);
 }
 
 function addressFacts(address: string): string {
@@ -322,11 +288,11 @@ function unavailablePage(username: string, key = username): string {
 }
 
 /**
- * HTML: identity card (the whole hydrated entity) + routing skeleton.
- * Zero telemetry/personalization surface — the copy helper is the page's
- * only script. Lenient toward decoration, strict about identity: 404 for
- * a proven miss, 503 when shim is unreachable (no fail-open content source
- * for identity, unlike casts).
+ * HTML: identity card (the whole hydrated entity) + routing skeleton,
+ * plus the stateful client layer (menu, badge, banner — PLAN7 phase 2).
+ * The JSON twin (?format=json) stays cookie-free. Lenient toward
+ * decoration, strict about identity: 404 for a proven miss, 503 when shim
+ * is unreachable (no fail-open content source for identity, unlike casts).
  */
 /**
  * Linkify explicit http(s) URLs in the collapsed bio — the one approved
@@ -354,6 +320,9 @@ export function renderProfileHtml(
 	profile: ResolvedProfile,
 	username: string,
 	primaryOrigin?: string,
+	prefs: ClientPrefs = {},
+	rank?: RankSnapshot | null,
+	noredirect = false,
 ): { status: 200 | 404 | 503; html: string } {
 	if (profile.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username) };
@@ -375,28 +344,40 @@ export function renderProfileHtml(
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
 
-	// The way out depends on the ban signal: signed === false means the
-	// account is read-only on farcaster.xyz — "Open on Farcaster" would be
-	// futile, so unsigned visitors get the non-signer clients instead
-	// (Quilcast on desktop — the /u/ profile route — Quorum on mobile via
-	// its source-verified profile deep link). Both pills ship; CSS picks
-	// by pointer. Unknown (shim down / no answer) fails open: Farcaster
-	// stays offered. Targets resolve from the registry; phase 2 replaces
-	// this fork with the stateful menu.
+	// The stateful layer (PLAN7 phase 2): the menu IS the way out —
+	// offered = profile-capable clients (farcaster suppressed for
+	// known-unsigned via requiresSigned, fail-open; unknown fails open and
+	// offers it). The badge and the banner follow the flat resolution:
+	// the kind's own slug, else the cast slug, else nothing (badgeless
+	// menu, no banner). Registry order without a rank snapshot.
 	const vars: TemplateVars = { username: handle, fid };
-	const actions =
+	const resolved = resolveLastUsed(
+		prefs,
+		"profile",
+		clientsForRoute("profile", vars, profile.signed),
+	);
+	const menu = clientActionsHtml(
+		vars,
+		profile.signed,
+		resolved?.id,
+		rank,
+		undefined,
+		{ kind: "profile", resolvedId: resolved?.id },
+	);
+	const auto = autoOpenUi(prefs, profile.signed, vars, noredirect, undefined, {
+		kind: "profile",
+		noun: "profiles",
+	});
+	const notice =
 		profile.signed === false
-			? `<p class="actions">
-${forkPill("quilcast", vars, "Open in Quilcast", "pill")}
-${forkPill("quorum", vars, "Open in Quorum", "pill")}
-</p>
-<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
-			: `<p class="actions"><a class="pill" href="${escapeHtml(profileTargetHref("farcaster", vars))}">Open on Farcaster</a></p>`;
+			? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
+			: "";
 
 	// Waypoint law, strict dial: the identity card IS the page — no cast
 	// list here. The list lives on /{username}/casts-and-replies.
 	const body = `
 ${PROFILE_STYLE}
+${auto.html}
 <div class="profile-card">
 ${avatar}
 <div class="profile-head">
@@ -406,7 +387,8 @@ ${bio ? `<p class="profile-bio">${renderBio(bio)}</p>` : ""}
 <ul class="profile-facts">${facts.join("")}</ul>
 </div>
 </div>
-${actions}
+${menu}
+${notice}
 <p class="actions"><a class="pill" href="/${encodeURIComponent(handle)}/casts-and-replies">Casts and replies</a></p>`;
 
 	const og = {
@@ -423,12 +405,10 @@ ${actions}
 			`${handle} · forkcaster`,
 			body,
 			og,
-			// Copy helper always; DEEPLINK_SCRIPT only when the unsigned pills
-			// ship (it attempts Quorum's profile deep link on phones, with
-			// the homepage stub as the no-app fallback).
-			profile.signed === false
-				? COPY_SCRIPT + DEEPLINK_SCRIPT
-				: COPY_SCRIPT,
+			// Copy helper + the stateful layer's scripts (telemetry __fk, the
+			// cookie writer, auto-open when a banner rendered). DEEPLINK_SCRIPT
+			// rides inside the menu row when any pill has a native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${auto.script ?? ""}`,
 			canonicalUrl,
 			"profile",
 		),
@@ -509,6 +489,9 @@ export async function renderCastsHtml(
 	username: string,
 	primaryOrigin?: string,
 	env?: { UNFURL?: Fetcher },
+	prefs: ClientPrefs = {},
+	rank?: RankSnapshot | null,
+	noredirect = false,
 ): Promise<{ status: 200 | 404 | 503; html: string }> {
 	const key = `${username}/casts-and-replies`;
 	if (profile.kind === "not-found") {
@@ -595,23 +578,38 @@ export async function renderCastsHtml(
 						: "Recent casts are unavailable right now."
 				}</p>`;
 
-	// Same ban-signal fork as the profile: unsigned ⇒ the non-signer
-	// clients in the head line (Quilcast desktop / Quorum mobile via its
-	// profile deep link), never Farcaster. Registry-resolved, bare-class
-	// links on this surface.
+	// The stateful layer (PLAN7 phase 2): the feed row + banner resolve
+	// over the feed kind — farcaster is the only seeded feed target, so
+	// the menu is one pill wide today (unsigned suppresses it entirely;
+	// the notice explains). Flat inheritance from the cast slug.
 	const vars: TemplateVars = { username: handle, fid };
-	const wayOut =
+	const resolved = resolveLastUsed(
+		prefs,
+		"feed",
+		clientsForRoute("feed", vars, signed),
+	);
+	const menu = clientActionsHtml(vars, signed, resolved?.id, rank, undefined, {
+		kind: "feed",
+		resolvedId: resolved?.id,
+	});
+	const auto = autoOpenUi(prefs, signed, vars, noredirect, undefined, {
+		kind: "feed",
+		noun: "feeds",
+	});
+	const notice =
 		signed === false
-			? `${forkPill("quilcast", vars, "Open in Quilcast", "")} · ${forkPill("quorum", vars, "Open in Quorum", "")}`
-			: `<a href="${escapeHtml(profileTargetHref("farcaster", vars))}">Open on Farcaster</a>`;
+			? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
+			: "";
 
 	const body = `
 ${PROFILE_STYLE}
+${auto.html}
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
-<p class="profile-handle">@${escapeHtml(handle)} · <a href="/${encodeURIComponent(handle)}">Profile</a> · ${wayOut}</p>
+<p class="profile-handle"><a href="/${encodeURIComponent(handle)}">Profile</a></p>
 </div>
-${signed === false ? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>` : ""}
+${menu}
+${notice}
 ${listHtml}`;
 
 	// OG preview identical to the profile's: same title/description/image.
@@ -631,12 +629,11 @@ ${listHtml}`;
 			`${key} · forkcaster`,
 			body,
 			og,
-			// The live-stats script fills one slot per card; DEEPLINK_SCRIPT
-			// rides along when the unsigned head ships Quorum's deep link —
-			// no pills, no telemetry, no auto-open on this surface.
-			signed === false
-				? LIVE_STATS_SCRIPT + DEEPLINK_SCRIPT
-				: LIVE_STATS_SCRIPT,
+			// Live-stats fills one slot per card; the stateful layer adds the
+			// telemetry helper + cookie writer; auto-open rides the banner.
+			// DEEPLINK_SCRIPT ships inside the feed row when its pill has a
+			// native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${auto.script ?? ""}`,
 			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.

@@ -28,6 +28,7 @@ describe("parseTrackEvent", () => {
 			transport: "native",
 			device: "coarse",
 			first: "switch",
+			route: "cast",
 		});
 	});
 
@@ -38,6 +39,7 @@ describe("parseTrackEvent", () => {
 			transport: "web",
 			device: "",
 			first: "",
+			route: "cast",
 		});
 		expect(
 			parseTrackEvent(JSON.stringify({ c: "neynar", k: "go-now", d: "fine" })),
@@ -47,6 +49,7 @@ describe("parseTrackEvent", () => {
 			transport: "web",
 			device: "fine",
 			first: "",
+			route: "cast",
 		});
 	});
 
@@ -89,7 +92,7 @@ describe("parseTrackEvent", () => {
 });
 
 describe("trackBlobs (the declared negative list, in blob form)", () => {
-	test("index is the slug; blobs are kind:transport, device, first flag, host", () => {
+	test("index is the slug; blobs are kind:transport, device, first flag, host, route", () => {
 		const event = parseTrackEvent(VALID);
 		expect(event).not.toBeNull();
 		expect(trackBlobs(event as NonNullable<typeof event>, "forkcaster.xyz")).toEqual([
@@ -97,6 +100,7 @@ describe("trackBlobs (the declared negative list, in blob form)", () => {
 			"coarse",
 			"switch",
 			"forkcaster.xyz",
+			"cast",
 		]);
 	});
 
@@ -108,6 +112,35 @@ describe("trackBlobs (the declared negative list, in blob form)", () => {
 			"-",
 			"-",
 			"warpcats.com",
+			"cast",
+		]);
+	});
+});
+
+describe("route blob (PLAN7 phase 2)", () => {
+	test("absent/invalid r normalizes to cast; valid passes", () => {
+		expect(parseTrackEvent(VALID)?.route).toBe("cast");
+		expect(
+			parseTrackEvent(JSON.stringify({ c: "firefly", k: "pill", r: "profile" }))
+				?.route,
+		).toBe("profile");
+		expect(
+			parseTrackEvent(JSON.stringify({ c: "firefly", k: "pill", r: "hover" }))
+				?.route,
+		).toBe("cast");
+	});
+
+	test("the route appends as the FIFTH blob — host stays fourth", () => {
+		const event = parseTrackEvent(
+			JSON.stringify({ c: "quorum", k: "auto", r: "feed" }),
+		);
+		expect(event).not.toBeNull();
+		expect(trackBlobs(event, "forkcaster.xyz")).toEqual([
+			"auto:web",
+			"-",
+			"-",
+			"forkcaster.xyz",
+			"feed",
 		]);
 	});
 });

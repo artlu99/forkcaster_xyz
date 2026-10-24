@@ -314,8 +314,8 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 // registered LAST: Hono matches in registration order, so every exact
 // reserved route above and the two-segment cast route keep winning (a
 // Farcaster user literally named "transparency" is shadowed — the same
-// accepted tradeoff the cast route documents). Waypoint law: identity card +
-// routing skeleton; no pills, no auto-open, no cookies, no telemetry. The
+// accepted tradeoff the cast route documents). Waypoint law: identity card
+// + the stateful client layer (PLAN7 phase 2 — menu, badge, auto-open). The
 // charset gate and bot-path denylist 404 garbage with zero upstream fetches —
 // every shim call costs a lookup, so noise never leaves the worker.
 const PROFILE_BOT_PATHS = new Set([
@@ -388,10 +388,17 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 			retryAfter ? { "retry-after": retryAfter } : undefined,
 		);
 	}
+	// The last-used client cookie + the rank snapshot + ?noredirect feed
+	// the stateful layer (PLAN7 phase 2): badge, banner, pill order.
+	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
+	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = renderProfileHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+		prefs,
+		rank,
+		c.req.query("noredirect") === "1",
 	);
 	// Retry-After rides the 503 in both variants (identity has no fail-open
 	// source — unlike casts, there is nothing to render without shim).
@@ -418,11 +425,18 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// follows the signed state.
 		signed: true,
 	});
+	// Stateful layer (PLAN7 phase 2): prefs + rank + ?noredirect, same
+	// wiring as the cast and profile routes.
+	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
+	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = await renderCastsHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		c.env,
+		prefs,
+		rank,
+		c.req.query("noredirect") === "1",
 	);
 	return c.html(
 		html,

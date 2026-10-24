@@ -24,11 +24,25 @@ export const AUTO_DELAY_MIN = 0;
 export const AUTO_DELAY_MAX = 5;
 export const AUTO_DELAY_DEFAULT = 5;
 
+export interface ClientKindPrefs {
+	/** Last-used client for profile routes (the `p:` segment). */
+	profile?: string;
+	/** Last-used client for feed routes (the `f:` segment). */
+	feed?: string;
+}
+
 export interface ClientPrefs {
 	slug?: string;
 	auto?: AutoOpen;
 	/** Saved wait in seconds. Absent means the default (5). */
 	delay?: number;
+	/**
+	 * Per-route-kind last-used slugs (v3 tail segments `p:`/`f:`). An
+	 * unset kind inherits the cast slug when capable — flat, never another
+	 * kind's choice (PLAN7 §5). Channels stay stateless: no `c:` segment
+	 * exists.
+	 */
+	kinds?: ClientKindPrefs;
 }
 
 export interface ClientPrefsPatch {
@@ -45,6 +59,10 @@ const SEPARATOR = "|";
 const FLAG_ON = "auto-on";
 const FLAG_OFF = "auto-off";
 const DELAY_SEGMENT = /^d([0-5])$/;
+/** Kind segments: `p:<slug>` = profile, `f:<slug>` = feed. Anything else
+ * (including a future `c:` — channels are stateless) is ignored. */
+const KIND_SEGMENT = /^([pf]):([a-z0-9-]+)$/;
+const KIND_KEYS = { p: "profile", f: "feed" } as const;
 
 export function isAutoDelay(value: unknown): value is number {
 	return (
@@ -74,24 +92,35 @@ export function parseClientCookie(raw: string | undefined): ClientPrefs {
 		else {
 			const delay = DELAY_SEGMENT.exec(part);
 			if (delay) prefs.delay = Number(delay[1]);
+			else {
+				const kind = KIND_SEGMENT.exec(part);
+				if (kind) {
+					prefs.kinds ??= {};
+					prefs.kinds[KIND_KEYS[kind[1] as keyof typeof KIND_KEYS]] =
+						kind[2];
+				}
+			}
 		}
 	}
 	return prefs;
 }
 
-/** Serializes prefs. Omits the delay segment at the default of 5s. */
+/** Serializes prefs. Omits the delay segment at the default of 5s; kind
+ * segments ride the tail in fixed p/f order after the flags. */
 export function serializeClientCookie(prefs: ClientPrefs): string {
 	const parts: string[] = [];
 	if (prefs.auto) parts.push(prefs.auto === "on" ? FLAG_ON : FLAG_OFF);
 	if (isAutoDelay(prefs.delay) && prefs.delay !== AUTO_DELAY_DEFAULT) {
 		parts.push(`d${prefs.delay}`);
 	}
+	if (prefs.kinds?.profile) parts.push(`p:${prefs.kinds.profile}`);
+	if (prefs.kinds?.feed) parts.push(`f:${prefs.kinds.feed}`);
 	const slug = prefs.slug ?? "";
 	if (parts.length === 0) return slug;
 	return `${slug}${SEPARATOR}${parts.join(SEPARATOR)}`;
 }
 
-/** Keeps the slug and any field the patch does not set. */
+/** Keeps the slug, the kind segments, and any field the patch does not set. */
 export function mergeClientCookie(
 	current: string | undefined,
 	patch: ClientPrefsPatch,
@@ -101,5 +130,6 @@ export function mergeClientCookie(
 		slug: prev.slug,
 		auto: patch.auto ?? prev.auto,
 		delay: isAutoDelay(patch.delay) ? patch.delay : prev.delay,
+		kinds: prev.kinds,
 	});
 }
