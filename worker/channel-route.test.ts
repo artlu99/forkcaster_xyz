@@ -102,14 +102,19 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 		`href="https://farcaster.xyz/~/channel/${CHANNEL_ID}" data-scheme="farcaster://~/channel/${CHANNEL_ID}" data-intent="intent://~/channel/${CHANNEL_ID}#Intent;scheme=farcaster;package=com.farcaster.mobile;S.browser_fallback_url=https%3A%2F%2Ffarcaster.xyz%2F~%2Fchannel%2Ffarcaster;end">Farcaster</a>`,
 	);
 	expect(body).toContain(
-		`href="https://firefly.social/channel/farcaster/${CHANNEL_ID}">Firefly</a>`,
+		`href="https://firefly.social/channel/farcaster/${CHANNEL_ID}" data-scheme="firefly://FarcasterChannel/${CHANNEL_ID}" data-intent="intent://FarcasterChannel/${CHANNEL_ID}#Intent;scheme=firefly;package=io.dimension.firefly;S.browser_fallback_url=https%3A%2F%2Ffirefly.social%2Fchannel%2Ffarcaster%2Ffarcaster;end">Firefly</a>`,
 	);
 	expect(body).toContain(
 		`class="pill coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?channelKey=${CHANNEL_ID}"`,
 	);
 	expect(body).toContain("package=com.quilibrium.quorummobile");
-	// Firefly is web-only: no native attrs on its pill.
-	expect(body).toContain(`>Firefly</a>`);
+	// Row order (owner call): Farcaster, Quorum, Firefly.
+	const iFc = body.indexOf(">Farcaster</a>");
+	const iQr = body.indexOf(">Quorum</a>");
+	const iFf = body.indexOf(">Firefly</a>");
+	expect(iFc).toBeGreaterThan(-1);
+	expect(iQr).toBeGreaterThan(iFc);
+	expect(iFf).toBeGreaterThan(iQr);
 	expect(body).not.toContain('data-scheme="https://firefly.social');
 	expect(body).not.toContain('rel="noopener noreferrer"');
 	// Engagement counts are withheld from HTML (PLAN5 §5) — neither the

@@ -73,10 +73,14 @@ const CHANNEL_STYLE = `<style>
 //   intent:// form (package com.farcaster.mobile, Chrome-native web
 //   fallback); iOS/other attempt the scheme with the 1.8s visibility
 //   fallback to the href (DEEPLINK_SCRIPT). Desktop just opens the web URL.
-// - Firefly: web-only, `channel/farcaster/{id}` — the network infix is
-//   part of their path (owner-confirmed route from their channels
-//   directory; Vercel's bot checkpoint blocks curl verification). No
-//   scheme exists for channels — the plain link is the intent.
+// - Firefly: `firefly://FarcasterChannel/{id}` — VERIFIED against the APK
+//   (io.dimension.firefly 1.1.44, apkpure mirror): the navigator registers
+//   `firefly://FarcasterChannel/{url}` and `https://farcaster.xyz/~/channel/
+//   {url}` onto ONE route whose token is the channel slug (the sibling
+//   regex `/~/channel/[\w\-]+` pins the charset), rendering the native
+//   ChannelDetail(farcasterChannelId=…) screen. Web href is the
+//   owner-confirmed `channel/farcaster/{id}` route (network infix is part
+//   of their path; Vercel's bot checkpoint blocks curl verification).
 // - Quorum: `quorummobile://feed?channelKey={id}` — VERIFIED against the
 //   open-source app (github.com/QuilibriumNetwork/quorum-mobile): the
 //   feed route accepts channelKey and seeds the nav stack into the
@@ -86,6 +90,7 @@ const CHANNEL_STYLE = `<style>
 //   only real target. Needs a Farcaster account connected in-app.
 const FARCASTER_ANDROID_PACKAGE = "com.farcaster.mobile";
 const QUORUM_ANDROID_PACKAGE = "com.quilibrium.quorummobile";
+const FIREFLY_ANDROID_PACKAGE = "io.dimension.firefly";
 
 /** Android intent:// URL — Chrome natively falls back to the web URL. */
 function androidIntent(scheme: string, pkg: string, webUrl: string): string {
@@ -97,12 +102,13 @@ function channelActionsHtml(id: string, external: string | null): string {
 	const fcWeb = `https://farcaster.xyz/~/channel/${id}`;
 	const fcScheme = `farcaster://~/channel/${id}`;
 	const ffWeb = `https://firefly.social/channel/farcaster/${id}`;
+	const ffScheme = `firefly://FarcasterChannel/${id}`;
 	const quorumScheme = `quorummobile://feed?channelKey=${id}`;
 	const quorumWeb = "https://www.quorummessenger.com/";
 	const pills = [
 		`<a class="pill" href="${escapeHtml(fcWeb)}" data-scheme="${escapeHtml(fcScheme)}" data-intent="${escapeHtml(androidIntent(fcScheme, FARCASTER_ANDROID_PACKAGE, fcWeb))}">Farcaster</a>`,
-		`<a class="pill" href="${escapeHtml(ffWeb)}">Firefly</a>`,
 		`<a class="pill coarse-only" href="${escapeHtml(quorumWeb)}" data-scheme="${escapeHtml(quorumScheme)}" data-intent="${escapeHtml(androidIntent(quorumScheme, QUORUM_ANDROID_PACKAGE, quorumWeb))}">Quorum</a>`,
+		`<a class="pill" href="${escapeHtml(ffWeb)}" data-scheme="${escapeHtml(ffScheme)}" data-intent="${escapeHtml(androidIntent(ffScheme, FIREFLY_ANDROID_PACKAGE, ffWeb))}">Firefly</a>`,
 	];
 	if (external) pills.push(external);
 	return `<p class="actions">${pills.join("")}</p>${DEEPLINK_SCRIPT}`;
