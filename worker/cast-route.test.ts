@@ -629,7 +629,7 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(res.headers.get("content-type") ?? "").toContain("text/html");
 	const body = await res.text();
 	expect(body).toContain("forkcaster — transparency");
-	expect(body).toContain("first validated answer wins");
+	expect(body).toContain("first good answer");
 	expect(body).toContain("No cast IDs");
 	expect(body).toContain("shim.artlu.xyz"); // provider roster table
 	expect(body).toContain('href="/transparency"'); // footer link present

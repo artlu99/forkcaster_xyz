@@ -57,15 +57,15 @@ test("HTML with a snapshot: numbers fill the table, dashes only for missing prov
 	expect(html).toContain("700ms");
 	expect(html).toContain("129ms");
 	expect(html).toContain("81%");
-	expect(html).toContain("stats as of");
-	expect(html).toContain("window 168h");
+	expect(html).toContain("answers later than 0.7 seconds");
+	expect(html).toContain("last 168 hours");
 	// haatz/snap aren't in this snapshot — their rows keep the dashes.
 	expect(html).toContain("<td>—</td>");
 });
 
 test("HTML without a snapshot: the coming-soon dashes remain, no as-of line", () => {
 	const html = renderTransparencyHtml({});
-	expect(html).not.toContain("stats as of");
+	expect(html).not.toContain("answers later than 0.7 seconds");
 	expect(html).toContain("<td>—</td>");
 	expect(html).toContain("<td>shim</td>");
 });
@@ -101,7 +101,7 @@ test("JSON twin without a snapshot: coming-soon with nulls", () => {
 test("Domains section: expiry dates + RDAP confirm links on HTML and JSON twin", () => {
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT });
 	expect(html).toContain(
-		"<code>forkcaster.xyz</code> — canonical · expires 2027-10-20",
+		"<code>forkcaster.xyz</code> — main · expires 2027-10-20",
 	);
 	expect(html).toContain(
 		"<code>warpcats.com</code> — same pages · expires 2027-10-21",
@@ -189,7 +189,7 @@ const RANK: import("./client-rank-store.ts").RankSnapshot = {
 
 test("rank table: numbers fill the roster, absent clients keep dashes", () => {
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
-	expect(html).toContain("Client choices");
+	expect(html).toContain("App use");
 	expect(html).toContain("<td>firefly</td>");
 	expect(html).toContain("<td>21.4</td>");
 	expect(html).toContain("<td>60.1%</td>");
@@ -197,9 +197,9 @@ test("rank table: numbers fill the roster, absent clients keep dashes", () => {
 	expect(html).toContain("<td>quorum</td>");
 	// The weighting is published next to the numbers (the methodology is
 	// part of the public contract).
-	expect(html).toContain("auto-opens ×0.1");
-	expect(html).toContain("pill order follows this table");
-	expect(html).toContain("rank stats as of");
+	expect(html).toContain("automatic ×0.1");
+	expect(html).toContain("follow this order");
+	expect(html).toContain("250 selections");
 });
 
 test("rank table: warming up — counts stay, shares are withheld", () => {
@@ -212,14 +212,14 @@ test("rank table: warming up — counts stay, shares are withheld", () => {
 	const html = renderTransparencyHtml({ rank: warming });
 	expect(html).toContain("<td>21.4</td>"); // counts shown
 	expect(html).not.toContain("<td>60.1%</td>"); // shares withheld
-	expect(html).toContain("shares withheld until 100+ events");
+	expect(html).toContain("shares show at 100+ selections");
 });
 
 test("rank table: no snapshot — dashes and no as-of line", () => {
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT });
-	expect(html).toContain("Client choices");
+	expect(html).toContain("App use");
 	expect(html).toContain("<td>firefly</td>");
-	expect(html).not.toContain("rank stats as of");
+	expect(html).not.toContain("shares show at 100+ selections");
 });
 
 test("JSON twin: clientRank live with zero-filled roster and published weights", () => {
@@ -278,7 +278,7 @@ test("JSON twin: the tracking counters shape declares both datapoints", () => {
 
 test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
-	expect(html).toContain("Client coverage");
+	expect(html).toContain("App links");
 	// farcaster: every kind seeded.
 	expect(html).toContain(
 		"<td>farcaster</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
@@ -332,8 +332,8 @@ test("tracking copy declares the route kind and the per-kind cookie memory", () 
 	expect(json.tracking.counters.clientChoice).toContain("which surface");
 	expect(json.tracking.cookies).toContain("profiles");
 	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
-	expect(html).toContain("which surface");
-	expect(html).toContain("for casts, profiles, and feeds separately");
+	expect(html).toContain("the page type");
+	expect(html).toContain("(casts, profiles, and feeds separately)");
 	// The What line covers the whole waypoint family now.
 	expect(html).toContain("profiles, feeds, and channels");
 });

@@ -72,12 +72,12 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 	const asOf =
 		snapshot == null
 			? ""
-			: `<li>stats as of <code>${escapeHtml(snapshot.generatedAt)}</code> · window ${snapshot.window.hours}h${snapshot.sampled ? " · sampled" : ""} · completes that miss the 700ms box are cut by design</li>`;
+			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · answers later than 0.7 seconds are not counted</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
 	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
 }
 
-const WEIGHTS_NOTE = `first picks ×${RANK_WEIGHTS.first} · go-now ×${RANK_WEIGHTS.goNow} · repeats ×${RANK_WEIGHTS.repeat} · auto-opens ×${RANK_WEIGHTS.auto}`;
+const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
 // Client coverage: the capability matrix, straight from
 // the registry — clients × route kinds. A — means "not verified yet",
@@ -88,7 +88,7 @@ const ACTIVE_CLIENTS = CLIENTS.filter(
 );
 
 function coverageTable(): string {
-	const head = ["client", ...ROUTE_KINDS]
+	const head = ["app", ...ROUTE_KINDS]
 		.map((h) => `<th>${escapeHtml(h)}</th>`)
 		.join("");
 	const body = ACTIVE_CLIENTS.map((client) => {
@@ -100,7 +100,7 @@ function coverageTable(): string {
 		];
 		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
 	}).join("");
-	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul><li>Straight from the registry. A — means not verified yet, not never; cast targets open the individual cast, the other kinds are that route's way out.</li></ul>`;
+	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul><li>This table comes from the site's app list. A ✓ means that the link exists. A — means that we have not confirmed it yet.</li></ul>`;
 }
 
 /** The JSON half of the coverage matrix (same source, same moment). */
@@ -129,10 +129,10 @@ function rankTable(rank: RankSnapshot | null | undefined): string {
 	const asOf =
 		rank == null
 			? ""
-			: `<li>rank stats as of <code>${escapeHtml(rank.generatedAt)}</code> · window ${rank.window.hours}h · ${rank.total} events${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares withheld until ${WARMING_UP_MIN}+ events (warming up)` : ""}</li>`;
-	const weights = `<li>score weights: ${WEIGHTS_NOTE} — auto-opens echo an earlier choice and count ~10× less; pill order follows this table</li>`;
+			: `<li>From <code>${escapeHtml(rank.generatedAt)}</code> · last ${rank.window.hours} hours · ${rank.total} selections${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares show at ${WARMING_UP_MIN}+ selections` : ""}</li>`;
+	const weights = `<li>${WEIGHTS_NOTE}</li>`;
 	const asOfHtml = asOf === "" ? `<ul>${weights}</ul>` : `<ul>${weights}${asOf}</ul>`;
-	return `<table><thead><tr><th>client</th><th>first picks</th><th>explicit</th><th>go-now</th><th>auto</th><th>score</th><th>share</th></tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+	return `<table><thead><tr><th>app</th><th>first picks</th><th>selections</th><th>open now</th><th>automatic</th><th>score</th><th>share</th></tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
 }
 
 export function transparencyJson(
@@ -282,32 +282,33 @@ export function renderTransparencyHtml(
 
 <h2>What</h2>
 <ul>
-<li>Farcaster casts, profiles, feeds, and channels → clean waypoints that route out to your client. No app, no login.</li>
-<li>MIT licensed open source: <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
+<li>Forkcaster shows Farcaster casts, profiles, feeds, and channels on simple pages. Open the links in the app that you choose. You do not need an app or an account to read.</li>
+<li>Open source, MIT license: <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
 </ul>
 
 <h2>Tracking</h2>
 <ul>
-<li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
-<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
-<li>One cookie: <code>fc_client</code> — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
-<li>JSON version of this page: add <code>?format=json</code>.</li>
+<li>Each page view sends one anonymous count: the data source that answered first, the response time, and the site name. No cast IDs. No IP addresses. No accounts. No ads.</li>
+<li>Each click on an app link sends one anonymous count: the app name, click or automatic open, website or app, phone or computer, the page type, and the site name. No cast IDs. No IP addresses. No other identifiers.</li>
+<li>We delete the raw counts after 90 days. Only the totals stay.</li>
+<li>One cookie, <code>fc_client</code>: the apps that you used last (casts, profiles, and feeds separately), your auto-open setting, and the wait time (0 to 5 seconds). It stays on this site and never goes to other sites. It expires after one year.</li>
+<li>For a JSON version of this page, add <code>?format=json</code>.</li>
 </ul>
 
-<h2>Client coverage</h2>
+<h2>App links</h2>
 ${coverageTable()}
 
-<h2>Client choices</h2>
-<p>Which client people open things with — casts, profiles, feeds. Pill order follows this table (a reordering — nothing is ever hidden on a surface it can serve, and the registry kill switch outranks popularity).</p>
+<h2>App use</h2>
+<p>This table shows the apps that people use. The app links on each page follow this order. No app is removed from a page that it can open.</p>
 ${rankTable(options.rank)}
 
 <h2>Data</h2>
 <ul>
-<li>Cast data is raced across 4 providers in parallel; first validated answer wins.</li>
+<li>Forkcaster asks 4 data sources at the same time and uses the first good answer.</li>
 </ul>
 ${statsTable(options.snapshot)}
 <ul>
-<li>Ban check (has the author signed Farcaster's contract?): shim <code>/signed/{fid}</code>. Unknown → fail open, everything shown.</li>
+<li>Some apps show only authors who signed the Farcaster agreement. We check this. If the check does not answer, we show every app.</li>
 </ul>
 
 <h2>Domains</h2>
@@ -315,10 +316,10 @@ ${statsTable(options.snapshot)}
 ${DOMAINS.registrations
 	.map(
 		(d) =>
-			`<li><code>${escapeHtml(d.name)}</code> — ${d.role === "canonical" ? "canonical" : "same pages"} · expires ${d.expires} · <a href="${d.rdap}">RDAP</a></li>`,
+			`<li><code>${escapeHtml(d.name)}</code> — ${d.role === "canonical" ? "main" : "same pages"} · expires ${d.expires} · <a href="${d.rdap}">RDAP</a></li>`,
 	)
 	.join("\n")}
-<li>Checked ${DOMAINS.checked} · RDAP links are live registry data.</li>
+<li>Checked ${DOMAINS.checked}. The RDAP links show the current registry data.</li>
 </ul>
 
 <p class="notice">Questions? <a href="${REPO}/issues">Open an issue</a>.</p>
@@ -329,7 +330,7 @@ ${DOMAINS.registrations
 		{
 			ogTitle: "forkcaster — transparency",
 			description:
-				"What forkcaster is, what is (and isn't) tracked, and where cast data comes from.",
+				"What forkcaster shows, what it collects, and where the data comes from.",
 		},
 		undefined,
 		options.canonicalUrl,
