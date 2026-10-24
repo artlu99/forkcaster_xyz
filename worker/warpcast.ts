@@ -20,19 +20,22 @@ export const channelUrl = (id: string): string =>
 	`${WARPCAST_API_BASE}/v1/channel?channelId=${encodeURIComponent(id)}`;
 
 /**
- * Channel entity as returned by GET /v1/channel. Only the minimal identity
- * (id, name, imageUrl) is load-bearing for the schema; everything else is
- * optional — absent fields render nothing, never faked. `url` is the
- * channel's parent key (legacy channels carry a `chain://…` NFT-contract
- * URL) and is renamed `parentUrl` at the JSON edge to keep "the channel's
- * page URL" unambiguous. Timestamps are unix SECONDS (profile convention).
+ * Channel entity as returned by GET /v1/channel. Only `id` — the entity's
+ * key — is load-bearing for the schema; every display field is optional
+ * because the renderer ships designed fallbacks (id-as-name, initial-block
+ * icon) that a required-but-empty string would make unreachable: a thin
+ * channel is still a found channel, not a 503. Absent fields render
+ * nothing, never faked. `url` is the channel's parent key (legacy channels
+ * carry a `chain://…` NFT-contract URL) and is renamed `parentUrl` at the
+ * JSON edge to keep "the channel's page URL" unambiguous. Timestamps are
+ * unix SECONDS (profile convention).
  */
 export const channelObjectSchema = z.object({
 	id: z.string(),
 	url: z.string().optional(),
-	name: z.string(),
+	name: z.string().optional(),
 	description: z.string().optional(),
-	imageUrl: z.string(),
+	imageUrl: z.string().optional(),
 	leadFid: z.number().nullish(),
 	moderatorFid: z.number().nullish(),
 	moderatorFids: z.array(z.number()).nullish(),

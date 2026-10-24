@@ -16,7 +16,7 @@
 
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
 import { getChannelById, type WarpcastChannel } from "./warpcast.ts";
-import { escapeHtml, shell } from "./shell.tsx";
+import { escapeHtml, formatDate, shell } from "./shell.tsx";
 
 export type ResolvedChannel =
 	| { kind: "found"; channel: WarpcastChannel }
@@ -47,16 +47,6 @@ const CHANNEL_STYLE = `<style>
 .channel-description { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .channel-facts { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
 </style>`;
-
-function formatDate(unixSeconds: number): string {
-	const date = new Date(unixSeconds * 1000);
-	if (Number.isNaN(date.getTime())) return "";
-	return new Intl.DateTimeFormat("en-US", {
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-	}).format(date);
-}
 
 /**
  * The channel's own way out: a second pill next to "Open on Farcaster".
@@ -200,8 +190,12 @@ export function renderChannelJson(
 	if (ch.imageUrl) body.image = ch.imageUrl;
 	if (ch.headerImageUrl) body.headerImage = ch.headerImageUrl;
 	if (typeof ch.createdAt === "number") {
-		// unix-SECOND API timestamps → ISO, same convention as the profile twin.
-		body.createdAt = new Date(ch.createdAt * 1000).toISOString();
+		// unix-SECOND API timestamps → ISO, same convention as the profile
+		// twin. An out-of-range number would make toISOString throw — a
+		// misbehaving answer is treated as absent, never a 500 (the HTML
+		// path's formatDate NaN guard does the same job).
+		const date = new Date(ch.createdAt * 1000);
+		if (Number.isFinite(date.getTime())) body.createdAt = date.toISOString();
 	}
 	if (ch.url) body.parentUrl = ch.url;
 	if (typeof ch.leadFid === "number") body.leadFid = ch.leadFid;

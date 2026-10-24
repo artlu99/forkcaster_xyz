@@ -33,6 +33,21 @@ import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
 export const app = new Hono<{ Bindings: Env }>();
 
+/**
+ * Shared JSON negotiation for every SSR+JSON twin route (cast, profile,
+ * channel, transparency): ?format=json is the explicit agent switch and
+ * wins over Accept; only a strict application/json Accept also negotiates
+ * JSON — a wildcard Accept stays HTML. One expression, four routes: the
+ * /api/ index advertises them as siblings, so they must negotiate
+ * identically.
+ */
+function negotiatesJson(c: Context<{ Bindings: Env }>): boolean {
+	return (
+		c.req.query("format") === "json" ||
+		(c.req.header("Accept") ?? "").includes("application/json")
+	);
+}
+
 // Auto-open preference write. Server `Set-Cookie` (not document.cookie)
 // keeps the preference exempt from Safari ITP's ~7-day cap on
 // script-set cookies. Dumb: validate → Set-Cookie → 204.
@@ -106,9 +121,7 @@ app.get("/mcp", (c) => {
 });
 
 app.get("/transparency", async (c) => {
-	const wantsJson =
-		c.req.query("format") === "json" ||
-		(c.req.header("Accept") ?? "").includes("application/json");
+	const wantsJson = negotiatesJson(c);
 	// Two cacheTtl'd reads (per-isolate) feed the HTML page and the JSON
 	// twin; absent/unreachable snapshots → dashes/coming-soon. Silent.
 	const snapshot = await getRaceStatsSnapshot(c.env);
@@ -168,9 +181,7 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 	// Resolve once, render twice — same negotiation as the cast/profile
 	// routes: ?format=json wins over Accept; only strict application/json
 	// Accept also negotiates JSON.
-	const wantsJson =
-		c.req.query("format") === "json" ||
-		(c.req.header("Accept") ?? "").includes("application/json");
+	const wantsJson = negotiatesJson(c);
 	const resolved = await resolveChannel(id);
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderChannelJson(resolved, id);
@@ -215,9 +226,7 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// strict application/json Accept also negotiates JSON — browsers and
 	// curl send */*, which stays HTML. HTML races the provider roster with
 	// a 700ms completeness box (cast-source.ts); JSON stays shim-only.
-	const wantsJson =
-		c.req.query("format") === "json" ||
-		(c.req.header("Accept") ?? "").includes("application/json");
+	const wantsJson = negotiatesJson(c);
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
@@ -348,9 +357,7 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	// ?format=json wins over Accept; only strict application/json Accept
 	// also negotiates JSON. The identity-card page skips the timeline call
 	// entirely; the JSON twin keeps serving recent casts.
-	const wantsJson =
-		c.req.query("format") === "json" ||
-		(c.req.header("Accept") ?? "").includes("application/json");
+	const wantsJson = negotiatesJson(c);
 	const resolved = await resolveProfile(username, {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.

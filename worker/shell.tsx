@@ -15,6 +15,19 @@ export function escapeHtml(s: string): string {
 		.replaceAll("'", "&#39;");
 }
 
+// Shared with the identity cards (profiles, channels): one date style for
+// every "Created"/cast-date fact. NaN/out-of-range input renders "" (the
+// field is then omitted — never a thrown render).
+export function formatDate(unixSeconds: number): string {
+	const date = new Date(unixSeconds * 1000);
+	if (Number.isNaN(date.getTime())) return "";
+	return new Intl.DateTimeFormat("en-US", {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	}).format(date);
+}
+
 export function shell(
 	title: string,
 	bodyHtml: string,
@@ -26,8 +39,9 @@ export function shell(
 	},
 	clientScript?: string,
 	canonicalUrl?: string,
-	// Profile pages render as og:type "profile"; everything else stays
-	// "article" (the historical default) — byte-identical output.
+	// og:type per surface: cast/transparency pages stay "article" (the
+	// historical default), profiles render "profile", channel landings
+	// render "website" — pass it explicitly.
 	ogType: string = "article",
 	// The casts skeleton page has no JSON twin: it omits the alternate link
 	// instead of advertising an endpoint that would answer HTML.

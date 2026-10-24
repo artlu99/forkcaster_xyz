@@ -183,6 +183,26 @@ test("an empty name falls back to the id (title, h1, og:title)", async () => {
 	);
 });
 
+test("a 200 payload without name/imageUrl renders the id fallbacks instead of 503", async () => {
+	// The schema requires only the entity key: a thin-but-real channel is
+	// found, and the renderer's designed fallbacks (id-as-name,
+	// initial-block icon) take over — same semantics as empty strings.
+	globalThis.fetch = apiMock({
+		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+			body: { result: { channel: { id: CHANNEL_ID } } },
+		},
+	});
+	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	expect(body).toContain("<title>farcaster · forkcaster</title>");
+	expect(body).toContain(`<h1 class="channel-title">${CHANNEL_ID}</h1>`);
+	expect(body).toContain("channel-avatar-fallback");
+	expect(body).not.toContain('class="channel-banner"');
+	expect(body).not.toContain('<meta property="og:image"');
+});
+
 test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropped", async () => {
 	const withLink = apiMock({
 		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
