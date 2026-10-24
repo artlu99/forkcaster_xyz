@@ -204,6 +204,16 @@ function isAddress(value: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
+// Hardcoded unsigned-client destinations (owner-directed) — NOT
+// registry-driven; the unsigned way out is a profile-surface affordance.
+// Quorum desktop keeps the homepage stub (the verified desktop target —
+// source-verified profile deep links exist but are mobile-scheme-only and
+// device-unverified, see below); Quilcast mobile uses the owner-provided
+// /u/ profile route.
+const QUORUM_DESKTOP_URL = "https://www.quorummessenger.com/";
+const quilcastProfileUrl = (handle: string): string =>
+	`https://quilcast.com/u/${encodeURIComponent(handle)}`;
+
 function addressFacts(address: string): string {
 	const truncated = `${address.slice(0, 6)}…${address.slice(-4)}`;
 	if (!isAddress(address)) {
@@ -282,8 +292,8 @@ export function renderProfileHtml(
 	const actions =
 		profile.signed === false
 			? `<p class="actions">
-<a class="pill fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>
-<a class="pill coarse-only" href="https://quilcast.com/u/${encodeURIComponent(handle)}">Open in Quilcast</a>
+<a class="pill fine-only" href="${QUORUM_DESKTOP_URL}">Open in Quorum</a>
+<a class="pill coarse-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>
 </p>
 <p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
 			: `<p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>`;
@@ -407,7 +417,7 @@ export async function renderCastsHtml(
 	if (profile.kind === "unreachable") {
 		return { status: 503, html: unavailablePage(username, key) };
 	}
-	const { user, fid, casts, timelineOk } = profile;
+	const { user, fid, casts, timelineOk, signed } = profile;
 	const handle = user.username ?? username;
 	const displayName = user.displayName ?? null;
 
@@ -485,12 +495,21 @@ export async function renderCastsHtml(
 						: "Recent casts are unavailable right now."
 				}</p>`;
 
+	// Same ban-signal fork as the profile: unsigned ⇒ the hardcoded
+	// non-signer clients in the head line (Quorum desktop / Quilcast
+	// mobile), never Farcaster.
+	const wayOut =
+		signed === false
+			? `<a class="fine-only" href="${QUORUM_DESKTOP_URL}">Open in Quorum</a> · <a class="coarse-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>`
+			: `<a href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a>`;
+
 	const body = `
 ${PROFILE_STYLE}
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
-<p class="profile-handle">@${escapeHtml(handle)} · <a href="/${encodeURIComponent(handle)}">Profile</a> · <a href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>
+<p class="profile-handle">@${escapeHtml(handle)} · <a href="/${encodeURIComponent(handle)}">Profile</a> · ${wayOut}</p>
 </div>
+${signed === false ? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>` : ""}
 ${listHtml}`;
 
 	// OG preview identical to the profile's: same title/description/image.

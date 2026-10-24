@@ -306,7 +306,12 @@ app.get("/:username/casts-and-replies", async (c) => {
 	if (username === null) {
 		return c.body(null, 404);
 	}
-	const resolved = await resolveProfile(username, { timeline: true });
+	const resolved = await resolveProfile(username, {
+		timeline: true,
+		// Same ban-signal fork as the profile page: the head's way out
+		// follows the signed state.
+		signed: true,
+	});
 	const { status, html } = await renderCastsHtml(
 		resolved,
 		username,

@@ -440,6 +440,10 @@ function repliesMock(): typeof fetch {
 	return shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: true,
+		},
 		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: REPLIES,
 	});
 }
@@ -544,6 +548,38 @@ test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 	const empty = await app.request(`/${USERNAME}/casts-and-replies`);
 	expect(empty.status).toBe(200);
 	expect(await empty.text()).toContain("No casts yet.");
+});
+
+test("casts-and-replies forks the way out for unsigned accounts too", async () => {
+	// Same ban-signal fork as the profile: unsigned ⇒ Quorum desktop /
+	// Quilcast mobile in the head, never Farcaster. The embed cards keep
+	// their own Show-on-Farcaster links (embed law — unaffected).
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: false,
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: REPLIES,
+	});
+	const res = await app.request(`/${USERNAME}/casts-and-replies`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The exact head link is gone (the card links continue with /0x…, so
+	// the trailing-quote substring only matches the head).
+	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu">');
+	expect(body).not.toContain(">Open on Farcaster</a>");
+	expect(body).toContain(
+		'class="fine-only" href="https://www.quorummessenger.com/">Open in Quorum</a>',
+	);
+	expect(body).toContain(
+		`class="coarse-only" href="https://quilcast.com/u/${USERNAME}">Open in Quilcast</a>`,
+	);
+	expect(body).toContain("read-only on farcaster.xyz");
+	// The cards themselves are unaffected.
+	expect(body).toContain("first cast");
 });
 
 test("profile card escapes hostile upstream text (XSS regression)", async () => {
