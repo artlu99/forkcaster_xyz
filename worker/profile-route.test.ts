@@ -505,7 +505,7 @@ test("GET /api/ lists the profile JSON surface", async () => {
 	expect(await res.json()).toEqual({
 		cast: "/{username}/{hash}?format=json",
 		profile: "/{username}?format=json",
-		channel: "/channel/{id}?format=json",
+		channel: "/~/channel/{id}?format=json",
 		raceStats: "/race-stats.json",
 		transparency: "/transparency?format=json",
 	});

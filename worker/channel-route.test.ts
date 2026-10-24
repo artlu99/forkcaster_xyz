@@ -79,7 +79,7 @@ afterEach(() => {
 // --- HTML: the identity card is the whole parsed entity -----------------------
 
 test("channel page renders the identity card from the Warpcast API entity", async () => {
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(res.status).toBe(200);
 	expect(res.headers.get("content-type") ?? "").toContain("text/html");
 
@@ -171,7 +171,7 @@ test("optional entity fields vanish instead of rendering empty", async () => {
 			},
 		},
 	});
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
@@ -195,7 +195,7 @@ test("an empty name falls back to the id (title, h1, og:title)", async () => {
 			},
 		},
 	});
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	const body = await res.text();
 	expect(body).toContain("<title>farcaster · forkcaster</title>");
 	expect(body).toContain(">farcaster</h1>");
@@ -213,7 +213,7 @@ test("a 200 payload without name/imageUrl renders the id fallbacks instead of 50
 			body: { result: { channel: { id: CHANNEL_ID } } },
 		},
 	});
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
@@ -238,7 +238,7 @@ test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropp
 		},
 	});
 	globalThis.fetch = withLink;
-	const ok = await app.request(`/channel/${CHANNEL_ID}`);
+	const ok = await app.request(`/~/channel/${CHANNEL_ID}`);
 	const okBody = await ok.text();
 	expect(okBody).toContain(
 		'href="https://www.farcaster.xyz/" target="_blank" rel="noopener noreferrer">Farcaster site</a>',
@@ -256,32 +256,46 @@ test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropp
 			},
 		},
 	});
-	const evil = await app.request(`/channel/${CHANNEL_ID}`);
+	const evil = await app.request(`/~/channel/${CHANNEL_ID}`);
 	const evilBody = await evil.text();
 	expect(evilBody).not.toContain("javascript:");
 	expect(evilBody).not.toContain('rel="noopener noreferrer"');
 });
 
-test("both URL shapes render the same page; canonical always carries /~/channel/{id}", async () => {
+test("canonical always carries /~/channel/{id}; the bare /channel/{id} alias is gone", async () => {
 	// The /~/ form is canonical — farcaster.xyz's own channel URL shape
-	// (warpcast.com 301s there); /channel/{id} is the bare alias.
-	const bare = await app.request(`/channel/${CHANNEL_ID}`, undefined, {
+	// (warpcast.com 301s there) — and the only shape served.
+	const canonical = await app.request(`/~/channel/${CHANNEL_ID}`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
-	expect(bare.status).toBe(200);
-	const bareBody = await bare.text();
-	expect(bareBody).toContain("Discussions about Farcaster on Farcaster (meta!)");
-	expect(bareBody).toContain(
+	expect(canonical.status).toBe(200);
+	const canonicalBody = await canonical.text();
+	expect(canonicalBody).toContain("Discussions about Farcaster on Farcaster (meta!)");
+	expect(canonicalBody).toContain(
 		`<link rel="canonical" href="https://forkcaster.xyz/~/channel/${CHANNEL_ID}" />`,
 	);
-	expect(bareBody).toContain(
+	expect(canonicalBody).toContain(
 		`<meta property="og:url" content="https://forkcaster.xyz/~/channel/${CHANNEL_ID}" />`,
 	);
 
-	const alias = await app.request(`/~/channel/${CHANNEL_ID}`);
-	const aliasBody = await alias.text();
-	expect(aliasBody).not.toContain("canonical");
-	expect(aliasBody).not.toContain("og:url");
+	const bare = await app.request(`/~/channel/${CHANNEL_ID}`);
+	const bareBody = await bare.text();
+	expect(bareBody).not.toContain("canonical");
+	expect(bareBody).not.toContain("og:url");
+});
+
+test("the bare /channel/{id} shape 404s with zero upstream fetches", async () => {
+	// Owner call: the bare alias was removed. A plain id matches no route
+	// (the cast route needs a 0x hash) — 404, and the Warpcast API is
+	// never asked.
+	let calls = 0;
+	globalThis.fetch = mock(async () => {
+		calls++;
+		throw new Error("Unexpected fetch in test");
+	}) as typeof fetch;
+	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	expect(res.status).toBe(404);
+	expect(calls).toBe(0);
 });
 
 // --- Identity verdicts: strict statuses in BOTH variants ----------------------
@@ -293,11 +307,11 @@ test("API 400 miss ⇒ 404 (HTML and JSON)", async () => {
 			status: 400,
 		},
 	});
-	const html = await app.request(`/channel/${CHANNEL_ID}`);
+	const html = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(html.status).toBe(404);
 	expect(await html.text()).toContain("Channel not found");
 
-	const json = await app.request(`/channel/${CHANNEL_ID}?format=json`);
+	const json = await app.request(`/~/channel/${CHANNEL_ID}?format=json`);
 	expect(json.status).toBe(404);
 	expect(await json.json()).toEqual({ error: "channel not found" });
 });
@@ -309,12 +323,12 @@ test("API 500 / network failure ⇒ 503 + Retry-After (HTML and JSON)", async ()
 			status: 500,
 		},
 	});
-	const down = await app.request(`/channel/${CHANNEL_ID}`);
+	const down = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(down.status).toBe(503);
 	expect(down.headers.get("retry-after")).toBe("60");
 	expect(await down.text()).toContain("temporarily unavailable");
 
-	const json = await app.request(`/channel/${CHANNEL_ID}?format=json`);
+	const json = await app.request(`/~/channel/${CHANNEL_ID}?format=json`);
 	expect(json.status).toBe(503);
 	expect(json.headers.get("retry-after")).toBe("60");
 	expect(await json.json()).toEqual({
@@ -325,7 +339,7 @@ test("API 500 / network failure ⇒ 503 + Retry-After (HTML and JSON)", async ()
 		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]:
 			new Error("api unreachable"),
 	});
-	const thrown = await app.request(`/channel/${CHANNEL_ID}`);
+	const thrown = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(thrown.status).toBe(503);
 	expect(thrown.headers.get("retry-after")).toBe("60");
 });
@@ -337,7 +351,7 @@ test("a malformed 200 body ⇒ 503 (service misbehaving, not an authoritative mi
 			body: { result: { channel: { followerCount: 1 } } },
 		},
 	});
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(res.status).toBe(503);
 	expect(res.headers.get("retry-after")).toBe("60");
 });
@@ -345,7 +359,7 @@ test("a malformed 200 body ⇒ 503 (service misbehaving, not an authoritative mi
 // --- Agent JSON twin ----------------------------------------------------------
 
 test("?format=json returns the availability-gated channel body", async () => {
-	const res = await app.request(`/channel/${CHANNEL_ID}?format=json`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}?format=json`);
 	expect(res.status).toBe(200);
 	expect(res.headers.get("content-type") ?? "").toContain("application/json");
 
@@ -371,13 +385,13 @@ test("?format=json returns the availability-gated channel body", async () => {
 });
 
 test("Accept: application/json negotiates JSON; */* stays HTML", async () => {
-	const jsonRes = await app.request(`/channel/${CHANNEL_ID}`, {
+	const jsonRes = await app.request(`/~/channel/${CHANNEL_ID}`, {
 		headers: { Accept: "application/json" },
 	});
 	expect(jsonRes.headers.get("content-type") ?? "").toContain(
 		"application/json",
 	);
-	const anyRes = await app.request(`/channel/${CHANNEL_ID}`, {
+	const anyRes = await app.request(`/~/channel/${CHANNEL_ID}`, {
 		headers: { Accept: "*/*" },
 	});
 	expect(anyRes.headers.get("content-type") ?? "").toContain("text/html");
@@ -393,8 +407,8 @@ test("garbage ids 404 with ZERO upstream fetches", async () => {
 	}) as typeof fetch;
 
 	for (const path of [
-		`/channel/${"a".repeat(31)}`, // over the id length gate
-		`/channel/${encodeURIComponent("a b")}`, // space outside the charset
+		`/~/channel/${"a".repeat(31)}`, // over the id length gate
+		`/~/channel/${encodeURIComponent("a b")}`, // space outside the charset
 	]) {
 		const res = await app.request(path);
 		expect(res.status).toBe(404);
@@ -415,25 +429,26 @@ test("channel trailing slashes 301 to the same shape minus the slash, search pre
 		throw new Error("Unexpected fetch in test");
 	}) as typeof fetch;
 
-	const plain = await app.request("/channel/Farcaster/?utm=x");
+	const plain = await app.request(`/~/channel/Farcaster/?utm=x`);
 	expect(plain.status).toBe(301);
-	expect(plain.headers.get("location")).toBe("/channel/farcaster?utm=x");
+	expect(plain.headers.get("location")).toBe("/~/channel/farcaster?utm=x");
 
-	const alias = await app.request(`/~/channel/${CHANNEL_ID}/`);
-	expect(alias.status).toBe(301);
-	expect(alias.headers.get("location")).toBe(`/~/channel/${CHANNEL_ID}`);
+	// The bare /channel/{id}/ shape died with the alias: a plain id matches
+	// no route (the cast route needs a 0x hash).
+	const gone = await app.request(`/channel/${CHANNEL_ID}/`);
+	expect(gone.status).toBe(404);
 
 	expect(calls).toBe(0);
 });
 
 test("uppercase ids lowercase before lookup", async () => {
-	const res = await app.request("/channel/Farcaster");
+	const res = await app.request("/~/channel/Farcaster");
 	expect(res.status).toBe(200);
 	expect(await res.text()).toContain("Discussions about Farcaster on Farcaster (meta!)");
 });
 
 test("a hash-shaped id routes to the channel handler, not the cast route", async () => {
-	// /channel/0xabc… is two segments and would match the cast route's
+	// /~/channel/0xabc… is two segments and would match the cast route's
 	// pattern — the literal-first-segment registration order must win.
 	// The mock only knows the Warpcast API: any shim fetch (the cast
 	// route's pipeline) would throw "Unexpected fetch" and fail the test.
@@ -443,15 +458,25 @@ test("a hash-shaped id routes to the channel handler, not the cast route", async
 			status: 400,
 		},
 	});
-	const res = await app.request("/channel/0xabc123");
+	const res = await app.request("/~/channel/0xabc123");
 	expect(res.status).toBe(404);
+});
+
+test("a bare /channel/0x… hash falls through to the cast route (un-shadowed)", async () => {
+	// With the bare channel alias gone, the hash matches the cast route's
+	// pattern (username "channel") — the Warpcast API must never be asked;
+	// the cast pipeline's shim fetches are unexpected here and throw.
+	globalThis.fetch = apiMock({});
+	const res = await app.request("/channel/0xabc123");
+	expect(res.status).not.toBe(404);
+	expect(await res.text()).not.toContain("Channel not found");
 });
 
 test("GET /api/ lists the channel JSON surface", async () => {
 	const res = await app.request("/api/");
 	expect(res.status).toBe(200);
 	const body = await res.json();
-	expect(body.channel).toBe("/channel/{id}?format=json");
+	expect(body.channel).toBe("/~/channel/{id}?format=json");
 });
 
 // --- Live-verified fixture: zora ----------------------------------------------
@@ -487,7 +512,7 @@ function zoraMock(): typeof fetch {
 
 test("zora: external link renders the second pill; counts stay withheld", async () => {
 	globalThis.fetch = zoraMock();
-	const res = await app.request("/channel/zora");
+	const res = await app.request("/~/channel/zora");
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
@@ -504,7 +529,7 @@ test("zora: external link renders the second pill; counts stay withheld", async 
 
 test("zora: JSON twin carries the full routing entity", async () => {
 	globalThis.fetch = zoraMock();
-	const res = await app.request("/channel/zora?format=json");
+	const res = await app.request("/~/channel/zora?format=json");
 	expect(res.status).toBe(200);
 
 	const body = await res.json();
@@ -548,7 +573,7 @@ test("channel card escapes hostile upstream text", async () => {
 			},
 		},
 	});
-	const res = await app.request(`/channel/${CHANNEL_ID}`);
+	const res = await app.request(`/~/channel/${CHANNEL_ID}`);
 	expect(res.status).toBe(200);
 
 	const body = await res.text();

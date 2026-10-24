@@ -150,18 +150,20 @@ app.get("/api/", (c) =>
 	c.json({
 		cast: "/{username}/{hash}?format=json",
 		profile: "/{username}?format=json",
-		channel: "/channel/{id}?format=json",
+		channel: "/~/channel/{id}?format=json",
 		raceStats: "/race-stats.json",
 		transparency: "/transparency?format=json",
 	}),
 );
 
-// Channel landing pages (PLAN6). The literal `channel` and `~/channel`
-// prefixes are registered BEFORE the two-segment cast route: Hono matches
-// in registration order, so even a hash-shaped id (/channel/0xabc…) routes
-// here rather than to the cast handler. Accepted shadow tradeoff (same
-// family as /transparency): a cast belonging to a Farcaster user literally
-// named "channel" is shadowed. Waypoint law, identity-only: the recent-casts
+// Channel landing pages (PLAN6). The literal `~/channel` prefix is
+// registered BEFORE the two-segment cast route: Hono matches in
+// registration order, so even a hash-shaped id (/~/channel/0xabc…) routes
+// here rather than to the cast handler. The bare /channel/{id} alias is
+// gone (owner call): plain ids 404 outright, and /channel/0x… hashes fall
+// through to the cast route — which un-shadows casts belonging to a
+// Farcaster user literally named "channel" (the tradeoff /transparency
+// still carries). Waypoint law, identity-only: the recent-casts
 // skeleton is deferred until a cheap feed exists (shim's measured 8–15s+,
 // PLAN6 §4); one stateless script (the trio's DEEPLINK_SCRIPT), zero
 // cookies, zero telemetry. The charset gate
@@ -206,23 +208,13 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 	);
 }
 
-// Both farcaster.xyz URL shapes render the same page; canonical + og:url
-// always carry the /~/channel/{id} form — farcaster.xyz's own channel URL
-// shape — with /channel/{id} the bare alias that also resolves.
-app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
+// The /~/channel/{id} form is farcaster.xyz's own channel URL shape and
+// the only one served — canonical + og:url carry it too.
 app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 
 // Trailing slashes ride the site-wide 301 policy (same shape, minus the
-// slash, search preserved) — without these, /channel/{id}/ 404s because
+// slash, search preserved) — without this, /~/channel/{id}/ 404s because
 // the profile trailing-slash routes only match single segments.
-app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}/", (c) => {
-	const id = gateChannelId(c.req.param().id);
-	if (id === null) {
-		return c.body(null, 404);
-	}
-	const search = new URL(c.req.url).search;
-	return c.redirect(`/channel/${id}${search}`, 301);
-});
 app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}/", (c) => {
 	const id = gateChannelId(c.req.param().id);
 	if (id === null) {
