@@ -1,5 +1,5 @@
 /**
- * Channel route integration tests (PLAN5).
+ * Channel route integration tests (PLAN6).
  *
  * Same contract as profile-route.test.ts: `app.request(...)`,
  * globalThis.fetch mocked and routed by exact URL — unexpected URLs throw,
@@ -117,7 +117,7 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 	expect(iFf).toBeGreaterThan(iQr);
 	expect(body).not.toContain('data-scheme="https://firefly.social');
 	expect(body).not.toContain('rel="noopener noreferrer"');
-	// Engagement counts are withheld from HTML (PLAN5 §5) — neither the
+	// Engagement counts are withheld from HTML (PLAN6 §5) — neither the
 	// field name nor the raw numbers survive into the page.
 	expect(body).not.toContain("followerCount");
 	expect(body).not.toContain("445637");
@@ -360,7 +360,7 @@ test("?format=json returns the availability-gated channel body", async () => {
 	expect(body.parentUrl).toBe(CHANNEL.url);
 	expect(body.leadFid).toBe(1);
 	expect(body.moderatorFids).toEqual([1]);
-	// The engagement counts HTML withholds live here (PLAN5 §5).
+	// The engagement counts HTML withholds live here (PLAN6 §5).
 	expect(body.followerCount).toBe(445637);
 	expect(body.memberCount).toBe(1);
 	expect(body.publicCasting).toBe(true);

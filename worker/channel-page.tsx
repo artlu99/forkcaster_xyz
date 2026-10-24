@@ -1,13 +1,13 @@
-// Channel landing pages — resolve once, render twice (PLAN5).
+// Channel landing pages — resolve once, render twice (PLAN6).
 //
 // Waypoint law: identity is the page, lists are skeletons (never feeds —
-// here: no list at all until shim grows a cheap one, PLAN5 §4), interaction
+// here: no list at all until shim grows a cheap one, PLAN6 §4), interaction
 // lives in the clients. The identity card surfaces exactly the entity
 // api.farcaster.xyz /v1/channel returns, parsed by worker/warpcast.ts —
 // empty-prone fields render nothing, never faked, and nothing beyond it is
 // fetched. Engagement counts (follower/member) are withheld from HTML and
-// carried in the JSON twin (PLAN5 §5). The way out is a hand-verified pill
-// trio (PLAN5 §8): no auto-open, no last-used memory, no telemetry — the
+// carried in the JSON twin (PLAN6 §5). The way out is a hand-verified pill
+// trio (PLAN6 §8): no auto-open, no last-used memory, no telemetry — the
 // only script is the cast row's DEEPLINK_SCRIPT, reused for click-time
 // native attempts precisely because it carries no state.
 //
@@ -226,7 +226,7 @@ ${channelActionsHtml(id, external)}`;
  * JSON: 404 on the API's authoritative miss, 503 + Retry-After when
  * unreachable. Availability-gated fields appear only when their data
  * exists; this is where the engagement counts live (HTML withholds them,
- * PLAN5 §5), alongside the routing data HTML doesn't carry (parentUrl,
+ * PLAN6 §5), alongside the routing data HTML doesn't carry (parentUrl,
  * pinnedCastHash, moderatorFids).
  */
 export function renderChannelJson(

@@ -156,14 +156,15 @@ app.get("/api/", (c) =>
 	}),
 );
 
-// Channel landing pages (PLAN5). The literal `channel` and `~/channel`
+// Channel landing pages (PLAN6). The literal `channel` and `~/channel`
 // prefixes are registered BEFORE the two-segment cast route: Hono matches
 // in registration order, so even a hash-shaped id (/channel/0xabc…) routes
 // here rather than to the cast handler. Accepted shadow tradeoff (same
 // family as /transparency): a cast belonging to a Farcaster user literally
 // named "channel" is shadowed. Waypoint law, identity-only: the recent-casts
 // skeleton is deferred until a cheap feed exists (shim's measured 8–15s+,
-// PLAN5 §4); zero scripts, zero cookies, zero telemetry. The charset gate
+// PLAN6 §4); one stateless script (the trio's DEEPLINK_SCRIPT), zero
+// cookies, zero telemetry. The charset gate
 // 404s garbage with zero upstream fetches; ids lowercase before lookup.
 const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9._-]{1,30}$/;
 
