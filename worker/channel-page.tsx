@@ -3,7 +3,7 @@
 // Waypoint law: identity is the page, lists are skeletons (never feeds —
 // here: no list at all until shim grows a cheap one, PLAN5 §4), interaction
 // lives in the clients. The identity card surfaces exactly the entity
-// api.warpcast.com /v1/channel returns, parsed by worker/warpcast.ts —
+// api.farcaster.xyz /v1/channel returns, parsed by worker/warpcast.ts —
 // empty-prone fields render nothing, never faked, and nothing beyond it is
 // fetched. Engagement counts (follower/member) are withheld from HTML and
 // carried in the JSON twin (PLAN5 §5). No pills, no auto-open, no cookies,

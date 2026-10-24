@@ -1,6 +1,8 @@
-// Warpcast channel API client — the one place that knows api.warpcast.com's
+// Farcaster channel API client — the one place that knows api.farcaster.xyz's
 // channel route, shapes, and failure semantics (the same seat worker/shim.ts
-// holds for shim). Zero dependencies beyond zod; consumers (channel landings
+// holds for shim). This is the API formerly hosted at api.warpcast.com —
+// byte-identical responses on both hosts (verified Oct 2026), new domain
+// everywhere. Zero dependencies beyond zod; consumers (channel landings
 // today, anything channel-shaped tomorrow) import this file.
 //
 // The zod contract wraps the owner's hand-rolled ChannelObject types
@@ -13,8 +15,8 @@
 
 import { z } from "zod";
 
-/** Base URL of the official Warpcast API (first-party Farcaster, keyless). */
-export const WARPCAST_API_BASE = "https://api.warpcast.com";
+/** Base URL of the official Farcaster API (first-party, keyless). */
+export const WARPCAST_API_BASE = "https://api.farcaster.xyz";
 
 export const channelUrl = (id: string): string =>
 	`${WARPCAST_API_BASE}/v1/channel?channelId=${encodeURIComponent(id)}`;

@@ -5,7 +5,7 @@
  * globalThis.fetch mocked and routed by exact URL — unexpected URLs throw,
  * which is how the zero-fetch gates (charset) are asserted. The channel
  * surface resolves entirely through the official Warpcast channel API
- * (api.warpcast.com/v1/channel): HTTP 200 {result:{channel}} is found,
+ * (api.farcaster.xyz/v1/channel): HTTP 200 {result:{channel}} is found,
  * HTTP 400 {errors:[…]} is the authoritative miss, everything else is
  * unreachable.
  */
@@ -21,7 +21,7 @@ mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 const { app } = await import("./index.ts");
 
 const CHANNEL_ID = "farcaster";
-// Exactly what api.warpcast.com/v1/channel answers for a healthy channel
+// Exactly what api.farcaster.xyz/v1/channel answers for a healthy channel
 // (probed live Oct 2026) — including the empty externalLink and the
 // engagement counts HTML must never render.
 const CHANNEL = {
@@ -62,7 +62,7 @@ function apiMock(
 
 function defaultMock(): typeof fetch {
 	return apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: FOUND,
 		},
 	});
@@ -138,7 +138,7 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 
 test("optional entity fields vanish instead of rendering empty", async () => {
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: {
 				result: {
 					channel: {
@@ -166,7 +166,7 @@ test("optional entity fields vanish instead of rendering empty", async () => {
 
 test("an empty name falls back to the id (title, h1, og:title)", async () => {
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: {
 				result: {
 					channel: { id: CHANNEL_ID, name: "", imageUrl: CHANNEL.imageUrl },
@@ -188,7 +188,7 @@ test("a 200 payload without name/imageUrl renders the id fallbacks instead of 50
 	// found, and the renderer's designed fallbacks (id-as-name,
 	// initial-block icon) take over — same semantics as empty strings.
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: { result: { channel: { id: CHANNEL_ID } } },
 		},
 	});
@@ -205,7 +205,7 @@ test("a 200 payload without name/imageUrl renders the id fallbacks instead of 50
 
 test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropped", async () => {
 	const withLink = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: {
 				result: {
 					channel: {
@@ -224,7 +224,7 @@ test("a http(s) externalLink renders a second way-out pill; non-http(s) is dropp
 	);
 
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: {
 				result: {
 					channel: {
@@ -267,7 +267,7 @@ test("both URL shapes render the same page; canonical always carries /~/channel/
 
 test("API 400 miss ⇒ 404 (HTML and JSON)", async () => {
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: MISS,
 			status: 400,
 		},
@@ -283,7 +283,7 @@ test("API 400 miss ⇒ 404 (HTML and JSON)", async () => {
 
 test("API 500 / network failure ⇒ 503 + Retry-After (HTML and JSON)", async () => {
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: { errors: [{ message: "internal" }] },
 			status: 500,
 		},
@@ -301,7 +301,7 @@ test("API 500 / network failure ⇒ 503 + Retry-After (HTML and JSON)", async ()
 	});
 
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]:
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]:
 			new Error("api unreachable"),
 	});
 	const thrown = await app.request(`/channel/${CHANNEL_ID}`);
@@ -311,7 +311,7 @@ test("API 500 / network failure ⇒ 503 + Retry-After (HTML and JSON)", async ()
 
 test("a malformed 200 body ⇒ 503 (service misbehaving, not an authoritative miss)", async () => {
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			// Missing the required id/name/imageUrl identity — not parseable.
 			body: { result: { channel: { followerCount: 1 } } },
 		},
@@ -417,7 +417,7 @@ test("a hash-shaped id routes to the channel handler, not the cast route", async
 	// The mock only knows the Warpcast API: any shim fetch (the cast
 	// route's pipeline) would throw "Unexpected fetch" and fail the test.
 	globalThis.fetch = apiMock({
-		"https://api.warpcast.com/v1/channel?channelId=0xabc123": {
+		"https://api.farcaster.xyz/v1/channel?channelId=0xabc123": {
 			body: MISS,
 			status: 400,
 		},
@@ -433,6 +433,73 @@ test("GET /api/ lists the channel JSON surface", async () => {
 	expect(body.channel).toBe("/channel/{id}?format=json");
 });
 
+// --- Live-verified fixture: zora ----------------------------------------------
+//
+// Probed live Oct 2026: zora is the channel that exercises every optional
+// branch at once — an externalLink (the second way-out pill farcaster and
+// the other sampled channels never show), a multi-fid moderatorFids array,
+// and non-trivial member/follower counts.
+
+const ZORA = {
+	id: "zora",
+	url: "chain://eip155:1/erc721:0xca21d4228cdcc68d4e23807e5e370c07577dd152",
+	name: "Zora",
+	description: "Trade what's trending.",
+	imageUrl: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/e49fbe15-894f-4918-1ecc-ee21c3e20800/original",
+	createdAt: 1689888729,
+	followerCount: 172438,
+	memberCount: 682,
+	publicCasting: true,
+	headerImageUrl: "https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/4660d7d0-b412-4a05-4e64-8825a1523c00/original",
+	leadFid: 8,
+	moderatorFids: [8, 565025, 5952, 2558, 17129, 11245],
+	externalLink: { title: "Join", url: "https://zora.co" },
+};
+
+function zoraMock(): typeof fetch {
+	return apiMock({
+		"https://api.farcaster.xyz/v1/channel?channelId=zora": {
+			body: { result: { channel: ZORA } },
+		},
+	});
+}
+
+test("zora: external link renders the second pill; counts stay withheld", async () => {
+	globalThis.fetch = zoraMock();
+	const res = await app.request("/channel/zora");
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The channel's own way out, exactly as rendered live in prod QA.
+	expect(body).toContain(
+		'href="https://zora.co" target="_blank" rel="noopener noreferrer">Join</a>',
+	);
+	expect(body).toContain("lead fid 8");
+	expect(body).toContain("Created Jul 20, 2023");
+	// Engagement counts are a JSON-twin concern, never HTML surface.
+	expect(body).not.toContain("172438");
+	expect(body).not.toContain("682");
+});
+
+test("zora: JSON twin carries the full routing entity", async () => {
+	globalThis.fetch = zoraMock();
+	const res = await app.request("/channel/zora?format=json");
+	expect(res.status).toBe(200);
+
+	const body = await res.json();
+	expect(body.id).toBe("zora");
+	expect(body.parentUrl).toBe(
+		"chain://eip155:1/erc721:0xca21d4228cdcc68d4e23807e5e370c07577dd152",
+	);
+	expect(body.leadFid).toBe(8);
+	expect(body.moderatorFids).toEqual([8, 565025, 5952, 2558, 17129, 11245]);
+	expect(body.memberCount).toBe(682);
+	expect(body.followerCount).toBe(172438);
+	expect(body.externalLink).toEqual({ title: "Join", url: "https://zora.co" });
+	expect(body.createdAt).toBe(new Date(1689888729 * 1000).toISOString());
+	expect(body.farcaster).toBe("https://farcaster.xyz/~/channel/zora");
+});
+
 // --- Escaping: hostile upstream fields never survive raw (XSS regression) -----
 
 test("channel card escapes hostile upstream text", async () => {
@@ -442,7 +509,7 @@ test("channel card escapes hostile upstream text", async () => {
 	// because the channel card is a new set of interpolation sites. Note:
 	// the name never reaches <title> (the key-form title carries the id).
 	globalThis.fetch = apiMock({
-		[`https://api.warpcast.com/v1/channel?channelId=${CHANNEL_ID}`]: {
+		[`https://api.farcaster.xyz/v1/channel?channelId=${CHANNEL_ID}`]: {
 			body: {
 				result: {
 					channel: {
