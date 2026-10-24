@@ -1,5 +1,10 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import {
+	renderChannelHtml,
+	renderChannelJson,
+	resolveChannel,
+} from "./channel-page.tsx";
 import {
 	renderCastHtml,
 	renderCastJson,
@@ -132,10 +137,68 @@ app.get("/api/", (c) =>
 	c.json({
 		cast: "/{username}/{hash}?format=json",
 		profile: "/{username}?format=json",
+		channel: "/channel/{id}?format=json",
 		raceStats: "/race-stats.json",
 		transparency: "/transparency?format=json",
 	}),
 );
+
+// Channel landing pages (PLAN5). The literal `channel` and `~/channel`
+// prefixes are registered BEFORE the two-segment cast route: Hono matches
+// in registration order, so even a hash-shaped id (/channel/0xabc…) routes
+// here rather than to the cast handler. Accepted shadow tradeoff (same
+// family as /transparency): a cast belonging to a Farcaster user literally
+// named "channel" is shadowed. Waypoint law, identity-only: the recent-casts
+// skeleton is deferred until a cheap feed exists (shim's measured 8–15s+,
+// PLAN5 §4); zero scripts, zero cookies, zero telemetry. The charset gate
+// 404s garbage with zero upstream fetches; ids lowercase before lookup.
+const CHANNEL_ID_PATTERN = /^[a-zA-Z0-9._-]{1,30}$/;
+
+/** Shared channel-surface gate: charset, lowercased. null ⇒ 404. */
+function gateChannelId(raw: string): string | null {
+	if (!CHANNEL_ID_PATTERN.test(raw)) return null;
+	return raw.toLowerCase();
+}
+
+async function channelLanding(c: Context<{ Bindings: Env }>) {
+	const id = gateChannelId(c.req.param().id);
+	if (id === null) {
+		return c.body(null, 404);
+	}
+	// Resolve once, render twice — same negotiation as the cast/profile
+	// routes: ?format=json wins over Accept; only strict application/json
+	// Accept also negotiates JSON.
+	const wantsJson =
+		c.req.query("format") === "json" ||
+		(c.req.header("Accept") ?? "").includes("application/json");
+	const resolved = await resolveChannel(id);
+	if (wantsJson) {
+		const { status, body, retryAfter } = renderChannelJson(resolved, id);
+		return c.json(
+			body,
+			status,
+			retryAfter ? { "retry-after": retryAfter } : undefined,
+		);
+	}
+	const { status, html } = renderChannelHtml(
+		resolved,
+		id,
+		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+	);
+	// Retry-After rides the 503 in both variants (identity has no fail-open
+	// source — unlike casts, there is nothing to render without the API).
+	return c.html(
+		html,
+		status,
+		status === 503 ? { "retry-after": "60" } : undefined,
+	);
+}
+
+// Both farcaster.xyz URL shapes render the same page; canonical + og:url
+// always carry the /channel/{id} form (the /~/ shape is an alias, not a
+// second identity).
+app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", (c) => channelLanding(c));
+app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", (c) => channelLanding(c));
 
 app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const { username, hash } = c.req.param();
