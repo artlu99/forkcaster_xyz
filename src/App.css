@@ -168,6 +168,11 @@
   max-width: 320px;
   font-size: 11px;
 }
+.kind-summary {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+}
 
 .auto-delay {
   display: grid;

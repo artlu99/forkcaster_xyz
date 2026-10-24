@@ -1,9 +1,26 @@
 import { useEffect, useState } from 'preact/hooks'
 import { siGithub, siGithubsponsors, siModelcontextprotocol, siOpenaccess } from 'simple-icons'
 import { iconMark } from '../shared/icon-mark.ts'
-// Dependency-free — same parser the worker uses for the cookie.
+// Dependency-free — same parser the worker uses for the cookie, and the
+// registry's read-only per-kind summary line (PLAN7 §13).
 import { LAST_CLIENT_COOKIE, parseClientCookie } from '../worker/clients.ts'
+import { kindSummary } from '../worker/client-registry.ts'
 import './App.css'
+
+function readCookiePrefs() {
+  const m = document.cookie.match(
+    new RegExp(`(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)`),
+  )
+  // Cookie values may be percent-encoded (server Set-Cookie encodes
+  // "|" as %7C).
+  let v = ''
+  try {
+    v = m ? decodeURIComponent(m[1]) : ''
+  } catch {
+    v = m ? m[1] : ''
+  }
+  return parseClientCookie(v)
+}
 
 function delayNote(delay: number): string {
   if (delay === 0) return 'casts redirect immediately to your last-used app'
@@ -20,18 +37,7 @@ function AutoToggle() {
   const [auto, setAuto] = useState<'on' | 'off' | undefined>(undefined)
   const [delay, setDelay] = useState(5)
   useEffect(() => {
-    const m = document.cookie.match(
-      new RegExp(`(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)`),
-    )
-    // Cookie values may be percent-encoded (server Set-Cookie encodes
-    // "|" as %7C).
-    let v = ''
-    try {
-      v = m ? decodeURIComponent(m[1]) : ''
-    } catch {
-      v = m ? m[1] : ''
-    }
-    const prefs = parseClientCookie(v)
+    const prefs = readCookiePrefs()
     if (prefs.auto) setAuto(prefs.auto)
     if (prefs.delay !== undefined) setDelay(prefs.delay)
   }, [])
@@ -77,6 +83,16 @@ function AutoToggle() {
   )
 }
 
+function KindSummary() {
+  // Read-only per-kind line (PLAN7 §13): what the cookie remembers per
+  // surface — "Casts: Quorum · Profiles: inherits casts → Quorum".
+  // Nothing without a cookie; nothing here writes.
+  const [line, setLine] = useState<string | undefined>(undefined)
+  useEffect(() => setLine(kindSummary(readCookiePrefs())), [])
+  if (!line) return null
+  return <p className="kind-summary">{line}</p>
+}
+
 function App() {
   return (
     <>
@@ -103,6 +119,7 @@ function App() {
           so their pages skip any app that requires signing.
         </p>
         <AutoToggle />
+        <KindSummary />
         <p className="repo-link">
           <a href="https://github.com/artlu99/forkcaster_xyz">
             <span

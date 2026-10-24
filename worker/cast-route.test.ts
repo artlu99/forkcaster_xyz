@@ -743,9 +743,10 @@ test("no cookie: no auto-open markup at all (bots and first-timers)", async () =
 	expect(body).not.toContain("Auto-open:");
 });
 
-test("signed suppression gates auto-open: suppressed client never redirects", async () => {
+test("signed suppression gates auto-open: suppressed client never redirects, idle chip explains", async () => {
 	// decent-artlu is unsigned; farcaster requires signing → the ON cookie
-	// targeting farcaster must not arm any redirect.
+	// targeting farcaster must not arm any redirect — and the idle chip
+	// names Farcaster as the armed-but-unoffered client (PLAN7 §13).
 	const res = await app.request("/decent-artlu/0xbb54368f", {
 		headers: { cookie: "fc_client=farcaster|auto-on" },
 	});
@@ -753,6 +754,8 @@ test("signed suppression gates auto-open: suppressed client never redirects", as
 	const body = await res.text();
 	expect(body).not.toContain('data-auto="on"');
 	expect(body).not.toContain("Turn off auto-open");
+	expect(body).toContain('data-auto="idle"');
+	expect(body).toContain("Auto-open: Farcaster isn&#39;t offered here");
 });
 
 test("?noredirect=1 suppresses the redirect and shows the status chip", async () => {

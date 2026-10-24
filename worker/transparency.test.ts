@@ -283,9 +283,10 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>farcaster</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
-	// quorum: cast + profile + channel — no feed target exists.
+	// quorum: every kind — the feed target verified Oct 2026 (the profile
+	// deep link IS the cast-list surface, PLAN7 §2 merged surface).
 	expect(html).toContain(
-		"<td>quorum</td><td>✓</td><td>✓</td><td>—</td><td>✓</td>",
+		"<td>quorum</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
 	// quilcast: cast + profile.
 	expect(html).toContain(
@@ -319,6 +320,7 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 	expect(json.clients.find((c) => c.id === "quorum")?.kinds).toEqual([
 		"cast",
 		"profile",
+		"feed",
 		"channel",
 	]);
 });

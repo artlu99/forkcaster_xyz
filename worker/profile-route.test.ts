@@ -569,10 +569,11 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
-	// The feed row (phase 2): stateful pills — farcaster is the only client
-	// with a verified feed target, so today the menu is one pill wide.
+	// The feed row (phase 2): stateful pills — farcaster plus Quorum, the
+	// two verified feed targets (Quorum's coarse-only pill scoped by the
+	// target's pointer class).
 	expect(body).toContain('data-client="farcaster" data-kind="feed"');
-	expect(body).not.toContain('data-client="quorum"');
+	expect(body).toContain('class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="feed"');
 	// The OG preview is IDENTICAL to the profile's (entity-backed card);
 	// canonical stays on this page's own URL.
 	expect(body).toContain(
@@ -773,12 +774,12 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	// the targets, native attempts through the row's DEEPLINK_SCRIPT.
 	// Registry order: quorum first, quilcast second.
 	expect(body).toContain(
-		'class="pill client-pill" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
+		'class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
 	);
 	expect(body).toContain("/logos/quorum.png");
 	expect(body).toContain(">Quorum</a>");
 	expect(body).toContain(
-		`class="pill client-pill" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
+		`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
 	);
 	expect(body).toContain(">Quilcast</a>");
 	// DEEPLINK_SCRIPT ships with the row; telemetry scripts too.
@@ -918,17 +919,25 @@ test("profile auto-open: flat cast inheritance arms the overlay", async () => {
 	expect(body).toContain('data-auto-slug="farcaster"');
 });
 
-test("profile auto-open: an incapable cast slug resolves nothing — no banner, badgeless menu", async () => {
+test("profile auto-open: an incapable cast slug resolves nothing to open — the idle chip names why, badgeless menu", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}`, {
 		headers: { Cookie: "fc_client=linkcast|auto-on" },
 	});
 	const body = await res.text();
 	// linkcast has no profile target: flat inheritance finds nothing ⇒ no
-	// banner at all, and the menu renders without a badge. (The attribute
-	// form: the bare string also appears inside CLIENT_SCRIPT.)
+	// redirect fires — and the non-redirect is EXPLAINED (PLAN7 §13 idle
+	// chip): the armed client is named, the menu below is the way out.
+	// No redirect targets, no arming overlay, and the menu renders
+	// without a badge. (The attribute form: the bare string also appears
+	// inside CLIENT_SCRIPT.)
 	expect(body).not.toContain("data-auto-url");
 	expect(body).not.toContain('data-resolved="');
+	expect(body).not.toContain('data-auto="on"');
+	expect(body).toContain('data-auto="idle"');
+	expect(body).toContain(
+		"Auto-open: Linkcast isn&#39;t offered here — pick below",
+	);
 	expect(body).toContain('data-client="farcaster" data-kind="profile"');
 });
 

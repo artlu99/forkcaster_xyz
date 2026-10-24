@@ -11,6 +11,7 @@ import {
 	clientsForRoute,
 	findClient,
 	resolveLastUsed,
+	pointerClass,
 	resolveTemplate,
 	targetDeeplinkTargets,
 	targetFor,
@@ -39,7 +40,7 @@ export function clientPill(
 		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "");
 	const kindAttr = kind === undefined ? "" : ` data-kind="${kind}"`;
 	return (
-		`<a class="pill client-pill" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${kindAttr}${native}>` +
+		`<a class="pill client-pill${pointerClass(target)}" href="${escapeHtml(href)}" data-client="${escapeHtml(client.id)}"${kindAttr}${native}>` +
 		`<img class="pill-logo" src="${escapeHtml(client.logoUrl)}" alt="" width="16" height="16" />` +
 		`${escapeHtml(client.title)}` +
 		(isLast ? `<span class="pill-badge">last used</span>` : "") +
@@ -132,7 +133,32 @@ export function autoOpenUi(
 			(c) => c.id === prefs.slug,
 		);
 	}
-	if (!last?.web) return { html: "" };
+	if (last === undefined || !last.web) {
+		// Idle chip (PLAN7 §13): auto-open is armed but nothing resolves
+		// for this route — the last-used client can't serve this kind, is
+		// signed/link-gated out, or the cast lacks a needed placeholder.
+		// Name the armed client in ONE server-rendered line instead of
+		// silence; no script ships (nothing times out, nothing opens).
+		// Only the armed state explains itself — off/noredirect keep
+		// their own chips (or the pre-chip silence), and a slug that
+		// names no ACTIVE client (stale/suspended) self-heals silently.
+		if (prefs.auto === "on" && !noredirect) {
+			const named = findClient(
+				route !== undefined
+					? (prefs.kinds?.[route.kind] ?? prefs.slug)
+					: prefs.slug,
+			);
+			if (named?.web !== undefined) {
+				return {
+					html:
+						`<div class="auto-banner" aria-live="polite" data-auto="idle">` +
+						`<span class="auto-status">Auto-open: ${escapeHtml(named.title)} isn&#39;t offered here — pick below</span>` +
+						`<a class="auto-settings" href="/">settings</a></div>`,
+				};
+			}
+		}
+		return { html: "" };
+	}
 	// Native-aware redirect: when the last-used client ships a deeplink,
 	// the banner carries the resolved targets so AUTO_SCRIPT attempts the
 	// app before falling back to the web href — for quorum that href is a

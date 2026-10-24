@@ -211,6 +211,28 @@ export const CLIENTS: ClientDefinition[] = [
 			},
 			pointer: "coarse",
 		},
+		// Feed — VERIFIED (Oct 2026, same source trail as the profile
+		// target): the profileFid deep link seeds SocialFeedModal with a
+		// profile screen (app/(tabs)/feed/index.tsx — no castHashPrefix ⇒
+		// "the modal pushes a profile screen instead of a thread") and that
+		// screen renders the user's CAST LIST: SocialFeedModal mounts
+		// ProfileView, whose useFarcasterProfile({fid}) returns { author,
+		// casts, fetchNextPage }. Profile and feed are one merged surface
+		// in Quorum (PLAN7 §2) — identical templates, this comment covers
+		// both. Caveat, quoted from the hook: "its user-casts feed includes
+		// replies, which the profile filters out" — the list shows
+		// top-level casts only; replies live one tap deeper in thread
+		// screens. Same caveats as the profile target: scheme-only
+		// (homepage-stub href), coarse-only, needs a Farcaster account
+		// connected in-app.
+		feed: {
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?profileFid={fid}&profileUsername={username}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		},
 		channel: {
 			web: "https://www.quorummessenger.com/",
 			deeplink: {
@@ -237,7 +259,13 @@ export const CLIENTS: ClientDefinition[] = [
 		// (farcasterChannelId=…) screen. The web href is the owner-confirmed
 		// channel/farcaster/{id} route (network infix is part of their path;
 		// Vercel's bot checkpoint blocks curl verification). Profile/feed
-		// targets: unknown — verify before seeding (PLAN7 §13).
+		// targets: STILL UNKNOWN (re-checked Oct 2026, PLAN7 §13) — the iOS
+		// AASA (firefly.social/.well-known/apple-app-site-association,
+		// appID 7LFDZ96332.io.mask.Mask) claims /profile/*, but a path claim
+		// is not a route format (username? fid? network-infixed?); the web
+		// app's bot checkpoint 403s live checks and the APK navigator
+		// evidence (the channel route's source) hasn't been produced for
+		// profiles. Unseeded until the APK check names the token.
 		channel: {
 			web: "https://firefly.social/channel/farcaster/{channelId}",
 			deeplink: {
@@ -256,9 +284,13 @@ export const CLIENTS: ClientDefinition[] = [
 		title: "Quilcast",
 		logoUrl: "/logos/quilcast.svg",
 		web: "https://quilcast.com/c/{fullHashRaw}",
-		// Profile — owner-provided /u/ route (the unsigned way out's
-		// desktop half; live-check + any further provenance still owed,
-		// PLAN7 §13). fine-only: the fork's assignment is Quilcast
+		// Profile — VERIFIED (Oct 2026): owner-provided /u/ route,
+		// source-verified against the open-source server
+		// (backmeupplz/quilcast server/index.mjs: /^\/u\/([^/]{1,64})$/ →
+		// getUser(username) → SSR shell titled "{display} (@{user}) on
+		// Quilcast" with the bio as description) and live-checked
+		// (quilcast.com/u/decent-artlu serves exactly that SSR meta for the
+		// right profile). fine-only: the fork's assignment is Quilcast
 		// DESKTOP / Quorum MOBILE. Feed/channel: unknown.
 		profile: {
 			web: "https://quilcast.com/u/{username}",
@@ -268,6 +300,16 @@ export const CLIENTS: ClientDefinition[] = [
 	// Per-cast format verified against fc-clients-cast-action
 	// (github.com/artlu99/fc-clients-cast-action, src/lib/deeplink.ts):
 	// frame castId hashes are always full-form, hence {fullHash}.
+	// RE-VERIFIED live (Oct 2026): explorer.neynar.com has migrated to
+	// dev.neynar.com/explorer — every identifier path 308s to
+	// dev.neynar.com/explorer/search?q={ident}, which SSRs a per-object
+	// title ("Cast 0x895ecc…") and client-renders the cast card
+	// (neynarxyz/explorer: [identifier] page matches /^0x[a-f0-9]{40}$/
+	// into NetworkResponse → NeynarCastCard). The pill keeps the original
+	// URL — it still lands on the cast through the redirect. NO
+	// profile/feed route exists (PLAN7 §13): non-cast identifiers there
+	// are search queries (a fid query titles "FID n" and ships no profile
+	// data server-side — a search page, not a profile).
 	{
 		id: "neynar",
 		title: "Neynar",
@@ -278,6 +320,9 @@ export const CLIENTS: ClientDefinition[] = [
 	// cast originator's fid (castFid) alongside the hash, so the entry is
 	// {fid}-gated — skipped on fid-less surfaces (e.g. the link-only
 	// fallback page). castHash wants the full 40 hex, hence {fullHash}.
+	// Profile/feed (PLAN7 §13, checked Oct 2026): no surface found — the
+	// served bundle carries no profile/user route vocabulary beyond the
+	// ?view=cast shape, so there is nothing to verify into an entry.
 	{
 		id: "vibeshift",
 		title: "Vibeshift",
@@ -303,6 +348,8 @@ export const CLIENTS: ClientDefinition[] = [
 	// appears only on casts that could plausibly exist in Linkcast's feed,
 	// i.e. casts known to carry an external URL embed; if Linkcast ever
 	// reports per-cast ineligibility, the entry already matches it.
+	// Profile route: none (linkcast.xyz/{username} 404s, Oct 2026,
+	// PLAN7 §13) — the product is the links feed, cast-kind only.
 	{
 		id: "linkcast",
 		title: "Linkcast",
@@ -369,6 +416,29 @@ export function resolveLastUsed(
 	}
 	if (prefs.slug === undefined) return undefined;
 	return offered.find((client) => client.id === prefs.slug);
+}
+
+/**
+ * The landing's read-only per-kind preference line (PLAN7 §13): the
+ * cookie carries per-kind slugs only the routes can see — one string
+ * makes the system inspectable ("Casts: Quorum · Profiles: Firefly ·
+ * Feeds: inherits casts → Quorum"). Mirrors flat resolution honestly:
+ * an own-kind slug that names no ACTIVE client (removed target,
+ * suspended kill switch) displays as the inheritance it would resolve
+ * to, never a dead name. No cookie state at all ⇒ no line.
+ */
+export function kindSummary(
+	prefs: { slug?: string; kinds?: { profile?: string; feed?: string } },
+): string | undefined {
+	const cast = findClient(prefs.slug);
+	if (cast === undefined) return undefined;
+	const kind = (slug: string | undefined): string => {
+		const own = findClient(slug);
+		return own !== undefined
+			? own.title
+			: `inherits casts → ${cast.title}`;
+	};
+	return `Casts: ${cast.title} · Profiles: ${kind(prefs.kinds?.profile)} · Feeds: ${kind(prefs.kinds?.feed)}`;
 }
 
 /**

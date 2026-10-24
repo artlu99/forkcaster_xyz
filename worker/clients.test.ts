@@ -12,7 +12,7 @@ mock.module("react-dom", () => require("preact/compat"));
 mock.module("react/jsx-runtime", () => require("preact/jsx-runtime"));
 mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 
-const { clientPill } = await import("./cast-actions.tsx");
+const { autoOpenUi, clientPill } = await import("./cast-actions.tsx");
 
 import {
 	CLIENTS,
@@ -24,6 +24,7 @@ import {
 	clientsForRoute,
 	deeplinkTargets,
 	findClient,
+	kindSummary,
 	missingVars,
 	pointerClass,
 	resolveLastUsed,
@@ -579,6 +580,21 @@ describe("kind targets (PLAN7 phase 1)", () => {
 			},
 			pointer: "coarse",
 		});
+		// Feed — VERIFIED (Oct 2026): the profileFid deep link IS the feed
+		// surface (SocialFeedModal pushes ProfileView, which renders the
+		// user's cast list via useFarcasterProfile) — profile and feed are
+		// one merged surface in Quorum (PLAN7 §2), identical templates,
+		// one provenance comment (the registry's). The list shows
+		// top-level casts (the profile filters replies out — source
+		// comment, quoted there); same stub/pointer/account caveats.
+		expect(targetFor(quorum, "feed")).toEqual({
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?profileFid={fid}&profileUsername={username}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		});
 		expect(targetFor(quorum, "channel")).toEqual({
 			web: "https://www.quorummessenger.com/",
 			deeplink: {
@@ -638,6 +654,39 @@ describe("kind targets (PLAN7 phase 1)", () => {
 		expect(pointerClass({ web: "https://x.test/", pointer: "coarse" })).toBe(
 			" coarse-only",
 		);
+	});
+
+	test("route-mode pills carry the target's pointer scope (PLAN6 §8 pattern)", () => {
+		// The registry promises pointer scoping (ClientTarget.pointer) and
+		// the channel row renders it — the stateful row must too, or a
+		// coarse-only homepage-stub pill flings desktop users at a
+		// marketing page (the exact outcome PLAN7 §11.3 rejects).
+		const vars: TemplateVars = { username: "decent-artlu", fid: 3319217 };
+		const quorum = findClient("quorum") as ClientDefinition;
+		expect(clientPill(quorum, vars, false, "profile")).toContain(
+			'class="pill client-pill coarse-only"',
+		);
+		expect(clientPill(quorum, vars, false, "feed")).toContain(
+			'class="pill client-pill coarse-only"',
+		);
+		const quilcast = findClient("quilcast") as ClientDefinition;
+		expect(clientPill(quilcast, vars, false, "profile")).toContain(
+			'class="pill client-pill fine-only"',
+		);
+		// Cast mode stays byte-identical: cast targets never carry a
+		// pointer scope, so the class attribute is unchanged.
+		const farcaster = findClient("farcaster") as ClientDefinition;
+		expect(
+			clientPill(
+				farcaster,
+				{
+					username: "zoo",
+					hash: "0x895ecc74",
+					fullHash: "0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",
+				},
+				false,
+			),
+		).toContain('class="pill client-pill"');
 	});
 
 	test("clientsForRoute: channel kind — registry order matches the trio, unknown signed fails open", () => {
@@ -781,5 +830,117 @@ describe("resolveLastUsed — flat inheritance (PLAN7 §5)", () => {
 			resolveLastUsed({ slug: "linkcast", kinds: { profile: "firefly" } }, "profile", offered),
 		).toBeUndefined();
 		expect(resolveLastUsed({}, "profile", offered)).toBeUndefined();
+	});
+});
+
+describe("auto-open idle chip (PLAN7 §13)", () => {
+	// auto=on but nothing resolves for this route: the non-redirect gets
+	// ONE server-rendered line naming the armed client — never silence,
+	// never a script (nothing times out, nothing opens).
+
+	test("cast mode: a link-gated last-used client is named, no script", () => {
+		// linkcast requires external links; a cast without one hides it —
+		// the ON cookie must not silently do nothing.
+		const { html, script } = autoOpenUi(
+			{ slug: "linkcast", auto: "on" },
+			true,
+			VARS,
+			false,
+			false,
+		);
+		expect(html).toContain('data-auto="idle"');
+		expect(html).toContain(
+			"Auto-open: Linkcast isn&#39;t offered here — pick below",
+		);
+		expect(html).toContain('class="auto-settings" href="/"');
+		expect(script).toBeUndefined();
+	});
+
+	test("route mode: an incapable cast slug is named on profile/feed", () => {
+		const { html, script } = autoOpenUi(
+			{ slug: "linkcast", auto: "on" },
+			true,
+			{ username: "decent-artlu", fid: 3319217 },
+			false,
+			undefined,
+			{ kind: "profile", noun: "profiles" },
+		);
+		expect(html).toContain('data-auto="idle"');
+		expect(html).toContain("Auto-open: Linkcast isn&#39;t offered here");
+		expect(script).toBeUndefined();
+	});
+
+	test("a stale (unknown/suspended) slug names nothing — no chip", () => {
+		expect(
+			autoOpenUi({ slug: "not-a-client", auto: "on" }, true, VARS, false).html,
+		).toBe("");
+	});
+
+	test("auto off/unset, ?noredirect, and resolvable states are unchanged", () => {
+		// Off: the ordinary two-way chip (resolvable slug), never the idle
+		// line.
+		const off = autoOpenUi({ slug: "firefly", auto: "off" }, true, VARS, false);
+		expect(off.html).toContain('data-auto="off"');
+		expect(off.html).not.toContain('data-auto="idle"');
+		// Off + unresolvable keeps its pre-chip silence too: no redirect
+		// was ever promised in the off state.
+		expect(
+			autoOpenUi({ slug: "linkcast", auto: "off" }, true, VARS, false, false)
+				.html,
+		).toBe("");
+		// noredirect keeps its own status chip path (no idle line).
+		const noredirect = autoOpenUi(
+			{ slug: "linkcast", auto: "on" },
+			true,
+			VARS,
+			true,
+			false,
+		);
+		expect(noredirect.html).not.toContain('data-auto="idle"');
+		// Resolvable: the normal arming overlay, not the chip.
+		const armed = autoOpenUi({ slug: "firefly", auto: "on" }, true, VARS, false);
+		expect(armed.html).toContain('data-auto="on"');
+		expect(armed.html).not.toContain('data-auto="idle"');
+	});
+});
+
+describe("kindSummary — the landing's read-only per-kind line (PLAN7 §13)", () => {
+	test("no remembered state: no line at all", () => {
+		expect(kindSummary({})).toBeUndefined();
+	});
+
+	test("a cast slug alone: profiles and feeds display their inheritance", () => {
+		expect(kindSummary({ slug: "quorum" })).toBe(
+			"Casts: Quorum · Profiles: inherits casts → Quorum · Feeds: inherits casts → Quorum",
+		);
+	});
+
+	test("own kind slugs win; inheritance only where a kind is unset", () => {
+		expect(
+			kindSummary({ slug: "quorum", kinds: { profile: "firefly" } }),
+		).toBe(
+			"Casts: Quorum · Profiles: Firefly · Feeds: inherits casts → Quorum",
+		);
+	});
+
+	test("stale/unknown kind slugs fall back to the inheritance display", () => {
+		// A removed target or retired id must not render a dead name —
+		// the summary mirrors what resolution would actually do.
+		expect(
+			kindSummary({ slug: "quorum", kinds: { profile: "not-a-client" } }),
+		).toBe(
+			"Casts: Quorum · Profiles: inherits casts → Quorum · Feeds: inherits casts → Quorum",
+		);
+	});
+
+	test("a suspended slug never renders (kill switch outranks memory)", () => {
+		const suspended = CLIENTS.find((c) => c.id === "quorum");
+		expect(suspended).toBeDefined();
+		try {
+			(suspended as ClientDefinition).status = "suspended";
+			expect(kindSummary({ slug: "quorum" })).toBeUndefined();
+		} finally {
+			delete (suspended as ClientDefinition).status;
+		}
 	});
 });
