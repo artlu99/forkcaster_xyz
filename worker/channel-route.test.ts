@@ -372,11 +372,16 @@ test("garbage ids 404 with ZERO upstream fetches", async () => {
 	for (const path of [
 		`/channel/${"a".repeat(31)}`, // over the id length gate
 		`/channel/${encodeURIComponent("a b")}`, // space outside the charset
-		"/channel/", // empty id — matches nothing
 	]) {
 		const res = await app.request(path);
 		expect(res.status).toBe(404);
 	}
+	// Empty id: "channel" fits the username charset, so main's site-wide
+	// trailing-slash policy owns this shape — 301 to /channel (which then
+	// 404s at the profile route), still with zero upstream fetches.
+	const slash = await app.request("/channel/");
+	expect(slash.status).toBe(301);
+	expect(slash.headers.get("location")).toBe("/channel");
 	expect(calls).toBe(0);
 });
 
