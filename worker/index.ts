@@ -208,8 +208,8 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 // Both farcaster.xyz URL shapes render the same page; canonical + og:url
 // always carry the /channel/{id} form (the /~/ shape is an alias, not a
 // second identity).
-app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", (c) => channelLanding(c));
-app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", (c) => channelLanding(c));
+app.get("/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
+app.get("/~/channel/:id{[a-zA-Z0-9._-]{1,30}}", channelLanding);
 
 app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const { username, hash } = c.req.param();

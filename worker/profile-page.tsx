@@ -38,7 +38,7 @@ import {
 	type ShimCast,
 	type ShimUser,
 } from "./shim.ts";
-import { escapeHtml, shell } from "./shell.tsx";
+import { collapseText, escapeHtml, shell } from "./shell.tsx";
 
 /** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
 export const TIMELINE_LIMIT = 10;
@@ -340,7 +340,7 @@ export function renderProfileHtml(
 	const handle = user.username ?? username;
 	const displayName = user.displayName ?? null;
 	const title = displayName ? `${displayName} (@${handle})` : `@${handle}`;
-	const bio = user.bio ? user.bio.replace(/\s+/g, " ").trim() : "";
+	const bio = collapseText(user.bio);
 
 	const avatar = user.pfpUrl
 		? `<img class="profile-avatar" src="${escapeHtml(user.pfpUrl)}" alt="" />`

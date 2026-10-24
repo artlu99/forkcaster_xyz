@@ -16,7 +16,7 @@
 
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
 import { getChannelById, type WarpcastChannel } from "./warpcast.ts";
-import { escapeHtml, formatDate, shell } from "./shell.tsx";
+import { collapseText, escapeHtml, formatDate, shell } from "./shell.tsx";
 
 export type ResolvedChannel =
 	| { kind: "found"; channel: WarpcastChannel }
@@ -102,9 +102,7 @@ export function renderChannelHtml(
 	}
 	const ch = channel.channel;
 	const name = ch.name?.trim() ? ch.name : id;
-	const description = ch.description
-		? ch.description.replace(/\s+/g, " ").trim()
-		: "";
+	const description = collapseText(ch.description);
 
 	const icon = ch.imageUrl
 		? `<img class="channel-avatar" src="${escapeHtml(ch.imageUrl)}" alt="" />`

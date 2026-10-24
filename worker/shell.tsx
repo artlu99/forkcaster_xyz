@@ -28,6 +28,12 @@ export function formatDate(unixSeconds: number): string {
 	}).format(date);
 }
 
+// Shared with the identity cards: one whitespace-collapse for every
+// free-text field (bios, channel descriptions) before it renders.
+export function collapseText(text: string | null | undefined): string {
+	return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
 export function shell(
 	title: string,
 	bodyHtml: string,
