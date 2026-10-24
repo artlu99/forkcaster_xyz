@@ -260,6 +260,11 @@ export function renderTransparencyHtml(
 		rank?: RankSnapshot | null;
 	} = {},
 ): string {
+	// Section order serves the common visitor: what it is → what's tracked
+	// (the question they came with) → which clients work → which clients
+	// people use → how the data plumbing works → domain facts. Pure block
+	// moves — tables and copy unchanged; the JSON twin keeps its own key
+	// order.
 	const body = `
 <style>
 .tr h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 24px 0 6px; }
@@ -279,6 +284,21 @@ export function renderTransparencyHtml(
 <li>MIT licensed open source: <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
 </ul>
 
+<h2>Tracking</h2>
+<ul>
+<li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
+<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
+<li>One cookie: <code>fc_client</code> — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
+<li>JSON version of this page: add <code>?format=json</code>.</li>
+</ul>
+
+<h2>Client coverage</h2>
+${coverageTable()}
+
+<h2>Client choices</h2>
+<p>Which client people open things with — casts, profiles, feeds. Pill order follows this table (a reordering — nothing is ever hidden on a surface it can serve, and the registry kill switch outranks popularity).</p>
+${rankTable(options.rank)}
+
 <h2>Data</h2>
 <ul>
 <li>Cast data is raced across 4 providers in parallel; first validated answer wins.</li>
@@ -286,21 +306,6 @@ export function renderTransparencyHtml(
 ${statsTable(options.snapshot)}
 <ul>
 <li>Ban check (has the author signed Farcaster's contract?): shim <code>/signed/{fid}</code>. Unknown → fail open, everything shown.</li>
-</ul>
-
-<h2>Client choices</h2>
-<p>Which client people open things with — casts, profiles, feeds. Pill order follows this table (a reordering — nothing is ever hidden on a surface it can serve, and the registry kill switch outranks popularity).</p>
-${rankTable(options.rank)}
-
-<h2>Client coverage</h2>
-${coverageTable()}
-
-<h2>Tracking</h2>
-<ul>
-<li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
-<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
-<li>One cookie: <code>fc_client</code> — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
-<li>JSON version of this page: add <code>?format=json</code>.</li>
 </ul>
 
 <h2>Domains</h2>
@@ -322,7 +327,7 @@ ${DOMAINS.registrations
 		{
 			ogTitle: "forkcaster — transparency",
 			description:
-				"What forkcaster is, where cast data comes from, and what is (and isn't) tracked.",
+				"What forkcaster is, what is (and isn't) tracked, and where cast data comes from.",
 		},
 		undefined,
 		options.canonicalUrl,
