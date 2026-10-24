@@ -95,11 +95,22 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 	expect(body).toContain(`src="${CHANNEL.headerImageUrl}"`);
 	expect(body).toContain("Created Aug 2, 2023");
 	expect(body).toContain("lead fid 1");
-	// Way out: Open on Farcaster (the /~/ shape farcaster.xyz canonicalizes);
-	// the channel's externalLink is empty ⇒ no second pill.
+	// Way out: the hand-verified trio — desktop sees Farcaster + Firefly,
+	// phones additionally see Quorum (coarse-only; its web build has no
+	// channel page). The channel's externalLink is empty ⇒ no fourth pill.
 	expect(body).toContain(
-		`href="https://farcaster.xyz/~/channel/${CHANNEL_ID}">Open on Farcaster</a>`,
+		`href="https://farcaster.xyz/~/channel/${CHANNEL_ID}" data-scheme="farcaster://~/channel/${CHANNEL_ID}" data-intent="intent://~/channel/${CHANNEL_ID}#Intent;scheme=farcaster;package=com.farcaster.mobile;S.browser_fallback_url=https%3A%2F%2Ffarcaster.xyz%2F~%2Fchannel%2Ffarcaster;end">Farcaster</a>`,
 	);
+	expect(body).toContain(
+		`href="https://firefly.social/channel/farcaster/${CHANNEL_ID}">Firefly</a>`,
+	);
+	expect(body).toContain(
+		`class="pill coarse-only" href="https://www.quorummessenger.com/" data-scheme="quorummobile://feed?channelKey=${CHANNEL_ID}"`,
+	);
+	expect(body).toContain("package=com.quilibrium.quorummobile");
+	// Firefly is web-only: no native attrs on its pill.
+	expect(body).toContain(`>Firefly</a>`);
+	expect(body).not.toContain('data-scheme="https://firefly.social');
 	expect(body).not.toContain('rel="noopener noreferrer"');
 	// Engagement counts are withheld from HTML (PLAN5 §5) — neither the
 	// field name nor the raw numbers survive into the page.
@@ -127,12 +138,17 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 	expect(body).toContain(
 		'<link rel="alternate" type="application/json" href="?format=json" />',
 	);
-	// Waypoint law: zero scripts, zero personalization surface.
-	expect(body).not.toContain("<script");
+	// Waypoint law: exactly ONE script — the stateless DEEPLINK_SCRIPT for
+	// the pill row's native attempts. "Don't remember or track" pinned
+	// verbatim: no last-used cookie, no beacon, no auto-open anywhere.
+	expect(body).toContain("(pointer: coarse)");
+	expect((body.match(/<script/g) ?? []).length).toBe(1);
 	expect(body).not.toContain("data-copy");
 	expect(body).not.toContain("window.__fk");
+	expect(body).not.toContain("sendBeacon");
 	expect(body).not.toContain("data-client");
 	expect(body).not.toContain("fc_client=");
+	expect(body).not.toContain("data-auto");
 	expect(body).not.toContain("farcaster.tv");
 });
 

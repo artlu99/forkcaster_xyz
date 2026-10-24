@@ -6,14 +6,17 @@
 // api.farcaster.xyz /v1/channel returns, parsed by worker/warpcast.ts —
 // empty-prone fields render nothing, never faked, and nothing beyond it is
 // fetched. Engagement counts (follower/member) are withheld from HTML and
-// carried in the JSON twin (PLAN5 §5). No pills, no auto-open, no cookies,
-// no telemetry; the page ships ZERO client scripts.
+// carried in the JSON twin (PLAN5 §5). The way out is a hand-verified pill
+// trio (PLAN5 §8): no auto-open, no last-used memory, no telemetry — the
+// only script is the cast row's DEEPLINK_SCRIPT, reused for click-time
+// native attempts precisely because it carries no state.
 //
 // Identity verdict: the API's HTTP 400 errors-envelope is the authoritative
 // miss; every other failure (other non-2xx, throw, timeout, malformed 200)
 // is unreachable ⇒ 503 + Retry-After in BOTH variants — a channel landing
 // has no fail-open content source, same as profiles.
 
+import { DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
 import { getChannelById, type WarpcastChannel } from "./warpcast.ts";
 import { collapseText, escapeHtml, formatDate, shell } from "./shell.tsx";
@@ -46,7 +49,64 @@ const CHANNEL_STYLE = `<style>
 .channel-handle { color: var(--muted); margin: 2px 0 0; }
 .channel-description { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .channel-facts { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
+/* Pointer-class pill picker (same pattern as the profile unsigned way
+   out): the full trio ships in the SSR HTML — byte-identical for every
+   device, no UA sniffing — and CSS hides the coarse-only pill on
+   desktop, where Quorum's web build has no channel page. */
+@media (pointer: coarse) { .fine-only { display: none; } }
+@media (pointer: fine) { .coarse-only { display: none; } }
 </style>`;
+
+// The way out (owner call: desktop = Farcaster + Firefly; phones add
+// Quorum). Source-verified per client, hand-built — NOT registry-driven,
+// because the cast row's machinery drags the fc_client cookie and click
+// telemetry behind it and channel pills deliberately carry neither
+// ("don't remember or track"): no data-client, no badge, no beacon — the
+// href is the only thing that ever leaves the page.
+//
+// - Farcaster: `farcaster://~/channel/{id}` — VERIFIED against the
+//   open-source app (github.com/farcasterxyz/client): useHandleDeepLink
+//   rewrites farcaster:// → https://farcaster.xyz/ and
+//   resolveUniversalChannel matches /~/channel/:channelKey onto the
+//   native Channel screen. The `~/` is load-bearing: the bare form would
+//   resolve as a profile for the user "channel". Android rides the
+//   intent:// form (package com.farcaster.mobile, Chrome-native web
+//   fallback); iOS/other attempt the scheme with the 1.8s visibility
+//   fallback to the href (DEEPLINK_SCRIPT). Desktop just opens the web URL.
+// - Firefly: web-only, `channel/farcaster/{id}` — the network infix is
+//   part of their path (owner-confirmed route from their channels
+//   directory; Vercel's bot checkpoint blocks curl verification). No
+//   scheme exists for channels — the plain link is the intent.
+// - Quorum: `quorummobile://feed?channelKey={id}` — VERIFIED against the
+//   open-source app (github.com/QuilibriumNetwork/quorum-mobile): the
+//   feed route accepts channelKey and seeds the nav stack into the
+//   channel screen; slug-shaped keys (our ids) are used as-is. Web is a
+//   homepage stub (the desktop build's Farcaster surface is literally
+//   "Coming soon"), so the pill is coarse-only and the scheme is the
+//   only real target. Needs a Farcaster account connected in-app.
+const FARCASTER_ANDROID_PACKAGE = "com.farcaster.mobile";
+const QUORUM_ANDROID_PACKAGE = "com.quilibrium.quorummobile";
+
+/** Android intent:// URL — Chrome natively falls back to the web URL. */
+function androidIntent(scheme: string, pkg: string, webUrl: string): string {
+	const sep = scheme.indexOf("://");
+	return `intent://${scheme.slice(sep + 3)}#Intent;scheme=${scheme.slice(0, sep)};package=${pkg};S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
+}
+
+function channelActionsHtml(id: string, external: string | null): string {
+	const fcWeb = `https://farcaster.xyz/~/channel/${id}`;
+	const fcScheme = `farcaster://~/channel/${id}`;
+	const ffWeb = `https://firefly.social/channel/farcaster/${id}`;
+	const quorumScheme = `quorummobile://feed?channelKey=${id}`;
+	const quorumWeb = "https://www.quorummessenger.com/";
+	const pills = [
+		`<a class="pill" href="${escapeHtml(fcWeb)}" data-scheme="${escapeHtml(fcScheme)}" data-intent="${escapeHtml(androidIntent(fcScheme, FARCASTER_ANDROID_PACKAGE, fcWeb))}">Farcaster</a>`,
+		`<a class="pill" href="${escapeHtml(ffWeb)}">Firefly</a>`,
+		`<a class="pill coarse-only" href="${escapeHtml(quorumWeb)}" data-scheme="${escapeHtml(quorumScheme)}" data-intent="${escapeHtml(androidIntent(quorumScheme, QUORUM_ANDROID_PACKAGE, quorumWeb))}">Quorum</a>`,
+	];
+	if (external) pills.push(external);
+	return `<p class="actions">${pills.join("")}</p>${DEEPLINK_SCRIPT}`;
+}
 
 /**
  * The channel's own way out: a second pill next to "Open on Farcaster".
@@ -84,10 +144,11 @@ function unavailablePage(id: string): string {
 }
 
 /**
- * HTML: identity card — the whole parsed entity, nothing more. Zero
- * scripts/cookies/telemetry; strict statuses (404 for the API's
- * authoritative miss, 503 + Retry-After when it's unreachable — no
- * fail-open source for identity, unlike casts).
+ * HTML: identity card — the whole parsed entity, nothing more. One
+ * stateless script (the pill row's native attempts); zero cookies, zero
+ * telemetry; strict statuses (404 for the API's authoritative miss,
+ * 503 + Retry-After when it's unreachable — no fail-open source for
+ * identity, unlike casts).
  */
 export function renderChannelHtml(
 	channel: ResolvedChannel,
@@ -117,12 +178,7 @@ export function renderChannelHtml(
 	if (created) facts.push(`<li>Created ${escapeHtml(created)}</li>`);
 	if (typeof ch.leadFid === "number") facts.push(`<li>lead fid ${ch.leadFid}</li>`);
 
-	const farcaster = `https://farcaster.xyz/~/channel/${id}`;
-	const outLinks = [
-		`<a class="pill" href="${escapeHtml(farcaster)}">Open on Farcaster</a>`,
-	];
 	const external = externalLinkPill(ch.externalLink);
-	if (external) outLinks.push(external);
 
 	const body = `
 ${CHANNEL_STYLE}
@@ -136,7 +192,7 @@ ${description ? `<p class="channel-description">${escapeHtml(description)}</p>` 
 ${facts.length > 0 ? `<ul class="channel-facts">${facts.join("")}</ul>` : ""}
 </div>
 </div>
-<p class="actions">${outLinks.join("")}</p>`;
+${channelActionsHtml(id, external)}`;
 
 	const og = {
 		ogTitle: `${name} (/${id})`,
