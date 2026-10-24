@@ -21,10 +21,15 @@ import {
 	type ClientDefinition,
 	blockedByLinkGate,
 	clientsForPage,
+	clientsForRoute,
 	deeplinkTargets,
 	findClient,
 	missingVars,
+	pointerClass,
 	resolveTemplate,
+	targetDeeplinkTargets,
+	targetFor,
+	type TemplateVars,
 } from "./client-registry.ts";
 import {
 	mergeClientCookie,
@@ -503,5 +508,190 @@ describe("external-link gate", () => {
 			"vibeshift.onchain.cooking",
 			"linkcast.xyz",
 		]);
+	});
+});
+
+describe("kind targets (PLAN7 phase 1)", () => {
+	// The registry is the single source of truth for verified client URL
+	// facts. The cast fields (web/deeplink) ARE the cast target; profile,
+	// feed, and channel targets are additive. Provenance lives in the
+	// registry comments; the route tests (profile-route.test.ts,
+	// channel-route.test.ts) pin the rendered bytes.
+
+	test("targetFor: the cast kind is the existing web/deeplink fields", () => {
+		const farcaster = findClient("farcaster") as ClientDefinition;
+		expect(targetFor(farcaster, "cast")).toEqual({
+			web: "https://farcaster.xyz/{username}/{hash}",
+			deeplink: {
+				scheme: "farcaster://{username}/{fullHash}",
+				androidPackage: "com.farcaster.mobile",
+			},
+		});
+		// No web = no cast target (scheme-only future entries).
+		expect(
+			targetFor({ ...farcaster, web: undefined, deeplink: undefined }, "cast"),
+		).toBeUndefined();
+	});
+
+	test("targetFor: the verified non-cast targets are seeded", () => {
+		const farcaster = findClient("farcaster") as ClientDefinition;
+		// Profile + feed = farcaster.xyz's own username shape (the URL the
+		// linktree's way out always used). Signed-gated via the client-level
+		// requiresSigned flag — the fork's rule, generalized (§3).
+		expect(targetFor(farcaster, "profile")).toEqual({
+			web: "https://farcaster.xyz/{username}",
+		});
+		expect(targetFor(farcaster, "feed")).toEqual({
+			web: "https://farcaster.xyz/{username}",
+		});
+		// Channel: the ~/ is load-bearing (bare form resolves as a profile
+		// for the user "channel") — source-verified, PLAN6 §8.
+		expect(targetFor(farcaster, "channel")).toEqual({
+			web: "https://farcaster.xyz/~/channel/{channelId}",
+			deeplink: {
+				scheme: "farcaster://~/channel/{channelId}",
+				androidPackage: "com.farcaster.mobile",
+			},
+		});
+
+		const firefly = findClient("firefly") as ClientDefinition;
+		// APK-verified (io.dimension.firefly 1.1.44 navigator): the scheme
+		// and the farcaster.xyz universal link land on ONE channel route.
+		expect(targetFor(firefly, "channel")).toEqual({
+			web: "https://firefly.social/channel/farcaster/{channelId}",
+			deeplink: {
+				scheme: "firefly://FarcasterChannel/{channelId}",
+				androidPackage: "io.dimension.firefly",
+			},
+		});
+		expect(targetFor(firefly, "profile")).toBeUndefined();
+
+		const quorum = findClient("quorum") as ClientDefinition;
+		// Source-verified profile deep link (initialProfile →
+		// SocialFeedModal; profileFid required, username optional) and
+		// channelKey route. Scheme-only: the web href is the honest
+		// homepage stub, coarse-only — the desktop build has neither page.
+		expect(targetFor(quorum, "profile")).toEqual({
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?profileFid={fid}&profileUsername={username}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		});
+		expect(targetFor(quorum, "channel")).toEqual({
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?channelKey={channelId}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		});
+
+		const quilcast = findClient("quilcast") as ClientDefinition;
+		// Owner-provided /u/ profile route; desktop scope (the unsigned way
+		// out's assignment: Quilcast DESKTOP / Quorum MOBILE).
+		expect(targetFor(quilcast, "profile")).toEqual({
+			web: "https://quilcast.com/u/{username}",
+			pointer: "fine",
+		});
+		expect(targetFor(quilcast, "feed")).toBeUndefined();
+		expect(targetFor(quilcast, "channel")).toBeUndefined();
+	});
+
+	test("targetDeeplinkTargets: the shared composer reproduces the fork's intent exactly", () => {
+		// The fork's hand-built intent (profile-page.tsx, pre-registry) —
+		// byte-exact or the unsigned way out changes under the user.
+		const quorum = findClient("quorum") as ClientDefinition;
+		const target = targetFor(quorum, "profile") as ClientTarget;
+		const vars: TemplateVars = { username: "decent-artlu", fid: 3319217 };
+		expect(targetDeeplinkTargets(target, vars)).toEqual({
+			scheme:
+				"quorummobile://feed?profileFid=3319217&profileUsername=decent-artlu",
+			intent:
+				"intent://feed?profileFid=3319217&profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end",
+		});
+	});
+
+	test("targetDeeplinkTargets: scheme-only target without a package = raw scheme", () => {
+		const quorum = findClient("quorum") as ClientDefinition;
+		const channel = targetFor(quorum, "channel") as ClientTarget;
+		// The same route with the package stripped: no intent form, the raw
+		// scheme alone (iOS/other attempt it directly).
+		expect(
+			targetDeeplinkTargets(
+				{
+					web: channel.web,
+					deeplink: { scheme: "quorummobile://feed?channelKey={channelId}" },
+				},
+				{ channelId: "farcaster" },
+			),
+		).toEqual({ scheme: "quorummobile://feed?channelKey=farcaster" });
+		expect(targetDeeplinkTargets({ web: "https://x.test/" }, {})).toEqual({});
+	});
+
+	test("pointerClass: scope renders the established CSS classes", () => {
+		expect(pointerClass({ web: "https://x.test/" })).toBe("");
+		expect(pointerClass({ web: "https://x.test/", pointer: "fine" })).toBe(
+			" fine-only",
+		);
+		expect(pointerClass({ web: "https://x.test/", pointer: "coarse" })).toBe(
+			" coarse-only",
+		);
+	});
+
+	test("clientsForRoute: channel kind — registry order matches the trio, unknown signed fails open", () => {
+		const vars: TemplateVars = { channelId: "farcaster" };
+		expect(clientsForRoute("channel", vars).map((c) => c.id)).toEqual([
+			"farcaster",
+			"quorum",
+			"firefly",
+		]);
+		// Channels run no /signed check — every state must fail open.
+		expect(clientsForRoute("channel", vars, null).map((c) => c.id)).toEqual([
+			"farcaster",
+			"quorum",
+			"firefly",
+		]);
+	});
+
+	test("clientsForRoute: profile unsigned — requiresSigned suppresses farcaster", () => {
+		const vars: TemplateVars = { username: "decent-artlu", fid: 3319217 };
+		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
+			"quorum",
+			"quilcast",
+		]);
+	});
+
+	test("clientsForRoute: signed true/null/undefined fail open — farcaster offered", () => {
+		const vars: TemplateVars = { username: "zoo", fid: 10215 };
+		const expected = ["farcaster", "quorum", "quilcast"];
+		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
+			expected,
+		);
+		expect(clientsForRoute("profile", vars, null).map((c) => c.id)).toEqual(
+			expected,
+		);
+		expect(clientsForRoute("profile", vars).map((c) => c.id)).toEqual(expected);
+	});
+
+	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
+		const vars: TemplateVars = { username: "decent-artlu" };
+		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
+			"quilcast",
+		]);
+	});
+
+	test("kind routes carry partial vars — channelId resolves, absent placeholders gate", () => {
+		const vars: TemplateVars = { channelId: "farcaster" };
+		expect(
+			resolveTemplate("https://farcaster.xyz/~/channel/{channelId}", vars),
+		).toBe("https://farcaster.xyz/~/channel/farcaster");
+		expect(missingVars("https://farcaster.xyz/{username}/{hash}", vars)).toEqual([
+			"username",
+			"hash",
+		]);
+		// fullHashRaw derives from fullHash — optional-safe now.
+		expect(missingVars("{fullHashRaw}", {})).toEqual(["fullHashRaw"]);
 	});
 });

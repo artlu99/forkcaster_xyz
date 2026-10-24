@@ -132,7 +132,10 @@ function castPage(
 	// The full hash additionally dedupes short/long variants of the same
 	// cast — the form the JSON renderer and MCP tool already advertise.
 	const canonicalUrl = primaryOrigin
-		? `${primaryOrigin}/${encodeURIComponent(vars.username)}/${vars.fullHash}`
+		// Cast vars carry username by contract (a resolved cast always has
+		// its author handle); the ?? only satisfies the now-partial
+		// TemplateVars type.
+		? `${primaryOrigin}/${encodeURIComponent(vars.username ?? "")}/${vars.fullHash}`
 		: undefined;
 	const auto = autoOpenUi(prefs, signed, vars, noredirect, externalLinks);
 	return shell(

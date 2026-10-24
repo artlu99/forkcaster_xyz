@@ -18,6 +18,15 @@
 
 import { DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
+import {
+	clientsForRoute,
+	pointerClass,
+	resolveTemplate,
+	targetDeeplinkTargets,
+	targetFor,
+	type ClientTarget,
+	type TemplateVars,
+} from "./client-registry.ts";
 import { getChannelById, type WarpcastChannel } from "./warpcast.ts";
 import { collapseText, escapeHtml, formatDate, shell } from "./shell.tsx";
 
@@ -58,58 +67,23 @@ const CHANNEL_STYLE = `<style>
 </style>`;
 
 // The way out (owner call: desktop = Farcaster + Firefly; phones add
-// Quorum). Source-verified per client, hand-built — NOT registry-driven,
-// because the cast row's machinery drags the fc_client cookie and click
-// telemetry behind it and channel pills deliberately carry neither
-// ("don't remember or track"): no data-client, no badge, no beacon — the
-// href is the only thing that ever leaves the page.
-//
-// - Farcaster: `farcaster://~/channel/{id}` — VERIFIED against the
-//   open-source app (github.com/farcasterxyz/client): useHandleDeepLink
-//   rewrites farcaster:// → https://farcaster.xyz/ and
-//   resolveUniversalChannel matches /~/channel/:channelKey onto the
-//   native Channel screen. The `~/` is load-bearing: the bare form would
-//   resolve as a profile for the user "channel". Android rides the
-//   intent:// form (package com.farcaster.mobile, Chrome-native web
-//   fallback); iOS/other attempt the scheme with the 1.8s visibility
-//   fallback to the href (DEEPLINK_SCRIPT). Desktop just opens the web URL.
-// - Firefly: `firefly://FarcasterChannel/{id}` — VERIFIED against the APK
-//   (io.dimension.firefly 1.1.44, apkpure mirror): the navigator registers
-//   `firefly://FarcasterChannel/{url}` and `https://farcaster.xyz/~/channel/
-//   {url}` onto ONE route whose token is the channel slug (the sibling
-//   regex `/~/channel/[\w\-]+` pins the charset), rendering the native
-//   ChannelDetail(farcasterChannelId=…) screen. Web href is the
-//   owner-confirmed `channel/farcaster/{id}` route (network infix is part
-//   of their path; Vercel's bot checkpoint blocks curl verification).
-// - Quorum: `quorummobile://feed?channelKey={id}` — VERIFIED against the
-//   open-source app (github.com/QuilibriumNetwork/quorum-mobile): the
-//   feed route accepts channelKey and seeds the nav stack into the
-//   channel screen; slug-shaped keys (our ids) are used as-is. Web is a
-//   homepage stub (the desktop build's Farcaster surface is literally
-//   "Coming soon"), so the pill is coarse-only and the scheme is the
-//   only real target. Needs a Farcaster account connected in-app.
-const FARCASTER_ANDROID_PACKAGE = "com.farcaster.mobile";
-const QUORUM_ANDROID_PACKAGE = "com.quilibrium.quorummobile";
-const FIREFLY_ANDROID_PACKAGE = "io.dimension.firefly";
-
-/** Android intent:// URL — Chrome natively falls back to the web URL. */
-function androidIntent(scheme: string, pkg: string, webUrl: string): string {
-	const sep = scheme.indexOf("://");
-	return `intent://${scheme.slice(sep + 3)}#Intent;scheme=${scheme.slice(0, sep)};package=${pkg};S.browser_fallback_url=${encodeURIComponent(webUrl)};end`;
-}
-
+// Quorum). The trio renders from the REGISTRY (PLAN7 phase 1): each
+// client's channel target carries its verified URL/scheme/package facts
+// (per-target provenance in client-registry.ts; the full verification
+// record is PLAN6 §8). Statelessness is the law here (PLAN6 §6): the row
+// is logo-less markup with no data-client, no badge, no beacon — the href
+// is the only thing that ever leaves the page.
 function channelActionsHtml(id: string, external: string | null): string {
-	const fcWeb = `https://farcaster.xyz/~/channel/${id}`;
-	const fcScheme = `farcaster://~/channel/${id}`;
-	const ffWeb = `https://firefly.social/channel/farcaster/${id}`;
-	const ffScheme = `firefly://FarcasterChannel/${id}`;
-	const quorumScheme = `quorummobile://feed?channelKey=${id}`;
-	const quorumWeb = "https://www.quorummessenger.com/";
-	const pills = [
-		`<a class="pill" href="${escapeHtml(fcWeb)}" data-scheme="${escapeHtml(fcScheme)}" data-intent="${escapeHtml(androidIntent(fcScheme, FARCASTER_ANDROID_PACKAGE, fcWeb))}">Farcaster</a>`,
-		`<a class="pill coarse-only" href="${escapeHtml(quorumWeb)}" data-scheme="${escapeHtml(quorumScheme)}" data-intent="${escapeHtml(androidIntent(quorumScheme, QUORUM_ANDROID_PACKAGE, quorumWeb))}">Quorum</a>`,
-		`<a class="pill" href="${escapeHtml(ffWeb)}" data-scheme="${escapeHtml(ffScheme)}" data-intent="${escapeHtml(androidIntent(ffScheme, FIREFLY_ANDROID_PACKAGE, ffWeb))}">Firefly</a>`,
-	];
+	const vars: TemplateVars = { channelId: id };
+	const pills = clientsForRoute("channel", vars).map((client) => {
+		const target = targetFor(client, "channel") as ClientTarget;
+		const targets = targetDeeplinkTargets(target, vars);
+		// This renderer's established attribute order: href, scheme, intent.
+		return `<a class="pill${pointerClass(target)}" href="${escapeHtml(resolveTemplate(target.web, vars))}"` +
+			(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "") +
+			(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
+			`>${escapeHtml(client.title)}</a>`;
+	});
 	if (external) pills.push(external);
 	return `<p class="actions">${pills.join("")}</p>${DEEPLINK_SCRIPT}`;
 }
@@ -145,7 +119,7 @@ function notFoundPage(id: string): string {
 function unavailablePage(id: string): string {
 	return shell(
 		`${id} · forkcaster`,
-		`<p class="notice">Channel data is temporarily unavailable. <a href="/channel/${escapeHtml(id)}">Retry</a>.</p>`,
+		`<p class="notice">Channel data is temporarily unavailable. <a href="/~/channel/${escapeHtml(id)}">Retry</a>.</p>`,
 	);
 }
 
@@ -208,8 +182,8 @@ ${channelActionsHtml(id, external)}`;
 	};
 	// Canonical + og:url carry the /~/channel/{id} shape — the form
 	// farcaster.xyz itself canonicalizes to (warpcast.com 301s there), so
-	// forkcaster mirrors it; /channel/{id} stays the bare alias that also
-	// resolves (owner call, ship-day QA).
+	// forkcaster serves only that shape (owner call: the bare /channel/{id}
+	// alias was removed).
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/~/channel/${encodeURIComponent(id)}`
 		: undefined;

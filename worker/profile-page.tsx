@@ -28,6 +28,14 @@ import {
 import { hardenBlankTargets, unfurl } from "./cast-page.tsx";
 import { LIVE_STATS_SCRIPT, DEEPLINK_SCRIPT } from "./cast-scripts.ts";
 import {
+	findClient,
+	pointerClass,
+	resolveTemplate,
+	targetDeeplinkTargets,
+	targetFor,
+	type TemplateVars,
+} from "./client-registry.ts";
+import {
 	getCastsAndReplies,
 	getCastByHash,
 	getFidByUsername,
@@ -244,29 +252,47 @@ function isAddress(value: string): boolean {
 	return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
-// Hardcoded unsigned-client destinations (owner-directed; assignment
-// revised: Quorum MOBILE, Quilcast DESKTOP) — NOT registry-driven; the
-// unsigned way out is a profile-surface affordance.
-// - Quilcast desktop: the owner-provided /u/ profile route (plain web).
-// - Quorum mobile: the SOURCE-VERIFIED profile deep link (quorum-mobile
-//   app/(tabs)/feed/index.tsx `initialProfile` → SocialFeedModal profile
-//   screen; profileFid required, profileUsername optional). Attempted via
-//   the cast page's DEEPLINK_SCRIPT machinery (data-scheme on iOS/other,
-//   Android intent:// form with a Chrome-native fallback), so the pill's
-//   href — the homepage stub — is only the no-app fallback.
-const QUORUM_FALLBACK_URL = "https://www.quorummessenger.com/";
-const quilcastProfileUrl = (handle: string): string =>
-	`https://quilcast.com/u/${encodeURIComponent(handle)}`;
-const quorumProfileTargets = (
-	fid: number,
-	handle: string,
-): { scheme: string; intent: string } => {
-	const query = `profileFid=${fid}&profileUsername=${encodeURIComponent(handle)}`;
-	return {
-		scheme: `quorummobile://feed?${query}`,
-		intent: `intent://feed?${query}#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=${encodeURIComponent(QUORUM_FALLBACK_URL)};end`,
-	};
-};
+/**
+ * One unsigned-way-out pill, resolved from the REGISTRY (PLAN7 phase 1):
+ * the URL/scheme/package facts live in the client's profile target — this
+ * renderer keeps only the curated presentation (which two clients, which
+ * order, which label), because the fork is a profile-surface affordance,
+ * not a menu. The registry-driven menu replaces this head in phase 2.
+ * `baseClass` differs per surface: the profile page's pills are
+ * `pill fine-only`, the casts page's head links are bare `fine-only`.
+ * Markup matches the pre-registry fork byte-for-byte: logo-less, scheme
+ * before intent, native attempts via the cast page's DEEPLINK_SCRIPT
+ * (data-scheme on iOS/other, Android intent:// with a Chrome-native
+ * fallback — the href, quorum's homepage stub, is only the no-app
+ * fallback).
+ */
+function forkPill(
+	clientId: string,
+	vars: TemplateVars,
+	label: string,
+	baseClass: string,
+): string {
+	const client = findClient(clientId);
+	const target = client && targetFor(client, "profile");
+	if (client === undefined || target === undefined) return "";
+	const targets = targetDeeplinkTargets(target, vars);
+	const cls = [baseClass, pointerClass(target).trim()]
+		.filter(Boolean)
+		.join(" ");
+	return `<a class="${cls}" href="${escapeHtml(resolveTemplate(target.web, vars))}"` +
+		(targets.scheme ? ` data-scheme="${escapeHtml(targets.scheme)}"` : "") +
+		(targets.intent ? ` data-intent="${escapeHtml(targets.intent)}"` : "") +
+		`>${escapeHtml(label)}</a>`;
+}
+
+/** The signed branch's "Open on Farcaster" href, resolved from the registry. */
+function profileTargetHref(clientId: string, vars: TemplateVars): string {
+	const client = findClient(clientId);
+	const target = client && targetFor(client, "profile");
+	return client === undefined || target === undefined
+		? ""
+		: resolveTemplate(target.web, vars);
+}
 
 function addressFacts(address: string): string {
 	const truncated = `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -351,21 +377,21 @@ export function renderProfileHtml(
 
 	// The way out depends on the ban signal: signed === false means the
 	// account is read-only on farcaster.xyz — "Open on Farcaster" would be
-	// futile, so unsigned visitors get the hardcoded non-signer clients
-	// instead (Quilcast on desktop — the /u/ profile route — Quorum on
-	// mobile via its source-verified profile deep link, attempted through
-	// the cast page's DEEPLINK_SCRIPT with the homepage stub as the no-app
-	// fallback). Both pills ship; CSS picks by pointer. Unknown (shim down
-	// / no answer) fails open: Farcaster stays offered.
-	const quorumTargets = quorumProfileTargets(fid, handle);
+	// futile, so unsigned visitors get the non-signer clients instead
+	// (Quilcast on desktop — the /u/ profile route — Quorum on mobile via
+	// its source-verified profile deep link). Both pills ship; CSS picks
+	// by pointer. Unknown (shim down / no answer) fails open: Farcaster
+	// stays offered. Targets resolve from the registry; phase 2 replaces
+	// this fork with the stateful menu.
+	const vars: TemplateVars = { username: handle, fid };
 	const actions =
 		profile.signed === false
 			? `<p class="actions">
-<a class="pill fine-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a>
-<a class="pill coarse-only" href="${QUORUM_FALLBACK_URL}" data-scheme="${escapeHtml(quorumTargets.scheme)}" data-intent="${escapeHtml(quorumTargets.intent)}">Open in Quorum</a>
+${forkPill("quilcast", vars, "Open in Quilcast", "pill")}
+${forkPill("quorum", vars, "Open in Quorum", "pill")}
 </p>
 <p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
-			: `<p class="actions"><a class="pill" href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a></p>`;
+			: `<p class="actions"><a class="pill" href="${escapeHtml(profileTargetHref("farcaster", vars))}">Open on Farcaster</a></p>`;
 
 	// Waypoint law, strict dial: the identity card IS the page — no cast
 	// list here. The list lives on /{username}/casts-and-replies.
@@ -569,14 +595,15 @@ export async function renderCastsHtml(
 						: "Recent casts are unavailable right now."
 				}</p>`;
 
-	// Same ban-signal fork as the profile: unsigned ⇒ the hardcoded
-	// non-signer clients in the head line (Quilcast desktop / Quorum
-	// mobile via its profile deep link), never Farcaster.
-	const quorumTargets = quorumProfileTargets(fid, handle);
+	// Same ban-signal fork as the profile: unsigned ⇒ the non-signer
+	// clients in the head line (Quilcast desktop / Quorum mobile via its
+	// profile deep link), never Farcaster. Registry-resolved, bare-class
+	// links on this surface.
+	const vars: TemplateVars = { username: handle, fid };
 	const wayOut =
 		signed === false
-			? `<a class="fine-only" href="${quilcastProfileUrl(handle)}">Open in Quilcast</a> · <a class="coarse-only" href="${QUORUM_FALLBACK_URL}" data-scheme="${escapeHtml(quorumTargets.scheme)}" data-intent="${escapeHtml(quorumTargets.intent)}">Open in Quorum</a>`
-			: `<a href="https://farcaster.xyz/${escapeHtml(handle)}">Open on Farcaster</a>`;
+			? `${forkPill("quilcast", vars, "Open in Quilcast", "")} · ${forkPill("quorum", vars, "Open in Quorum", "")}`
+			: `<a href="${escapeHtml(profileTargetHref("farcaster", vars))}">Open on Farcaster</a>`;
 
 	const body = `
 ${PROFILE_STYLE}

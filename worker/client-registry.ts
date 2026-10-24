@@ -39,6 +39,32 @@ export interface DeeplinkTarget {
 
 export type ClientStatus = "active" | "eol" | "suspended";
 
+/**
+ * A route kind: the thing a client target points at. `cast` is the
+ * original surface (the existing `web`/`deeplink` fields); the others are
+ * additive targets on the same entries. One vocabulary — track.ts and the
+ * renderers import this, never a second enum.
+ */
+export type RouteKind = "cast" | "profile" | "feed" | "channel";
+
+/**
+ * A per-thing client target: one verified https URL (universal links on
+ * mobile, browser otherwise) plus an optional native scheme. A homepage
+ * stub `web` is an honest, documented shape when only the scheme is
+ * verified (quorum's entries) — the scheme is the real target, the href
+ * the no-app fallback.
+ *
+ * `pointer` scopes the pill to a pointer class (the established
+ * `.fine-only` / `.coarse-only` CSS mechanism: the markup ships
+ * byte-identical for every device, CSS picks, `pointer: none` sees both).
+ * Absent = universal.
+ */
+export interface ClientTarget {
+	web: string;
+	deeplink?: DeeplinkTarget;
+	pointer?: "fine" | "coarse";
+}
+
 export interface ClientDefinition {
 	/** Stable slug — the cookie value and the badge lookup key. */
 	id: string;
@@ -55,6 +81,17 @@ export interface ClientDefinition {
 	web?: string;
 	/** Native app target — activates the mobile scheme attempt. Absent ⇒ web-only. */
 	deeplink?: DeeplinkTarget;
+	/**
+	 * Non-cast targets (PLAN7): the capability matrix. The registry is the
+	 * single source of truth for verified per-thing URL facts — renderers
+	 * resolve through targetFor/targetDeeplinkTargets and keep only their
+	 * own markup. A kind without a target means "this client cannot show
+	 * this thing" — such clients are absent from that kind's row, never
+	 * stubbed (PLAN7 §11.3).
+	 */
+	profile?: ClientTarget;
+	feed?: ClientTarget;
+	channel?: ClientTarget;
 	/**
 	 * Hide when the author hasn't signed the social smart contract (the
 	 * farcaster.xyz rule). Unknown signed-state fails open. Default false.
@@ -99,6 +136,27 @@ export const CLIENTS: ClientDefinition[] = [
 			scheme: "farcaster://{username}/{fullHash}",
 			androidPackage: "com.farcaster.mobile",
 		},
+		// Profile + feed = farcaster.xyz's own username shape — the URL the
+		// profile linktree's way out always used; signed-gated via the
+		// client-level requiresSigned flag above (the fork's rule,
+		// generalized: farcaster.xyz hides unsigned accounts' surfaces,
+		// so its pills suppress for known-unsigned authors, fail-open).
+		profile: { web: "https://farcaster.xyz/{username}" },
+		feed: { web: "https://farcaster.xyz/{username}" },
+		// Channel — VERIFIED against the open-source app
+		// (github.com/farcasterxyz/client): useHandleDeepLink rewrites
+		// farcaster:// → https://farcaster.xyz/ and resolveUniversalChannel
+		// matches /~/channel/:channelKey onto the native Channel screen.
+		// The ~/ is LOAD-BEARING: the bare form would resolve as a profile
+		// for the user "channel". Android rides the intent:// form with the
+		// web URL as Chrome's native fallback.
+		channel: {
+			web: "https://farcaster.xyz/~/channel/{channelId}",
+			deeplink: {
+				scheme: "farcaster://~/channel/{channelId}",
+				androidPackage: "com.farcaster.mobile",
+			},
+		},
 		requiresSigned: true,
 	},
 	// Quilibrium's decentralized group messenger renders Farcaster casts in
@@ -132,6 +190,35 @@ export const CLIENTS: ClientDefinition[] = [
 			scheme: "quorummobile://feed?castHashPrefix={fullHash}&username={username}",
 			androidPackage: "com.quilibrium.quorummobile",
 		},
+		// Profile — SOURCE-VERIFIED (quorum-mobile app/(tabs)/feed/index.tsx
+		// `initialProfile` → SocialFeedModal profile screen): profileFid
+		// required, profileUsername optional. Channel — SOURCE-VERIFIED: the
+		// feed route accepts channelKey and seeds the nav stack into the
+		// channel screen; slug-shaped ids are used as-is. Both are
+		// scheme-only with the homepage stub as href (the desktop build's
+		// Farcaster surface is "Coming soon" — there is no profile/channel
+		// web page), and coarse-only: phones only. Both need a Farcaster
+		// account connected in-app. Package rotation warning: Quilibrium
+		// signs release APKs with the debug keystore committed in their
+		// repo — expect a package/keystore rotation at their Play launch,
+		// and this entry is the ONE place to make it (the profile fork and
+		// channel trio resolve through here).
+		profile: {
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?profileFid={fid}&profileUsername={username}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		},
+		channel: {
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme: "quorummobile://feed?channelKey={channelId}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		},
 	},
 	{
 		id: "firefly",
@@ -142,6 +229,22 @@ export const CLIENTS: ClientDefinition[] = [
 		// the native app on both platforms. No per-cast custom scheme is
 		// documented anywhere; web-only until one surfaces.
 		web: "https://firefly.social/post/farcaster/{fullHash}",
+		// Channel — VERIFIED against the APK (io.dimension.firefly 1.1.44,
+		// apkpure mirror): the navigator registers firefly://FarcasterChannel/{url}
+		// and https://farcaster.xyz/~/channel/{url} onto ONE route whose
+		// token is the channel slug (the sibling regex /~/channel/[\w\-]+
+		// pins the charset), rendering the native ChannelDetail
+		// (farcasterChannelId=…) screen. The web href is the owner-confirmed
+		// channel/farcaster/{id} route (network infix is part of their path;
+		// Vercel's bot checkpoint blocks curl verification). Profile/feed
+		// targets: unknown — verify before seeding (PLAN7 §13).
+		channel: {
+			web: "https://firefly.social/channel/farcaster/{channelId}",
+			deeplink: {
+				scheme: "firefly://FarcasterChannel/{channelId}",
+				androidPackage: "io.dimension.firefly",
+			},
+		},
 	},
 	// Per-cast format verified against the open-source client
 	// (github.com/backmeupplz/quilcast, server/index.mjs): the /c/ route
@@ -153,6 +256,14 @@ export const CLIENTS: ClientDefinition[] = [
 		title: "Quilcast",
 		logoUrl: "/logos/quilcast.svg",
 		web: "https://quilcast.com/c/{fullHashRaw}",
+		// Profile — owner-provided /u/ route (the unsigned way out's
+		// desktop half; live-check + any further provenance still owed,
+		// PLAN7 §13). fine-only: the fork's assignment is Quilcast
+		// DESKTOP / Quorum MOBILE. Feed/channel: unknown.
+		profile: {
+			web: "https://quilcast.com/u/{username}",
+			pointer: "fine",
+		},
 	},
 	// Per-cast format verified against fc-clients-cast-action
 	// (github.com/artlu99/fc-clients-cast-action, src/lib/deeplink.ts):
@@ -241,23 +352,33 @@ export function blockedByLinkGate(
 	return client.requiresExternalLinks === true && externalLinks !== true;
 }
 
+/**
+ * What a route can offer a template: the kind's own identifiers. Cast
+ * routes carry everything; user routes have no hash; channel routes only a
+ * channelId. Templates referencing a placeholder these vars lack are
+ * skipped via missingVars — that gate IS the capability filter for
+ * placeholder-bearing targets.
+ */
 export interface TemplateVars {
-	username: string;
+	username?: string;
 	/** Route-form hash, short or full, exactly as requested. */
-	hash: string;
+	hash?: string;
 	/** Full hash as resolved by Shim. */
-	fullHash: string;
-	/** Author fid — optional; reserved for templates that need it. */
+	fullHash?: string;
+	/** Author fid — optional; templates that need it are fid-gated. */
 	fid?: number;
+	/** Channel id (channel routes). */
+	channelId?: string;
 }
 
-/** Placeholders a template may reference; `fid` is the only optional one. */
+/** Placeholders a template may reference; everything but the first four is optional. */
 const PLACEHOLDERS = [
 	"username",
 	"hash",
 	"fullHash",
 	"fullHashRaw",
 	"fid",
+	"channelId",
 ] as const;
 
 /** {fullHashRaw} derives from {fullHash}: bare lowercase hex, no 0x prefix. */
@@ -266,7 +387,7 @@ function placeholderValue(
 	vars: TemplateVars,
 ): string | undefined {
 	if (name === "fullHashRaw") {
-		return vars.fullHash.replace(/^0x/i, "").toLowerCase();
+		return vars.fullHash?.replace(/^0x/i, "").toLowerCase();
 	}
 	if (name === "fid") {
 		return vars.fid === undefined ? undefined : String(vars.fid);
@@ -325,9 +446,9 @@ export function findClient(
 }
 
 /**
- * Native click-time targets for a client, resolved per cast. Returned
- * to the renderer as data attributes; the pill href stays the web URL
- * on every platform. When both are present the client script picks per
+ * Native click-time targets for a client's CAST target, resolved per cast.
+ * Returned to the renderer as data attributes; the pill href stays the web
+ * URL on every platform. When both are present the client script picks per
  * platform: Android uses `intent` (Chrome-native fallback), iOS and
  * other coarse-pointer devices use `scheme`.
  *
@@ -336,20 +457,99 @@ export function findClient(
  * - `intent`: Android intent:// URL when an androidPackage is set —
  *   Chrome natively falls back to the encoded web URL in that form.
  * - neither: the client is web-only.
+ *
+ * The ONE intent:// composer — the profile fork and the channel trio
+ * resolve through {@link targetDeeplinkTargets} with their kind targets.
  */
 export function deeplinkTargets(
 	client: ClientDefinition,
 	vars: TemplateVars,
 ): { scheme?: string; intent?: string } {
 	if (!client.deeplink || !client.web) return {};
-	const scheme = resolveTemplate(client.deeplink.scheme, vars);
+	return targetDeeplinkTargets(
+		{ web: client.web, deeplink: client.deeplink },
+		vars,
+	);
+}
+
+/**
+ * The shared composer for ANY target (cast or kind): scheme resolution +
+ * the Android intent:// form with the resolved web URL as Chrome's native
+ * fallback. Markup stays in the renderers — this returns data, and each
+ * renderer emits attributes in its own established order.
+ */
+export function targetDeeplinkTargets(
+	target: ClientTarget,
+	vars: TemplateVars,
+): { scheme?: string; intent?: string } {
+	if (!target.deeplink) return {};
+	const scheme = resolveTemplate(target.deeplink.scheme, vars);
 	const sep = scheme.indexOf("://");
-	if (client.deeplink.androidPackage && sep > 0) {
-		const web = resolveTemplate(client.web, vars);
+	if (target.deeplink.androidPackage && sep > 0) {
+		const web = resolveTemplate(target.web, vars);
 		return {
 			scheme,
-			intent: `intent://${scheme.slice(sep + 3)}#Intent;scheme=${scheme.slice(0, sep)};package=${client.deeplink.androidPackage};S.browser_fallback_url=${encodeURIComponent(web)};end`,
+			intent: `intent://${scheme.slice(sep + 3)}#Intent;scheme=${scheme.slice(0, sep)};package=${target.deeplink.androidPackage};S.browser_fallback_url=${encodeURIComponent(web)};end`,
 		};
 	}
 	return { scheme };
+}
+
+/**
+ * A client's target for a route kind. `cast` assembles the EXISTING
+ * web/deeplink fields (byte-stability for every current consumer); the
+ * other kinds read their additive field.
+ */
+export function targetFor(
+	client: ClientDefinition,
+	kind: RouteKind,
+): ClientTarget | undefined {
+	if (kind === "cast") {
+		return client.web === undefined
+			? undefined
+			: { web: client.web, deeplink: client.deeplink };
+	}
+	return client[kind];
+}
+
+/** Leading class-string for a target's pointer scope (`class="pill${…}"`). */
+export function pointerClass(target: ClientTarget): string {
+	return target.pointer === undefined ? "" : ` ${target.pointer}-only`;
+}
+
+/**
+ * Clients offered on a NON-CAST route (the cast path stays
+ * clientsForPage with its content gates): must have a target for the kind
+ * whose placeholders these vars satisfy, and must pass the signed rule —
+ * requiresSigned extends to every kind (the profile fork's farcaster
+ * suppression, generalized), FAIL-OPEN: only a known signed:false
+ * suppresses, and channel routes run no /signed check at all, so
+ * everything fails open there. requiresExternalLinks deliberately does
+ * NOT apply — it gates on cast embed data, which no other route has.
+ * Phase 1 renders these statelessly (PLAN7): no cookie, no badge, no
+ * rank, no beacons — the stateful layer arrives per kind in phase 2.
+ */
+export function clientsForRoute(
+	kind: "profile" | "feed" | "channel",
+	vars: TemplateVars,
+	signed?: boolean | null,
+): ClientDefinition[] {
+	return CLIENTS.filter((client) => {
+		const target = client[kind];
+		if (target === undefined || !isActive(client)) return false;
+		// The gate covers the SCHEME too, not just the web template: a
+		// scheme-only target (quorum's entries) rides a placeholder-free
+		// stub href, and an unresolved {fid}/{username} in a scheme would
+		// ship literal braces into a native URL. (The cast path keeps its
+		// web-only gate — cast routes always carry the hash fields, and its
+		// rendered bytes are frozen.)
+		const templates =
+			target.deeplink === undefined
+				? [target.web]
+				: [target.web, target.deeplink.scheme];
+		if (templates.some((tpl) => missingVars(tpl, vars).length > 0)) {
+			return false;
+		}
+		return !(client.requiresSigned === true && signed === false);
+	});
 }
