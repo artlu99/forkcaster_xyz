@@ -8,6 +8,7 @@ import type { RankSnapshot, RankRow } from "../scripts/client-rank-lib.ts";
 import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
+import { CLIENTS, ROUTE_KINDS, targetFor } from "./client-registry.ts";
 import { escapeHtml, shell } from "./shell.tsx";
 
 // Public provider roster — names included on purpose (transparency over
@@ -78,6 +79,36 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 
 const WEIGHTS_NOTE = `first picks ×${RANK_WEIGHTS.first} · go-now ×${RANK_WEIGHTS.goNow} · repeats ×${RANK_WEIGHTS.repeat} · auto-opens ×${RANK_WEIGHTS.auto}`;
 
+// Client coverage (PLAN7 phase 3): the capability matrix, straight from
+// the registry — clients × route kinds. A — means "not verified yet",
+// never "never"; the table cannot drift from client-registry.ts because
+// it IS the registry.
+const ACTIVE_CLIENTS = CLIENTS.filter(
+	(client) => client.status === undefined || client.status === "active",
+);
+
+function coverageTable(): string {
+	const head = ["client", ...ROUTE_KINDS]
+		.map((h) => `<th>${escapeHtml(h)}</th>`)
+		.join("");
+	const body = ACTIVE_CLIENTS.map((client) => {
+		const cells = [
+			client.id,
+			...ROUTE_KINDS.map((kind) =>
+				targetFor(client, kind) !== undefined ? "✓" : "—",
+			),
+		];
+		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
+	}).join("");
+	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul><li>Straight from the registry. A — means not verified yet, not never; cast targets open the individual cast, the other kinds are that route's way out.</li></ul>`;
+}
+
+/** The JSON half of the coverage matrix (same source, same moment). */
+const CLIENT_COVERAGE = ACTIVE_CLIENTS.map((client) => ({
+	id: client.id,
+	kinds: ROUTE_KINDS.filter((kind) => targetFor(client, kind) !== undefined),
+}));
+
 function rankTable(rank: RankSnapshot | null | undefined): string {
 	const rows = new Map((rank?.rows ?? []).map((r) => [r.id, r]));
 	const body = RANK_IDS.map((id) => {
@@ -133,11 +164,13 @@ export function transparencyJson(
 				pageLoad:
 					"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
 				clientChoice:
-					"1 anonymous datapoint per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, host. No cast IDs, no IPs, no identifiers. Raw rows expire in <=90 days.",
+					"1 anonymous datapoint per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in <=90 days.",
 			},
 			cookies:
-				"fc_client only — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
+				"fc_client only — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
 		},
+		// Capability matrix (PLAN7 phase 3): the registry's coverage, public.
+		clients: CLIENT_COVERAGE,
 		domains: {
 			canonical: "https://forkcaster.xyz",
 			also: ["https://warpcats.com"],
@@ -242,7 +275,7 @@ export function renderTransparencyHtml(
 
 <h2>What</h2>
 <ul>
-<li>Farcaster cast links → clean redirects. No app, no login.</li>
+<li>Farcaster casts, profiles, feeds, and channels → clean waypoints that route out to your client. No app, no login.</li>
 <li>MIT licensed open source: <a href="${REPO}">github.com/artlu99/forkcaster_xyz</a>.</li>
 </ul>
 
@@ -256,14 +289,17 @@ ${statsTable(options.snapshot)}
 </ul>
 
 <h2>Client choices</h2>
-<p>Which client people open casts with. Pill order on cast pages follows this table (a reordering — nothing is ever hidden, and the registry kill switch outranks popularity).</p>
+<p>Which client people open things with — casts, profiles, feeds. Pill order follows this table (a reordering — nothing is ever hidden on a surface it can serve, and the registry kill switch outranks popularity).</p>
 ${rankTable(options.rank)}
+
+<h2>Client coverage</h2>
+${coverageTable()}
 
 <h2>Tracking</h2>
 <ul>
 <li>One anonymous counter per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.</li>
-<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
-<li>One cookie: <code>fc_client</code> — remembers your last-used app, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
+<li>One anonymous counter per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in ≤90 days; only aggregates persist.</li>
+<li>One cookie: <code>fc_client</code> — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year, never sent cross-site.</li>
 <li>JSON version of this page: add <code>?format=json</code>.</li>
 </ul>
 

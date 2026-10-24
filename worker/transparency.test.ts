@@ -5,6 +5,7 @@
  * registration facts (expiry + RDAP confirm links) on both variants.
  */
 import { expect, mock, test } from "bun:test";
+import { CLIENTS } from "./client-registry.ts";
 
 mock.module("server-only", () => ({}));
 // CJS deps (linkify-react) call require("react"); sync preact/compat works.
@@ -271,4 +272,66 @@ test("JSON twin: the tracking counters shape declares both datapoints", () => {
 	expect(json.tracking.counters.pageLoad).toContain("per page load");
 	expect(json.tracking.counters.clientChoice).toContain("per client selection");
 	expect(json.tracking.counters.clientChoice).toContain("No cast IDs");
+});
+
+// --- client coverage + phase-2 tracking copy (PLAN7 phase 3) ---
+
+test("capability matrix: registry-driven clients x kinds on HTML", () => {
+	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
+	expect(html).toContain("Client coverage");
+	// farcaster: every kind seeded.
+	expect(html).toContain(
+		"<td>farcaster</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
+	);
+	// quorum: cast + profile + channel — no feed target exists.
+	expect(html).toContain(
+		"<td>quorum</td><td>✓</td><td>✓</td><td>—</td><td>✓</td>",
+	);
+	// quilcast: cast + profile.
+	expect(html).toContain(
+		"<td>quilcast</td><td>✓</td><td>✓</td><td>—</td><td>—</td>",
+	);
+	// linkcast: cast only.
+	expect(html).toContain(
+		"<td>linkcast</td><td>✓</td><td>—</td><td>—</td><td>—</td>",
+	);
+	// Registry-driven: every ACTIVE client renders a row, whatever the roster.
+	for (const client of CLIENTS.filter(
+		(c) => c.status === undefined || c.status === "active",
+	)) {
+		expect(html).toContain(`<td>${client.id}</td>`);
+	}
+});
+
+test("JSON twin: the clients block lists per-kind coverage", () => {
+	const json = transparencyJson(SNAPSHOT, RANK) as {
+		clients: Array<{ id: string; kinds: string[] }>;
+	};
+	expect(json.clients.find((c) => c.id === "farcaster")?.kinds).toEqual([
+		"cast",
+		"profile",
+		"feed",
+		"channel",
+	]);
+	expect(json.clients.find((c) => c.id === "linkcast")?.kinds).toEqual([
+		"cast",
+	]);
+	expect(json.clients.find((c) => c.id === "quorum")?.kinds).toEqual([
+		"cast",
+		"profile",
+		"channel",
+	]);
+});
+
+test("tracking copy declares the route kind and the per-kind cookie memory", () => {
+	const json = transparencyJson(SNAPSHOT, RANK) as {
+		tracking: { counters: { clientChoice: string }; cookies: string };
+	};
+	expect(json.tracking.counters.clientChoice).toContain("which surface");
+	expect(json.tracking.cookies).toContain("profiles");
+	const html = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
+	expect(html).toContain("which surface");
+	expect(html).toContain("for casts, profiles, and feeds separately");
+	// The What line covers the whole waypoint family now.
+	expect(html).toContain("profiles, feeds, and channels");
 });
