@@ -6,7 +6,7 @@
 // negotiation as cast pages).
 import type { RankSnapshot, RankRow } from "../scripts/client-rank-lib.ts";
 import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
-import type { FidSnapshot, FidSource } from "../scripts/fid-race-lib.ts";
+import { FID_SOURCES, type FidSnapshot } from "../scripts/fid-race-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
 import { CLIENTS, ROUTE_KINDS, targetFor } from "./client-registry.ts";
@@ -53,14 +53,23 @@ const DOMAINS = {
 	],
 };
 
-function statsTable(snapshot: Snapshot | null | undefined): string {
-	const head = ["id", "wins", "p50", "p95", "err%", "host"]
-		.map((h) => `<th>${h}</th>`)
+/** The one table markup: headers verbatim (static vocabulary), cells escaped. */
+function renderTable(headers: string[], rows: string[][]): string {
+	const head = headers.map((h) => `<th>${h}</th>`).join("");
+	const body = rows
+		.map(
+			(cells) =>
+				`<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`,
+		)
 		.join("");
+	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function statsTable(snapshot: Snapshot | null | undefined): string {
 	const byId = new Map((snapshot?.providers ?? []).map((p) => [p.id, p]));
-	const body = PROVIDERS.map((p) => {
+	const rows = PROVIDERS.map((p) => {
 		const s = byId.get(p.id);
-		const cells = [
+		return [
 			p.id,
 			s ? String(s.wins) : "—",
 			s?.p50Ms != null ? `${s.p50Ms}ms` : "—",
@@ -68,48 +77,42 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 			s ? `${Math.round(s.errorRate * 100)}%` : "—",
 			p.host,
 		];
-		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
-	}).join("");
+	});
 	const asOf =
 		snapshot == null
 			? ""
 			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · answers later than 0.7 seconds are not counted</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
-	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+	return `${renderTable(["id", "wins", "p50", "p95", "err%", "host"], rows)}${asOfHtml}`;
 }
 
 const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
-// The fid-race rows in registry order: the row label IS the source id
+// The fid-race rows in roster order — the row label IS the source id
 // (shim = this site's reader; haatz/snap = the raw gateways, tracked
-// independently). Typecheck-coupled to cast-source.ts's FidRace ids via
-// FidSource.
-const FID_SOURCES: readonly FidSource[] = ["shim", "haatz", "snap"];
+// independently). The vocabulary lives in the fid-race lib, typecheck-
+// coupled to cast-source.ts's FidRace ids.
 
 function fidTable(snapshot: FidSnapshot | null | undefined): string {
-	const head = ["source", "wins", "p50", "p95"]
-		.map((h) => `<th>${h}</th>`)
-		.join("");
-	const body = FID_SOURCES.map((source) => {
+	const rows = FID_SOURCES.map((source) => {
 		const stats = snapshot?.sources[source];
-		const cells = [
+		return [
 			source,
 			stats ? String(stats.wins) : "—",
 			stats?.p50Ms != null ? `${stats.p50Ms}ms` : "—",
 			stats?.p95Ms != null ? `${stats.p95Ms}ms` : "—",
 		];
-		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
-	}).join("");
+	});
 	const asOf =
 		snapshot == null
 			? ""
 			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${snapshot.legs.haatz + snapshot.legs.snap} lookups raced</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
-	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+	return `${renderTable(["source", "wins", "p50", "p95"], rows)}${asOfHtml}`;
 }
 
-// Client coverage: the capability matrix, straight from
-// the registry — clients × route kinds. A — means "not verified yet",
+// Client coverage: the capability matrix, straight from the registry —
+// clients × route kinds. A — means "not verified yet",
 // never "never"; the table cannot drift from client-registry.ts because
 // it IS the registry.
 const ACTIVE_CLIENTS = CLIENTS.filter(
@@ -117,19 +120,13 @@ const ACTIVE_CLIENTS = CLIENTS.filter(
 );
 
 function coverageTable(): string {
-	const head = ["app", ...ROUTE_KINDS]
-		.map((h) => `<th>${escapeHtml(h)}</th>`)
-		.join("");
-	const body = ACTIVE_CLIENTS.map((client) => {
-		const cells = [
-			client.id,
-			...ROUTE_KINDS.map((kind) =>
-				targetFor(client, kind) !== undefined ? "✓" : "—",
-			),
-		];
-		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
-	}).join("");
-	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table><ul><li>This table comes from the site's app list. A ✓ means that the link exists. A — means that we have not confirmed it yet.</li></ul>`;
+	const rows = ACTIVE_CLIENTS.map((client) => [
+		client.id,
+		...ROUTE_KINDS.map((kind) =>
+			targetFor(client, kind) !== undefined ? "✓" : "—",
+		),
+	]);
+	return `${renderTable(["app", ...ROUTE_KINDS], rows)}<ul><li>This table comes from the site's app list. A ✓ means that the link exists. A — means that we have not confirmed it yet.</li></ul>`;
 }
 
 /** The JSON half of the coverage matrix (same source, same moment). */
@@ -144,7 +141,7 @@ function rankTable(rank: RankSnapshot | null | undefined): string {
 		const r: RankRow | undefined = rows.get(id);
 		const share =
 			r?.share != null ? `${r.share}%` : "—";
-		const cells = [
+		return [
 			id,
 			r ? String(r.first) : "—",
 			r ? String(r.pill) : "—",
@@ -153,15 +150,14 @@ function rankTable(rank: RankSnapshot | null | undefined): string {
 			r ? String(r.score) : "—",
 			share,
 		];
-		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
-	}).join("");
+	});
 	const asOf =
 		rank == null
 			? ""
 			: `<li>From <code>${escapeHtml(rank.generatedAt)}</code> · last ${rank.window.hours} hours · ${rank.total} selections${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares show at ${WARMING_UP_MIN}+ selections` : ""}</li>`;
 	const weights = `<li>${WEIGHTS_NOTE}</li>`;
 	const asOfHtml = asOf === "" ? `<ul>${weights}</ul>` : `<ul>${weights}${asOf}</ul>`;
-	return `<table><thead><tr><th>app</th><th>first picks</th><th>selections</th><th>open now</th><th>automatic</th><th>score</th><th>share</th></tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+	return `${renderTable(["app", "first picks", "selections", "open now", "automatic", "score", "share"], body)}${asOfHtml}`;
 }
 
 export function transparencyJson(

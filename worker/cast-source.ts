@@ -58,13 +58,7 @@ export type ProviderResult =
 			fidRace?: FidRace;
 	  }
 	| { kind: "miss"; provider: ProviderId }
-	| {
-			kind: "error";
-			provider: ProviderId;
-			message: string;
-			/** Present when the leg died after a fid source had won. */
-			fidRace?: FidRace;
-	  };
+	| { kind: "error"; provider: ProviderId; message: string };
 
 export interface CastProvider {
 	id: ProviderId;
@@ -540,12 +534,12 @@ export async function raceCast(
 				.then((result): RaceEvent => {
 					clearTimeout(timer);
 					// Central validation: downgrade mismatches to errors so an
-					// off-target response can never win.
+					// off-target response can never win. The fid race still
+					// settled on the found result — keep its datapoint.
 					if (
 						result.kind === "found" &&
 						!resolvesRequested(vars, result.cast)
 					) {
-						// The fid race still settled — keep its datapoint.
 						settled("error", result.fidRace);
 						return {
 							provider: provider.id,
@@ -558,7 +552,7 @@ export async function raceCast(
 					}
 					settled(
 						result.kind,
-						result.kind === "miss" ? undefined : result.fidRace,
+						result.kind === "found" ? result.fidRace : undefined,
 					);
 					return { provider: provider.id, result };
 				})
