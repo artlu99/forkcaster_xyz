@@ -10,7 +10,7 @@
 	"vars": { "PRIMARY_ORIGIN": "https://forkcaster.xyz" },
 	"assets": { "not_found_handling": "none" },
 	"observability": { "enabled": true },
-	"analytics_engine_datasets": [{ "binding": "RACE_STATS" }, { "binding": "CLICK_STATS" }],
+	"analytics_engine_datasets": [{ "binding": "RACE_STATS" }, { "binding": "CLICK_STATS" }, { "binding": "FID_RACE" }],
 	"upload_source_maps": true,
 	"services": [{ "binding": "UNFURL", "service": "unfurl" }]
 	// "vars": {  "MY_VARIABLE": "production_value" }

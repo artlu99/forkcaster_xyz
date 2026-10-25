@@ -352,6 +352,176 @@ test("raw nodes fail soft when shim /f yields no fid", async () => {
 	expect(outcome.kind).toBe("error");
 });
 
+test("raw nodes survive a shim outage via the node's own userNameProofByName", async () => {
+	// Shim /f throws (outage) — the gateway's proof route names the fid and
+	// the cast still resolves, keeping the {fid}-gated client pills alive.
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/f/zoo") {
+			return respond(url, "throw");
+		}
+		if (
+			url === "https://haatz.quilibrium.com/v1/userNameProofByName?name=zoo"
+		) {
+			return respond(url, { fid: 10215, type: "USERNAME_TYPE_FNAME" });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const outcome = await haatzProvider.fetchCast(
+		{ username: "zoo", hash: FULL_HASH },
+		new AbortController().signal,
+	);
+	expect(outcome.kind).toBe("found");
+	if (outcome.kind !== "found") return;
+	expect(outcome.complete).toBe(true);
+	expect(outcome.cast.fid).toBe(10215);
+	expect(outcome.cast.user?.fid).toBe(10215);
+});
+
+test("resolveFid races shim against the node — first numeric answer wins", async () => {
+	// Shim answers SLOWLY with a stale fid; the node's proof route answers
+	// instantly with the live one. First numeric wins, and the late shim
+	// answer must be ignored (a stale fid can't win — hash validation
+	// would reject it downstream anyway).
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/f/zoo") {
+			return respond(url, { success: true, fid: 999 }, 25);
+		}
+		if (
+			url === "https://haatz.quilibrium.com/v1/userNameProofByName?name=zoo"
+		) {
+			return respond(url, { fid: 10215, type: "USERNAME_TYPE_FNAME" });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		// castById keyed on the STALE shim fid must never be requested.
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=999&hash=${FULL_HASH}`
+		) {
+			return respond(url, "throw");
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const outcome = await haatzProvider.fetchCast(
+		{ username: "zoo", hash: FULL_HASH },
+		new AbortController().signal,
+	);
+	expect(outcome.kind).toBe("found");
+	if (outcome.kind !== "found") return;
+	expect(outcome.cast.fid).toBe(10215);
+});
+
+test("raceCast carries the fid-race outcome on the leg's timing row (node wins)", async () => {
+	// Shim /f down; the gateway's own proof route names the fid. The leg
+	// reports { winner: "node" } — the datapoint /transparency reports.
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/f/zoo") {
+			return respond(url, "throw");
+		}
+		if (
+			url === "https://haatz.quilibrium.com/v1/userNameProofByName?name=zoo"
+		) {
+			return respond(url, { fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(
+		{ username: "zoo", hash: FULL_HASH },
+		{ providers: [haatzProvider] },
+	);
+	expect(race.kind).toBe("found");
+	const fid = race.timings[0]?.fid;
+	expect(fid?.winner).toBe("node");
+	expect(typeof fid?.ms).toBe("number");
+});
+
+test("raceCast carries the fid-race outcome on the leg's timing row (shim wins)", async () => {
+	// Shim /f answers; the node's proof route 404s (unmocked URL throws).
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/f/zoo") {
+			return respond(url, { success: true, fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(
+		{ username: "zoo", hash: FULL_HASH },
+		{ providers: [haatzProvider] },
+	);
+	expect(race.kind).toBe("found");
+	const fid = race.timings[0]?.fid;
+	expect(fid?.winner).toBe("shim");
+});
+
 test("shim adapter maps success:false to an authoritative miss", async () => {
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
 		const url = String(input);

@@ -8,7 +8,7 @@ Micro-site that mirrors Farcaster cast URLs for sharing without the Farcaster ap
 
 - Pattern: `/{username}/{castHash}` where `castHash` matches `0x[0-9a-fA-F]+` — short or full form
 - Examples: `/zoo/0x895ecc74` and `/decent-artlu/0xbb54368f` → SSR cast card + links
-- Data: raced across providers (`worker/cast-source.ts`, rpc-racer pattern) — see "Cast source race" below. **shim** (`https://shim.artlu.xyz/wc/{username}/{hash}`, owner-run Snapchain reader with a keep-warm cron) is the completeness anchor and the sole ban-signal dependency (`/signed/{fid}`); **farcaster.tv** is fast but quote-blind; raw nodes **haatz**/`snap.farcaster.xyz:3381` are complete but need shim `/f/{username}` for the fid and a full hash. All upstream calls are capped at 5s.
+- Data: raced across providers (`worker/cast-source.ts`, rpc-racer pattern) — see "Cast source race" below. **shim** (`https://shim.artlu.xyz/wc/{username}/{hash}`, owner-run Snapchain reader with a keep-warm cron) is the completeness anchor and the sole ban-signal dependency (`/signed/{fid}`); **farcaster.tv** is fast but quote-blind; raw nodes **haatz**/`snap.farcaster.xyz:3381` are complete and get the fid by racing shim `/f/{username}` against their own `/v1/userNameProofByName` (first numeric answer wins, loser aborted), plus a full hash requirement (`castById` 400s on short hashes). All upstream calls are capped at 5s.
 - Missing cast: an authoritative miss from a complete provider (shim, haatz, snap) → 404 page; no provider resolved → link-only page (200). All upstream calls are capped at 5s (`AbortSignal.timeout`) — shim's cold sharded lookups can otherwise hang 15s+; timeout ⇒ unreachable. Strict statuses are the JSON variant's job (see below)
 - Banned accounts: embeds render for everyone — but some clients hide unsigned authors. Since Oct 15, 2026 (Network School takeover), accounts must accept the "social smart contract" (Network Code); acceptance is an on-chain access NFT. Shim exposes it: `GET https://shim.artlu.xyz/signed/{fid}` → `{"signed":true|false}`. Unsigned authors: registry clients flagged `requiresSigned` (e.g. farcaster) are suppressed from the action row; the check fails open — unknown state suppresses nothing
 - farcaster.tv as a **cast data** source is quote-blind (it drops `{castId}` embeds) and unofficial — it races as the partial tier only (700ms HTML box, client-side quote fill-in). react-farcaster-embed's own default endpoint is farcaster.tv — always pass `castData` so it never fetches. The live stats row (replies/recasts/likes) is still fetched **client-side** from farcaster.tv — it sends `access-control-allow-origin: *` and answers for unsigned authors too; any failure just leaves the row absent
@@ -72,11 +72,14 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── clients.test.ts        # registry unit tests: templates, gating, signed rule, deeplinks
 │   ├── cast-source.test.ts    # race unit tests: eligibility, box, miss/error, abort, adapter mapping
 │   ├── race-stats-store.ts    # lmdis snapshot read-through TTL cache (10min TTL / stale 24h / 2s cap)
+│   ├── fid-race-store.ts      # mirror of the above for the "Author id races" snapshot (key fid-race)
 │   ├── vendor/lmdis-sdk.ts    # vendored lmdis SDK (Upstash-shaped seam; get/set only)
 │   └── shims/server-only.ts   # empty stub for Next.js marker package
 ├── scripts/
 │   ├── race-stats.ts          # offline stats job: AE SQL → snapshot → lmdis (dotenvx env; --dry)
 │   ├── race-stats-lib.ts      # pure query builders (fixture-tested)
+│   ├── fid-race.ts            # offline fid-race job: FID_RACE AE SQL → snapshot → lmdis (mirror of race-stats.ts)
+│   ├── fid-race-lib.ts        # pure fid-race query builders (fixture-tested)
 │   ├── client-rank.ts         # offline rank job: CLICK_STATS AE SQL → weighted snapshot → lmdis
 │   ├── client-rank-lib.ts     # pure query builders + weighting (fixture-tested)
 │   └── probe/                 # live-service probes (lmdis, AE SQL, shim timing)
@@ -169,7 +172,7 @@ Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fa
 
 **Ban signal:** NOT raced — `/signed/{fid}` stays a shim dependency, orthogonal to cast content, time-boxed to the HTML box with the usual fail-open.
 
-**Telemetry:** every resolve writes one Analytics Engine datapoint (`RACE_STATS` binding, non-blocking via `waitUntil`): index = winning provider (or outcome kind), doubles = total ms / box / partial flag, blob = per-provider `id:kind:ms` rows (race-abort losers record `abort`, not `error`). Query via the AE SQL API when tuning the box (`scripts/probe/`, `scripts/race-stats.ts`); tests and callers without an executionCtx skip it.
+**Telemetry:** every resolve writes one Analytics Engine datapoint (`RACE_STATS` binding, non-blocking via `waitUntil`): index = winning provider (or outcome kind), doubles = total ms / box / partial flag, blob = per-provider `id:kind:ms` rows (race-abort losers record `abort`, not `error`). Raw-node legs that settle their identity race also write one `FID_RACE` datapoint each (index = winning source `shim`/`node`, blob = leg + host, double = ms). Query via the AE SQL API when tuning the box (`scripts/probe/`, `scripts/race-stats.ts`); tests and callers without an executionCtx skip it.
 
 Follow-ups: quote hydration could race haatz/snap (`/h/{fullHash}` vs `castById` — the castId embed carries the fid); a `?format=json` consumer willing to trade completeness for latency could opt into the race.
 
@@ -178,6 +181,10 @@ Follow-ups: quote hydration could race haatz/snap (`/h/{fullHash}` vs `castById`
 The racing-stats table is filled **offline** — the render path stays cache-free and stats-free. `bun run stats` (env per `.env.example`) queries Analytics Engine through the **SQL API** — sample-weighted (`sum(_sample_interval)`, `quantileExactWeighted`; never raw `count()`) — assembles a versioned snapshot (`v: 1`; wins/requests/p50/p95/errorRate per provider + outcome counts) and publishes it as one lmdis key (`race-stats` on `lmdis.artlu.xyz`, the owner-run Redis-shaped KV) through the vendored Upstash-shaped SDK. Overwrite-only-on-success; `--dry` previews.
 
 The transparency route reads the snapshot through a per-isolate TTL cache (`worker/race-stats-store.ts`: 10 min TTL, 60s failure backoff, last-good served ≤24h, 2s read cap) and fills the table, the "stats as of" line, and the JSON twin's `racingStats` — absent/unreachable snapshot ⇒ "coming soon" dashes, silently. `/race-stats.json` serves the raw snapshot (404 when absent). SQL dialect + store behavior are live-verified by `scripts/probe/` (the AE dialect has no `CONCAT` and only `toUInt32`/`toUInt8` conversions; SQL errors come back as plain-text 422s; the SQL API rejects Account Owned Tokens — use a User token with Account Analytics:Read).
+
+## Fid races (/transparency, parallel to race stats)
+
+The raw-node legs race shim `/f/{username}` against the node's own `/v1/userNameProofByName` for the author fid (see "Cast source race"). Each settled race writes one `FID_RACE` Analytics Engine datapoint (index = winning source, blob = leg id + host, double = the winner's ms), and `bun run stats:fid` (same env discipline as `stats`) aggregates it into a second lmdis key (`fid-race`, overwrite-only-on-success, `--dry` previews). `/transparency` reads it through `worker/fid-race-store.ts` — a line-for-line mirror of the race store (same TTL/backoff/stale contract) — and renders the **Author id races** item (wins/p50/p95 per source + raced-lookups line) plus the JSON twin's `fidRace` block (`status`: live \| coming-soon). Declared as a third entry in `tracking.counters` (`fidRace`); no cast IDs, no identifiers.
 
 **Abort telemetry:** race-cut losers are recorded as `provider:abort:<ms>` (not `error`) so public errorRate stays honest — the 700ms box cuts slow completes by design; the 5s hard-timeout still counts as an error. `raceCast` drains pending settles after abort (bounded 25ms) so timing rows never escape incomplete.
 

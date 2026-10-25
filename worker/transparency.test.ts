@@ -325,6 +325,74 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 	]);
 });
 
+// --- fid race ("Author id races" item) ---
+
+const FID: import("./fid-race-store.ts").FidSnapshot = {
+	v: 1,
+	generatedAt: "2026-10-25T00:00:00.000Z",
+	window: { hours: 168 },
+	sampled: false,
+	sources: {
+		shim: { wins: 12, p50Ms: 8, p95Ms: 30 },
+		node: { wins: 40, p50Ms: 5, p95Ms: 22 },
+	},
+	legs: { haatz: 30, snap: 22 },
+};
+
+test("fid-race table: numbers fill the item, absent snapshot keeps dashes", () => {
+	const filled = renderTransparencyHtml({
+		snapshot: SNAPSHOT,
+		rank: RANK,
+		fid: FID,
+	});
+	expect(filled).toContain("Author id races");
+	expect(filled).toContain("<td>site reader</td><td>12</td><td>8ms</td><td>30ms</td>");
+	expect(filled).toContain("<td>public node</td><td>40</td><td>5ms</td><td>22ms</td>");
+	expect(filled).toContain("52 lookups raced");
+	expect(filled).toContain("last 168 hours");
+
+	const empty = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
+	expect(empty).toContain("Author id races");
+	expect(empty).toContain(
+		"<td>site reader</td><td>—</td><td>—</td><td>—</td>",
+	);
+	expect(empty).not.toContain("lookups raced");
+});
+
+test("JSON twin: fidRace live with totals; coming-soon with nulls", () => {
+	const live = transparencyJson(SNAPSHOT, RANK, FID) as {
+		fidRace: {
+			status: string;
+			total: number | null;
+			sources: { node: { wins: number | null } };
+		};
+	};
+	expect(live.fidRace.status).toBe("live");
+	expect(live.fidRace.total).toBe(52);
+	expect(live.fidRace.sources.node.wins).toBe(40);
+
+	const dry = transparencyJson(SNAPSHOT, RANK) as {
+		fidRace: {
+			status: string;
+			window: null;
+			total: null;
+			sources: { shim: { wins: number | null } };
+		};
+	};
+	expect(dry.fidRace.status).toBe("coming-soon");
+	expect(dry.fidRace.window).toBeNull();
+	expect(dry.fidRace.total).toBeNull();
+	expect(dry.fidRace.sources.shim.wins).toBeNull();
+});
+
+test("JSON twin: the tracking counters declare the fid-race datapoint", () => {
+	const json = transparencyJson(SNAPSHOT, RANK, FID) as {
+		tracking: { counters: { fidRace: string } };
+	};
+	expect(json.tracking.counters.fidRace).toContain("author-id lookup");
+	expect(json.tracking.counters.fidRace).toContain("No cast IDs");
+});
+
 test("tracking copy declares the route kind and the per-kind cookie memory", () => {
 	const json = transparencyJson(SNAPSHOT, RANK) as {
 		tracking: { counters: { clientChoice: string }; cookies: string };

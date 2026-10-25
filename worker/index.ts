@@ -28,6 +28,7 @@ import {
 	resolveProfile,
 } from "./profile-page.tsx";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
+import { getFidRaceSnapshot } from "./fid-race-store.ts";
 import { parseTrackEvent, writeTrackEvent } from "./track.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 
@@ -122,17 +123,22 @@ app.get("/mcp", (c) => {
 
 app.get("/transparency", async (c) => {
 	const wantsJson = negotiatesJson(c);
-	// Two cacheTtl'd reads (per-isolate) feed the HTML page and the JSON
-	// twin; absent/unreachable snapshots → dashes/coming-soon. Silent.
+	// Three cacheTtl'd reads (per-isolate) feed the HTML page and the JSON
+	// twin; absent/unreachable snapshots → dashes/coming-soon. Silent. The
+	// rank + fid reads run in parallel (each caps a cold lmdis at 2s).
 	const snapshot = await getRaceStatsSnapshot(c.env);
-	const rank = await getRankSnapshot(c.env);
-	if (wantsJson) return c.json(transparencyJson(snapshot, rank));
+	const [rank, fid] = await Promise.all([
+		getRankSnapshot(c.env),
+		getFidRaceSnapshot(c.env),
+	]);
+	if (wantsJson) return c.json(transparencyJson(snapshot, rank, fid));
 	const primaryOrigin = (c.env as Env | undefined)?.PRIMARY_ORIGIN;
 	return c.html(
 		renderTransparencyHtml({
 			canonicalUrl: primaryOrigin ? `${primaryOrigin}/transparency` : undefined,
 			snapshot,
 			rank,
+			fid,
 		}),
 	);
 });
@@ -272,6 +278,30 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 					}),
 				),
 			);
+		}
+	} catch {
+		// No executionCtx (tests) — telemetry is best-effort.
+	}
+	// Fid-source telemetry (cast-source.ts resolveFid): one datapoint per
+	// raw-node leg whose identity race settled — index = winning source
+	// (shim /f vs the node's own proof route), blob1 = the leg, blob2 =
+	// host, double = the winner's ms. Declared on /transparency ("Author
+	// id races"); no cast IDs, no identifiers. Best-effort, like above.
+	try {
+		const fidDataset = c.env.FID_RACE;
+		if (fidDataset) {
+			for (const t of resolved.timings) {
+				if (t.fid === undefined) continue;
+				c.executionCtx.waitUntil(
+					Promise.resolve(
+						fidDataset.writeDataPoint({
+							indexes: [t.fid.winner],
+							blobs: [t.provider, new URL(c.req.url).hostname],
+							doubles: [t.fid.ms],
+						}),
+					),
+				);
+			}
 		}
 	} catch {
 		// No executionCtx (tests) — telemetry is best-effort.

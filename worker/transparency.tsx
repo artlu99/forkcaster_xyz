@@ -6,6 +6,7 @@
 // negotiation as cast pages).
 import type { RankSnapshot, RankRow } from "../scripts/client-rank-lib.ts";
 import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
+import type { FidSnapshot, FidSource } from "../scripts/fid-race-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
 import { CLIENTS, ROUTE_KINDS, targetFor } from "./client-registry.ts";
@@ -79,6 +80,35 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 
 const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
+// The fid-race rows in display order: the source vocabulary mirrors
+// cast-source.ts's FidRace winner ids (typecheck-coupled via FidSource).
+const FID_SOURCES: Array<{ id: FidSource; label: string }> = [
+	{ id: "shim", label: "site reader" },
+	{ id: "node", label: "public node" },
+];
+
+function fidTable(snapshot: FidSnapshot | null | undefined): string {
+	const head = ["source", "wins", "p50", "p95"]
+		.map((h) => `<th>${h}</th>`)
+		.join("");
+	const body = FID_SOURCES.map((s) => {
+		const stats = snapshot?.sources[s.id];
+		const cells = [
+			s.label,
+			stats ? String(stats.wins) : "—",
+			stats?.p50Ms != null ? `${stats.p50Ms}ms` : "—",
+			stats?.p95Ms != null ? `${stats.p95Ms}ms` : "—",
+		];
+		return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
+	}).join("");
+	const asOf =
+		snapshot == null
+			? ""
+			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${snapshot.legs.haatz + snapshot.legs.snap} lookups raced</li>`;
+	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
+	return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${asOfHtml}`;
+}
+
 // Client coverage: the capability matrix, straight from
 // the registry — clients × route kinds. A — means "not verified yet",
 // never "never"; the table cannot drift from client-registry.ts because
@@ -138,6 +168,7 @@ function rankTable(rank: RankSnapshot | null | undefined): string {
 export function transparencyJson(
 	snapshot?: Snapshot | null,
 	rank?: RankSnapshot | null,
+	fid?: FidSnapshot | null,
 ): Record<string, unknown> {
 	const nullStats = () => ({
 		wins: null,
@@ -165,6 +196,8 @@ export function transparencyJson(
 					"1 anonymous datapoint per page load: winning provider, latencies, host. No cast IDs, no IPs, no accounts, no ads.",
 				clientChoice:
 					"1 anonymous datapoint per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in <=90 days.",
+				fidRace:
+					"1 anonymous datapoint per author-id lookup that settles: which source won (the site's own reader vs the public node), how fast, which node, host. No cast IDs, no IPs, no identifiers.",
 			},
 			cookies:
 				"fc_client only — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
@@ -201,6 +234,29 @@ export function transparencyJson(
 						...nullStats(),
 						host: p.host,
 					})),
+				},
+		fidRace: fid
+			? {
+					status: "live",
+					generatedAt: fid.generatedAt,
+					window: fid.window,
+					sampled: fid.sampled,
+					legs: fid.legs,
+					total: fid.sources.shim.wins + fid.sources.node.wins,
+					sources: {
+						shim: fid.sources.shim,
+						node: fid.sources.node,
+					},
+				}
+			: {
+					status: "coming-soon",
+					window: null,
+					legs: { haatz: null, snap: null },
+					total: null,
+					sources: {
+						shim: { wins: null, p50Ms: null, p95Ms: null },
+						node: { wins: null, p50Ms: null, p95Ms: null },
+					},
 				},
 		clientRank: rank
 			? {
@@ -260,6 +316,7 @@ export function renderTransparencyHtml(
 		canonicalUrl?: string;
 		snapshot?: Snapshot | null;
 		rank?: RankSnapshot | null;
+		fid?: FidSnapshot | null;
 	} = {},
 ): string {
 	// Section order serves the common visitor: what it is → what's tracked
@@ -310,6 +367,10 @@ ${statsTable(options.snapshot)}
 <ul>
 <li>Some apps show only authors who signed the Farcaster agreement. We check this. If the check does not answer, we show every app.</li>
 </ul>
+
+<h2>Author id races</h2>
+<p>Some apps need the author's numeric id. Two lookups race for it — this site's own reader and the public node itself — and the fastest answer wins.</p>
+${fidTable(options.fid)}
 
 <h2>Domains</h2>
 <ul>

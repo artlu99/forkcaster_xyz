@@ -5,8 +5,10 @@
 // Providers are tiered by completeness (measured Oct 2026, see README):
 // - shim       — complete. Canonical shape, short/full hashes, quotes inline.
 // - haatz/snap — complete raw Snapchain messages, but castById needs an fid
-//                (resolved via shim /f/{username}) and a FULL hash; short-hash
-//                URLs can't be keyed on a raw node (no usernameProof route).
+//                and a FULL hash (short hashes 400). The fid is raced between
+//                shim /f/{username} and the node's own
+//                /v1/userNameProofByName — neither source is a single point
+//                of failure, so a shim outage can't blind both providers.
 // - farcaster.tv — quote-blind: it silently DROPS {castId} quote embeds, so
 //                its wins are marked partial and only allowed after the box
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
@@ -30,6 +32,13 @@ export type { ShimCast, ShimEmbed };
 
 export type ProviderId = "shim" | "haatz" | "snap" | "farcaster-tv";
 
+/**
+ * How resolveFid's two-source identity race settled on a raw-node leg —
+ * which source named the fid first and how fast. Public reporting:
+ * /transparency's "Author id races" item. No cast identifiers.
+ */
+export type FidRace = { winner: "shim" | "node"; ms: number };
+
 /** What a request can supply before any cast data exists. */
 export interface CastVars {
 	username: string;
@@ -44,9 +53,17 @@ export type ProviderResult =
 			/** Complete providers preserve raw {castId} embeds; partial don't. */
 			complete: boolean;
 			cast: ShimCast & { hash: string };
+			/** Raw-node legs: how the fid race settled. */
+			fidRace?: FidRace;
 	  }
 	| { kind: "miss"; provider: ProviderId }
-	| { kind: "error"; provider: ProviderId; message: string };
+	| {
+			kind: "error";
+			provider: ProviderId;
+			message: string;
+			/** Present when the leg died after a fid source had won. */
+			fidRace?: FidRace;
+	  };
 
 export interface CastProvider {
 	id: ProviderId;
@@ -66,6 +83,11 @@ export interface ProviderTiming {
 	kind: "found" | "miss" | "error" | "abort";
 	/** Milliseconds from race start to this provider's settle. */
 	ms: number;
+	/**
+	 * Raw-node legs only: the leg's identity-race outcome. Absent when the
+	 * leg was cut off mid-race (abort) or neither source answered.
+	 */
+	fid?: FidRace;
 }
 
 export type RaceResult =
@@ -243,10 +265,10 @@ export const farcasterTvProvider: CastProvider = {
 // --- raw Snapchain nodes: haatz + snap (complete, fid + full hash only) ---
 //
 // Both expose the Snapchain HTTP gateway API family: /v1/castById needs
-// fid + FULL hash (short hashes 400 with NotFound) and no usernameProof
-// route exists, so the fid comes from shim /f/{username} — a lightweight
-// Redis lookup. userDataByFid supplies the inline user data the other
-// providers carry natively.
+// fid + FULL hash (short hashes 400 with NotFound). The fid is raced
+// between shim /f/{username} and the gateway's own
+// /v1/userNameProofByName — resolveFid below. userDataByFid supplies
+// the inline user data the other providers carry natively.
 
 type RawMessage = {
 	hash?: string;
@@ -297,6 +319,75 @@ function mapRawCast(
 	};
 }
 
+/**
+ * username → fid for the raw-node legs, RACED shim-vs-node (the
+ * rpc-racer pattern at identity scale): both sources fire under the
+ * leg's abort window, the first numeric answer wins, the loser is
+ * aborted, and a miss or failure from one source never wins while the
+ * other is still pending. Neither source is on the critical path — a
+ * hanging shim costs nothing when the node answers first, and vice
+ * versa (both observed live Oct 2026). A stale fid for a transferred
+ * username can never win — the central hash validation
+ * rejects any cast that doesn't resolve the requested hash.
+ */
+async function resolveFid(
+	base: string,
+	username: string,
+	signal: AbortSignal,
+): Promise<{ fid: number | undefined; race?: FidRace }> {
+	const startedAt = Date.now();
+	const shim = new AbortController();
+	const node = new AbortController();
+	// The leg's 5s cap propagates to both sources; a winner aborts only
+	// its loser.
+	const forward = () => {
+		shim.abort();
+		node.abort();
+	};
+	if (signal.aborted) forward();
+	else signal.addEventListener("abort", forward, { once: true });
+	const detach = () => signal.removeEventListener("abort", forward);
+	const fromShim = getFidByUsername(username, shim.signal);
+	const fromNode = (async () => {
+		const { status, data } = await getJsonWithStatus(
+			`${base}/v1/userNameProofByName?name=${encodeURIComponent(username)}`,
+			node.signal,
+		);
+		if (status !== 200) return undefined;
+		const fid = (data as { fid?: unknown } | undefined)?.fid;
+		return typeof fid === "number" ? fid : undefined;
+	})();
+	return new Promise<{ fid: number | undefined; race?: FidRace }>((resolve) => {
+		let pending = 2;
+		const onSettle = (
+			winner: FidRace["winner"],
+			loser: AbortController,
+		) => (fid: number | undefined) => {
+			if (typeof fid === "number") {
+				detach();
+				loser.abort();
+				resolve({
+					fid,
+					race: { winner, ms: Date.now() - startedAt },
+				});
+				return;
+			}
+			if (--pending === 0) {
+				detach();
+				resolve({ fid: undefined });
+			}
+		};
+		// Rejections (shim outage, node 5xx/abort) settle as undefined —
+		// only a numeric fid wins; the last source standing decides.
+		fromShim.then(onSettle("shim", node), () =>
+			onSettle("shim", node)(undefined),
+		);
+		fromNode.then(onSettle("node", shim), () =>
+			onSettle("node", shim)(undefined),
+		);
+	});
+}
+
 function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 	return {
 		id,
@@ -304,7 +395,7 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 		canServe: (vars) => isFullHash(vars.hash),
 		async fetchCast(vars, signal) {
 			try {
-				const fid = await getFidByUsername(vars.username, signal);
+				const { fid, race } = await resolveFid(base, vars.username, signal);
 				if (fid === undefined) {
 					return {
 						kind: "error",
@@ -344,6 +435,7 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 					provider: id,
 					complete: true,
 					cast: mapRawCast(message, vars, userMessages),
+					fidRace: race,
 				};
 			} catch (error) {
 				return { kind: "error", provider: id, message: String(error) };
@@ -415,7 +507,7 @@ export async function raceCast(
 		controllers.set(provider.id, controller);
 		const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 		const providerStartedAt = Date.now();
-		const settled = (kind: ProviderTiming["kind"]): void => {
+		const settled = (kind: ProviderTiming["kind"], fid?: FidRace): void => {
 			timings.push({
 				provider: provider.id,
 				// Aborted losers are race bookkeeping, not provider errors —
@@ -429,6 +521,7 @@ export async function raceCast(
 						? "abort"
 						: kind,
 				ms: Date.now() - providerStartedAt,
+				fid,
 			});
 		};
 		pending.set(
@@ -443,7 +536,8 @@ export async function raceCast(
 						result.kind === "found" &&
 						!resolvesRequested(vars, result.cast)
 					) {
-						settled("error");
+						// The fid race still settled — keep its datapoint.
+						settled("error", result.fidRace);
 						return {
 							provider: provider.id,
 							result: {
@@ -453,7 +547,10 @@ export async function raceCast(
 							},
 						};
 					}
-					settled(result.kind);
+					settled(
+						result.kind,
+						result.kind === "miss" ? undefined : result.fidRace,
+					);
 					return { provider: provider.id, result };
 				})
 				.catch((error): RaceEvent => {
