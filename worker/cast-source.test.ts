@@ -447,7 +447,8 @@ test("resolveFid races shim against the node — first numeric answer wins", asy
 
 test("raceCast carries the fid-race outcome on the leg's timing row (node wins)", async () => {
 	// Shim /f down; the gateway's own proof route names the fid. The leg
-	// reports { winner: "node" } — the datapoint /transparency reports.
+	// reports { winner: "haatz" } — its own id, per-node tracking on
+	// /transparency.
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
 		const url = String(input);
 		if (url === "https://shim.artlu.xyz/f/zoo") {
@@ -483,7 +484,7 @@ test("raceCast carries the fid-race outcome on the leg's timing row (node wins)"
 	);
 	expect(race.kind).toBe("found");
 	const fid = race.timings[0]?.fid;
-	expect(fid?.winner).toBe("node");
+	expect(fid?.winner).toBe("haatz");
 	expect(typeof fid?.ms).toBe("number");
 });
 

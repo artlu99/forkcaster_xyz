@@ -34,10 +34,21 @@ export function validateFidSnapshot(raw: unknown): FidSnapshot | null {
 	if (raw === null || typeof raw !== "object") return null;
 	const candidate = raw as {
 		v?: unknown;
-		sources?: unknown;
+		sources?: Record<string, unknown>;
 		legs?: unknown;
 	};
-	if (candidate.v !== 1 || !candidate.sources || !candidate.legs) return null;
+	if (
+		candidate.v !== 1 ||
+		!candidate.sources ||
+		!candidate.legs ||
+		// All three sources must be present — a pre-per-node snapshot
+		// (shim/node keys only) predates the contract and is ignored.
+		candidate.sources.shim === undefined ||
+		candidate.sources.haatz === undefined ||
+		candidate.sources.snap === undefined
+	) {
+		return null;
+	}
 	return raw as FidSnapshot;
 }
 

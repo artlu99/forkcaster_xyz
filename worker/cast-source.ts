@@ -34,10 +34,11 @@ export type ProviderId = "shim" | "haatz" | "snap" | "farcaster-tv";
 
 /**
  * How resolveFid's two-source identity race settled on a raw-node leg —
- * which source named the fid first and how fast. Public reporting:
- * /transparency's "Author id races" item. No cast identifiers.
+ * which source named the fid first and how fast: shim, or the leg's own
+ * gateway (winner id = the leg id). Public reporting: /transparency's
+ * "Author id races" item. No cast identifiers.
  */
-export type FidRace = { winner: "shim" | "node"; ms: number };
+export type FidRace = { winner: "shim" | "haatz" | "snap"; ms: number };
 
 /** What a request can supply before any cast data exists. */
 export interface CastVars {
@@ -331,6 +332,7 @@ function mapRawCast(
  * rejects any cast that doesn't resolve the requested hash.
  */
 async function resolveFid(
+	id: "haatz" | "snap",
 	base: string,
 	username: string,
 	signal: AbortSignal,
@@ -378,12 +380,14 @@ async function resolveFid(
 			}
 		};
 		// Rejections (shim outage, node 5xx/abort) settle as undefined —
-		// only a numeric fid wins; the last source standing decides.
+		// only a numeric fid wins; the last source standing decides. The
+		// node's win is labeled with its own id (per-node tracking on
+		// /transparency).
 		fromShim.then(onSettle("shim", node), () =>
 			onSettle("shim", node)(undefined),
 		);
-		fromNode.then(onSettle("node", shim), () =>
-			onSettle("node", shim)(undefined),
+		fromNode.then(onSettle(id, shim), () =>
+			onSettle(id, shim)(undefined),
 		);
 	});
 }
@@ -395,7 +399,12 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 		canServe: (vars) => isFullHash(vars.hash),
 		async fetchCast(vars, signal) {
 			try {
-				const { fid, race } = await resolveFid(base, vars.username, signal);
+				const { fid, race } = await resolveFid(
+					id,
+					base,
+					vars.username,
+					signal,
+				);
 				if (fid === undefined) {
 					return {
 						kind: "error",

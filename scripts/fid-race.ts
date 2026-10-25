@@ -14,8 +14,8 @@ import { LmdisClient } from "../worker/vendor/lmdis-sdk.ts";
 import {
 	buildFidLatencyQuery,
 	buildFidTalliesQuery,
+	FID_SOURCES,
 	type FidSnapshot,
-	type FidSource,
 	type FidSourceStats,
 } from "./fid-race-lib.ts";
 
@@ -90,11 +90,9 @@ async function aggregate(hours: number): Promise<FidSnapshot> {
 	const maxSampleInterval = num(tallyRow?.maxSampleInterval);
 
 	const sources = await Promise.all(
-		(["shim", "node"] as FidSource[]).map(async (source) => {
+		FID_SOURCES.map(async (source) => {
 			const [latencyRow] = await sql(buildFidLatencyQuery(source, hours));
-			const wins = num(
-				source === "shim" ? tallyRow?.shim_wins : tallyRow?.node_wins,
-			);
+			const wins = num(tallyRow?.[`${source}_wins`]);
 			const samples = num(latencyRow?.samples);
 			const stats: FidSourceStats = {
 				wins,
@@ -104,6 +102,7 @@ async function aggregate(hours: number): Promise<FidSnapshot> {
 			return [source, stats] as const;
 		}),
 	);
+	const bySource = new Map(sources);
 
 	return {
 		v: 1,
@@ -111,8 +110,9 @@ async function aggregate(hours: number): Promise<FidSnapshot> {
 		window: { hours },
 		sampled: maxSampleInterval > 1,
 		sources: {
-			shim: sources.find(([s]) => s === "shim")?.[1] ?? emptyStats(),
-			node: sources.find(([s]) => s === "node")?.[1] ?? emptyStats(),
+			shim: bySource.get("shim") ?? emptyStats(),
+			haatz: bySource.get("haatz") ?? emptyStats(),
+			snap: bySource.get("snap") ?? emptyStats(),
 		},
 		legs: {
 			haatz: num(tallyRow?.leg_haatz),

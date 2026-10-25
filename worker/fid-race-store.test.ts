@@ -17,7 +17,8 @@ const SNAPSHOT = {
 	sampled: false,
 	sources: {
 		shim: { wins: 12, p50Ms: 8, p95Ms: 30 },
-		node: { wins: 40, p50Ms: 5, p95Ms: 22 },
+		haatz: { wins: 9, p50Ms: 11, p95Ms: 40 },
+		snap: { wins: 31, p50Ms: 5, p95Ms: 22 },
 	},
 	legs: { haatz: 30, snap: 22 },
 };
@@ -30,6 +31,17 @@ describe("validateFidSnapshot", () => {
 		expect(validateFidSnapshot({ v: 2, sources: {}, legs: {} })).toBeNull();
 		// Recognizable v but missing the sources/legs halves → ignored.
 		expect(validateFidSnapshot({ v: 1 })).toBeNull();
+		// The pre-per-node shape (shim/node keys only) predates the
+		// contract — ignored rather than half-parsed.
+		expect(
+			validateFidSnapshot({
+				...SNAPSHOT,
+				sources: {
+					shim: SNAPSHOT.sources.shim,
+					node: { wins: 1, p50Ms: 1, p95Ms: 1 },
+				},
+			}),
+		).toBeNull();
 	});
 });
 

@@ -334,55 +334,59 @@ const FID: import("./fid-race-store.ts").FidSnapshot = {
 	sampled: false,
 	sources: {
 		shim: { wins: 12, p50Ms: 8, p95Ms: 30 },
-		node: { wins: 40, p50Ms: 5, p95Ms: 22 },
+		haatz: { wins: 9, p50Ms: 11, p95Ms: 40 },
+		snap: { wins: 31, p50Ms: 5, p95Ms: 22 },
 	},
-	legs: { haatz: 30, snap: 22 },
+	legs: { haatz: 21, snap: 31 },
 };
 
-test("fid-race table: numbers fill the item, absent snapshot keeps dashes", () => {
+test("fid-race table: per-source rows fill the item, absent snapshot keeps dashes", () => {
 	const filled = renderTransparencyHtml({
 		snapshot: SNAPSHOT,
 		rank: RANK,
 		fid: FID,
 	});
 	expect(filled).toContain("Author id races");
-	expect(filled).toContain("<td>site reader</td><td>12</td><td>8ms</td><td>30ms</td>");
-	expect(filled).toContain("<td>public node</td><td>40</td><td>5ms</td><td>22ms</td>");
+	expect(filled).toContain("<td>shim</td><td>12</td><td>8ms</td><td>30ms</td>");
+	expect(filled).toContain("<td>haatz</td><td>9</td><td>11ms</td><td>40ms</td>");
+	expect(filled).toContain("<td>snap</td><td>31</td><td>5ms</td><td>22ms</td>");
 	expect(filled).toContain("52 lookups raced");
 	expect(filled).toContain("last 168 hours");
 
 	const empty = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
 	expect(empty).toContain("Author id races");
-	expect(empty).toContain(
-		"<td>site reader</td><td>—</td><td>—</td><td>—</td>",
-	);
+	expect(empty).toContain("<td>shim</td><td>—</td><td>—</td><td>—</td>");
+	expect(empty).toContain("<td>haatz</td><td>—</td><td>—</td><td>—</td>");
+	expect(empty).toContain("<td>snap</td><td>—</td><td>—</td><td>—</td>");
 	expect(empty).not.toContain("lookups raced");
 });
 
-test("JSON twin: fidRace live with totals; coming-soon with nulls", () => {
+test("JSON twin: fidRace live with per-node totals; coming-soon with nulls", () => {
 	const live = transparencyJson(SNAPSHOT, RANK, FID) as {
 		fidRace: {
 			status: string;
 			total: number | null;
-			sources: { node: { wins: number | null } };
+			sources: { haatz: { wins: number | null }; snap: { wins: number | null } };
 		};
 	};
 	expect(live.fidRace.status).toBe("live");
 	expect(live.fidRace.total).toBe(52);
-	expect(live.fidRace.sources.node.wins).toBe(40);
+	expect(live.fidRace.sources.haatz.wins).toBe(9);
+	expect(live.fidRace.sources.snap.wins).toBe(31);
 
 	const dry = transparencyJson(SNAPSHOT, RANK) as {
 		fidRace: {
 			status: string;
 			window: null;
 			total: null;
-			sources: { shim: { wins: number | null } };
+			sources: { shim: { wins: number | null }; snap: { wins: number | null } };
 		};
 	};
 	expect(dry.fidRace.status).toBe("coming-soon");
 	expect(dry.fidRace.window).toBeNull();
 	expect(dry.fidRace.total).toBeNull();
 	expect(dry.fidRace.sources.shim.wins).toBeNull();
+	expect(dry.fidRace.sources.snap.wins).toBeNull();
 });
 
 test("JSON twin: the tracking counters declare the fid-race datapoint", () => {

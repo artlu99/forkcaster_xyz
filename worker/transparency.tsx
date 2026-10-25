@@ -80,21 +80,20 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 
 const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
-// The fid-race rows in display order: the source vocabulary mirrors
-// cast-source.ts's FidRace winner ids (typecheck-coupled via FidSource).
-const FID_SOURCES: Array<{ id: FidSource; label: string }> = [
-	{ id: "shim", label: "site reader" },
-	{ id: "node", label: "public node" },
-];
+// The fid-race rows in registry order: the row label IS the source id
+// (shim = this site's reader; haatz/snap = the raw gateways, tracked
+// independently). Typecheck-coupled to cast-source.ts's FidRace ids via
+// FidSource.
+const FID_SOURCES: readonly FidSource[] = ["shim", "haatz", "snap"];
 
 function fidTable(snapshot: FidSnapshot | null | undefined): string {
 	const head = ["source", "wins", "p50", "p95"]
 		.map((h) => `<th>${h}</th>`)
 		.join("");
-	const body = FID_SOURCES.map((s) => {
-		const stats = snapshot?.sources[s.id];
+	const body = FID_SOURCES.map((source) => {
+		const stats = snapshot?.sources[source];
 		const cells = [
-			s.label,
+			source,
 			stats ? String(stats.wins) : "—",
 			stats?.p50Ms != null ? `${stats.p50Ms}ms` : "—",
 			stats?.p95Ms != null ? `${stats.p95Ms}ms` : "—",
@@ -242,10 +241,14 @@ export function transparencyJson(
 					window: fid.window,
 					sampled: fid.sampled,
 					legs: fid.legs,
-					total: fid.sources.shim.wins + fid.sources.node.wins,
+					total:
+						fid.sources.shim.wins +
+						fid.sources.haatz.wins +
+						fid.sources.snap.wins,
 					sources: {
 						shim: fid.sources.shim,
-						node: fid.sources.node,
+						haatz: fid.sources.haatz,
+						snap: fid.sources.snap,
 					},
 				}
 			: {
@@ -255,7 +258,8 @@ export function transparencyJson(
 					total: null,
 					sources: {
 						shim: { wins: null, p50Ms: null, p95Ms: null },
-						node: { wins: null, p50Ms: null, p95Ms: null },
+						haatz: { wins: null, p50Ms: null, p95Ms: null },
+						snap: { wins: null, p50Ms: null, p95Ms: null },
 					},
 				},
 		clientRank: rank
@@ -369,7 +373,7 @@ ${statsTable(options.snapshot)}
 </ul>
 
 <h2>Author id races</h2>
-<p>Some apps need the author's numeric id. Two lookups race for it — this site's own reader and the public node itself — and the fastest answer wins.</p>
+<p>Some apps need the author's numeric id. On each raw-node fetch, shim (this site's reader) races the node's own proof route — the fastest answer wins, and each node is tracked separately.</p>
 ${fidTable(options.fid)}
 
 <h2>Domains</h2>
