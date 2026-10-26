@@ -13,6 +13,9 @@ import { LAST_CLIENT_COOKIE, LAST_CLIENT_MAX_AGE } from "./clients.ts";
 // the static icons use innerHTML; remote values go through textContent.
 // Cast pages ship a single stats slot; the casts skeleton page ships one
 // per embedded cast — every slot fills independently and degrades alone.
+// A slot flagged data-local="1" (a proven-unsigned author — the farcaster.xyz
+// cast URL is dead for them) gets local waypoint links; unflagged slots
+// keep the farcaster.xyz hrefs.
 export const LIVE_STATS_SCRIPT = `<script>
 (function () {
   var slots = document.querySelectorAll(".farcaster-embed-stats[data-username]");
@@ -50,7 +53,9 @@ export const LIVE_STATS_SCRIPT = `<script>
         [[icons.reply, replies], [icons.recast, recasts], [icons.like, likes]].forEach(function (it) {
           var a = document.createElement("a");
           a.className = "farcaster-embed-stats-link";
-          a.href = "https://farcaster.xyz/" + u + "/" + h;
+          a.href = slot.getAttribute("data-local")
+            ? "/" + u + "/" + h
+            : "https://farcaster.xyz/" + u + "/" + h;
           a.target = "_blank";
           a.rel = "noopener";
           var span = document.createElement("span");

@@ -534,6 +534,28 @@ test("first-party links echo the validated input; display keeps the entity handl
 	// The agent twin stays canonical — machines get the entity username.
 	const json = await app.request(`/${ALIAS}?format=json`);
 	expect((await json.json()).username).toBe(ENTITY);
+
+	// The unsigned variant: the dead farcaster.xyz cast anchor retargets to
+	// the local waypoint — a first-party link, so it echoes the input too,
+	// while the stats slot's display name stays the entity handle.
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${ALIAS}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: { ...USER, username: ENTITY },
+		},
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: false,
+		},
+		[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]: CASTS,
+	});
+	const unsigned = await app.request(`/${ALIAS}/casts-and-replies`);
+	const unsignedBody = await unsigned.text();
+	expect(unsignedBody).toContain(
+		`href="/${ALIAS}/${CAST_HASH}" title="Open on forkcaster"`,
+	);
+	expect(unsignedBody).not.toContain(`href="/${ENTITY}/${CAST_HASH}"`);
 });
 
 test("reserved exact routes still win by registration order", async () => {
@@ -623,11 +645,13 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
-	// The feed row: stateful pills — farcaster plus Quorum, the
-	// two verified feed targets (Quorum's coarse-only pill scoped by the
-	// target's pointer class).
+	// The feed row: stateful pills — farcaster, Quorum, Quilcast,
+	// Firefly, the four verified feed targets (pointer-scoped classes:
+	// Quorum coarse-only, Quilcast fine-only).
 	expect(body).toContain('data-client="farcaster" data-kind="feed"');
 	expect(body).toContain('class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="feed"');
+	expect(body).toContain(`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="feed"`);
+	expect(body).toContain(`class="pill client-pill" href="https://firefly.social/profile/farcaster/${USERNAME}" data-client="firefly" data-kind="feed"`);
 	// The OG preview is IDENTICAL to the profile's (entity-backed card);
 	// canonical stays on this page's own URL.
 	expect(body).toContain(
@@ -718,9 +742,12 @@ test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
 
 test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
 	// Signed suppression extends to kind targets (fail-open): unsigned ⇒
-	// the farcaster feed pill is suppressed. No other client has a feed
-	// target yet, so the row is empty — the notice explains. The embed
-	// cards keep their own Show-on-Farcaster links (embed law — unaffected).
+	// the farcaster feed pill is suppressed. The other feed targets
+	// (quorum, quilcast, firefly) carry no signed rule and stay — the notice
+	// explains the farcaster gap. The cards' cast-scoped farcaster.xyz
+	// anchors retarget to the local waypoint (dead links for an unsigned
+	// author — pinned in the dedicated test below); the profile anchor
+	// stays.
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
@@ -742,6 +769,66 @@ test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
 	expect(body).toContain("read-only on farcaster.xyz");
 	// The cards themselves are unaffected.
 	expect(body).toContain("first cast");
+});
+
+test("unsigned casts page: dead farcaster.xyz cast anchors retarget to the forkcaster waypoint", async () => {
+	// signed:false ⇒ farcaster.xyz is read-only for the author, so the
+	// cast URL the embed stamps on every card (Show-on-Farcaster icon)
+	// and the client-built stats links point at a dead page there. The
+	// cards retarget those — and only those — to the local waypoint;
+	// the profile anchor stays (it works unsigned) and author-typed
+	// farcaster.xyz links in cast text are content, untouched.
+	const withFarcasterBodyLink = {
+		success: true,
+		casts: [
+			{
+				fid: FID,
+				hash: CAST_HASH,
+				text: `see https://farcaster.xyz/${USERNAME}/${CAST_HASH} too`,
+				timestamp: CAST_TS,
+				embeds: [],
+			},
+		],
+	};
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: false,
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]:
+			withFarcasterBodyLink,
+	});
+	const res = await app.request(`/${USERNAME}/casts-and-replies`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The icon anchor is retargeted and relabeled (hardenBlankTargets ran
+	// first, hence the rel).
+	expect(body).toContain(
+		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
+	);
+	// The stats slot is flagged; the fill script writes local links there.
+	expect(body).toContain('data-local="1"');
+	// Author content immunity: the typed URL keeps its farcaster.xyz href
+	// (class-scoped rewrite — body links are never touched).
+	expect(body).toContain(
+		`<a href="https://farcaster.xyz/${USERNAME}/${CAST_HASH}" target="_blank" rel="noopener" class="farcaster-embed-body-link">`,
+	);
+
+	// The signed page keeps every original farcaster.xyz anchor (fail
+	// open: only a PROVEN-unsigned author gets the retarget). The bare
+	// "data-local" string ships inside LIVE_STATS_SCRIPT itself, so the
+	// attribute form is the discriminator.
+	globalThis.fetch = repliesMock();
+	const signedBody = await (
+		await app.request(`/${USERNAME}/casts-and-replies`)
+	).text();
+	expect(signedBody).toContain(
+		`<a href="https://farcaster.xyz/${USERNAME}/${CAST_HASH}" title="Show on Farcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
+	);
+	expect(signedBody).not.toContain('data-local="1"');
 });
 
 test("profile card escapes hostile upstream text (XSS regression)", async () => {
@@ -800,6 +887,7 @@ test("signed-check unavailable fails open: Farcaster stays offered", async () =>
 	expect(body).toContain('data-client="farcaster" data-kind="profile"');
 	expect(body).toContain('data-client="quilcast" data-kind="profile"');
 	expect(body).toContain('data-client="quorum" data-kind="profile"');
+	expect(body).toContain('data-client="firefly" data-kind="profile"');
 	expect(body).not.toContain("read-only on farcaster.xyz");
 });
 
@@ -826,12 +914,16 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	// The menu IS the way out now: stateful pills, registry-ordered (no
 	// rank snapshot reaches the test env), logos and pointer scopes from
 	// the targets, native attempts through the row's DEEPLINK_SCRIPT.
-	// Registry order: quorum first, quilcast second.
+	// Registry order: quorum first, firefly second, quilcast third.
 	expect(body).toContain(
 		'class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
 	);
 	expect(body).toContain("/logos/quorum.png");
 	expect(body).toContain(">Quorum</a>");
+	expect(body).toContain(
+		`class="pill client-pill" href="https://firefly.social/profile/farcaster/${USERNAME}" data-client="firefly" data-kind="profile"`,
+	);
+	expect(body).toContain(">Firefly</a>");
 	expect(body).toContain(
 		`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
 	);

@@ -27,7 +27,7 @@ import {
 	urlEmbedsOf,
 	type UnfurlResult,
 } from "./cast-data.ts";
-import { hardenBlankTargets, unfurl } from "./cast-page.tsx";
+import { hardenBlankTargets, relinkFarcasterAnchor, unfurl } from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
 	TRACK_SCRIPT,
@@ -549,6 +549,14 @@ export async function renderCastsHtml(
 			return r?.status === "fulfilled" ? r.value : undefined;
 		});
 		try {
+			// Same stats slot the individual cast page ships — the
+			// live-stats script fills every slot on the page. For a proven
+			// unsigned author the slot is flagged (data-local): the
+			// farcaster.xyz cast URL is dead for them, so the script writes
+			// local waypoints; unknown signedness fails open and the flag
+			// never ships.
+			const local = signed === false;
+			const statsSlot = `<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(handle)}" data-hash="${escapeHtml(cast.hash as string)}">`;
 			const card = hardenBlankTargets(
 				renderToString(
 					(await FarcasterEmbed({
@@ -561,14 +569,19 @@ export async function renderCastsHtml(
 						),
 					})) as never,
 				),
-				// Same stats slot the individual cast page ships — the
-				// live-stats script fills every slot on the page.
-			).replace(
-				STATS_ROW,
-				() =>
-					`<div class="farcaster-embed-stats" data-username="${escapeHtml(handle)}" data-hash="${escapeHtml(cast.hash as string)}">`,
+			).replace(STATS_ROW, () => statsSlot);
+			cards.push(
+				local
+					? relinkFarcasterAnchor(
+							card,
+							// Echo-the-valid-input: this becomes a first-party
+							// link on the casts page, so it carries the
+							// validated route input like the head's Profile
+							// link (the cast route resolves any alias).
+							`/${encodeURIComponent(username)}/${cast.hash}`,
+						)
+					: card,
 			);
-			cards.push(card);
 		} catch {
 			// A broken card must never take the list down.
 		}
