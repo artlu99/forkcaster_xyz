@@ -16,6 +16,13 @@
 // not 404 a proven identity. Strict statuses (404 / 503 + Retry-After)
 // apply to both variants — unlike casts, a profile has no fail-open
 // content source when shim is unreachable.
+//
+// Echo-the-valid-input: first-party links across the family carry the
+// gate-validated route input, not the entity handle — shim resolves any
+// resolvable alias (fname, ENS, basename) to the same fid, while
+// /user/{fid} answers the NEWEST username proof, which can differ from
+// what was typed. Display, OG/canonical, external client targets, and
+// the JSON twin stay canonical.
 
 import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
@@ -373,13 +380,8 @@ export function renderProfileHtml(
 			: "";
 
 	// Waypoint law, strict dial: the identity card IS the page — no cast
-	// list here. The list lives on /{username}/casts-and-replies. The pill
-	// echoes the validated route input (echo-the-valid-input): shim resolves
-	// any resolvable alias — fname, ENS, basename — to the same fid, so
-	// first-party navigation keeps the visitor's own words instead of
-	// rewriting to the entity's canonical handle (what /user/{fid} answers
-	// is the NEWEST username proof, not necessarily what was asked for).
-	// Display, OG/canonical, and external client targets stay canonical.
+	// list here. The list lives on /{username}/casts-and-replies, and the
+	// pill echoes the validated input (echo-the-valid-input, see header).
 	const body = `
 ${PROFILE_STYLE}
 ${auto.html}
@@ -574,10 +576,7 @@ export async function renderCastsHtml(
 				local
 					? relinkFarcasterAnchor(
 							card,
-							// Echo-the-valid-input: this becomes a first-party
-							// link on the casts page, so it carries the
-							// validated route input like the head's Profile
-							// link (the cast route resolves any alias).
+							// First-party link ⇒ echoes the validated input.
 							`/${encodeURIComponent(username)}/${cast.hash}`,
 						)
 					: card,
@@ -619,9 +618,8 @@ export async function renderCastsHtml(
 			? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
 			: "";
 
-	// Echo-the-valid-input on the back-link too: /{input} round-trips the
-	// visitor's own words, while the visible @handle below stays the
-	// canonical entity username.
+	// Echo-the-valid-input (see header): the back-link echoes the input,
+	// the visible @handle below stays the canonical entity username.
 	const body = `
 ${PROFILE_STYLE}
 ${auto.html}

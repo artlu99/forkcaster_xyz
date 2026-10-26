@@ -491,18 +491,20 @@ test("first-party links echo the validated input; display keeps the entity handl
 	// canonical entity handle.
 	const ALIAS = "arfonzo";
 	const ENTITY = "arfonzo.eth";
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${ALIAS}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: {
-			success: true,
-			user: { ...USER, username: ENTITY },
-		},
-		[`https://shim.artlu.xyz/signed/${FID}`]: {
-			success: true,
-			signed: true,
-		},
-		[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]: CASTS,
-	});
+	// The alias resolves to the fid; the entity answers the canonical
+	// handle. `signed` is the knob — both variants are pinned below.
+	const aliasMock = (signed: boolean): typeof fetch =>
+		shimMock({
+			[`https://shim.artlu.xyz/f/${ALIAS}`]: { success: true, fid: FID },
+			[`https://shim.artlu.xyz/user/${FID}`]: {
+				success: true,
+				user: { ...USER, username: ENTITY },
+			},
+			[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed },
+			[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]:
+				CASTS,
+		});
+	globalThis.fetch = aliasMock(true);
 
 	const profile = await app.request(`/${ALIAS}`);
 	const profileBody = await profile.text();
@@ -538,18 +540,7 @@ test("first-party links echo the validated input; display keeps the entity handl
 	// The unsigned variant: the dead farcaster.xyz cast anchor retargets to
 	// the local waypoint — a first-party link, so it echoes the input too,
 	// while the stats slot's display name stays the entity handle.
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${ALIAS}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: {
-			success: true,
-			user: { ...USER, username: ENTITY },
-		},
-		[`https://shim.artlu.xyz/signed/${FID}`]: {
-			success: true,
-			signed: false,
-		},
-		[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]: CASTS,
-	});
+	globalThis.fetch = aliasMock(false);
 	const unsigned = await app.request(`/${ALIAS}/casts-and-replies`);
 	const unsignedBody = await unsigned.text();
 	expect(unsignedBody).toContain(
