@@ -362,14 +362,34 @@ export const CLIENTS: ClientDefinition[] = [
 	// cast originator's fid (castFid) alongside the hash, so the entry is
 	// {fid}-gated — skipped on fid-less surfaces (e.g. the link-only
 	// fallback page). castHash wants the full 40 hex, hence {fullHash}.
-	// Profile/feed (checked Oct 2026): no surface found — the
-	// served bundle carries no profile/user route vocabulary beyond the
-	// ?view=cast shape, so there is nothing to verify into an entry.
+	// Profile + feed — VERIFIED (Oct 2026, owner): the owner surfaced
+	// ?view=profile&profileFid={fid}&profileTab=casts by clicking the
+	// signed-in app; live-checked logged-out through a JS-rendering
+	// reader — TWO fids render the full surface for signed-out visitors:
+	// 10215/zoo (banner, activity header, 7-day histogram, cast list with
+	// text and per-cast signer-app rows) and 3319217/decent-artlu
+	// (signed:false — renders fully, so Vibeshift applies NO signed
+	// rule). Server-side corroboration: /share-image with the same
+	// params renders a distinct PNG (50,914 B vs the 42,915-B default
+	// card unknown params get), and the SSR payload carries a fc:miniapp
+	// launch_frame button pointing at this exact URL — first-class in
+	// their code. Merged surface per owner direction (the Firefly
+	// pattern): profile and feed are the SAME URL; profileTab=casts is
+	// pinned because the bare form's default tab is unverified. The app
+	// is fid-keyed like its cast view ⇒ {fid}-gated. Other profileTab
+	// values: unverified (no SSR vocabulary) — only the casts tab is
+	// seeded. Web-only (no scheme evidence).
 	{
 		id: "vibeshift",
 		title: "Vibeshift",
 		logoUrl: "/logos/vibeshift.png",
 		web: "https://vibeshift.onchain.cooking/?view=cast&castHash={fullHash}&castFid={fid}",
+		profile: {
+			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
+		},
+		feed: {
+			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
+		},
 	},
 	// Linkcast is a links-only view of Farcaster: "Farcaster, but only the
 	// links… a live feed of every cast that shares a link" (ghostlinkz.eth's

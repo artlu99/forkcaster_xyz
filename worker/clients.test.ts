@@ -628,6 +628,18 @@ describe("kind targets", () => {
 			pointer: "fine",
 		});
 		expect(targetFor(quilcast, "channel")).toBeUndefined();
+
+		const vibeshift = findClient("vibeshift") as ClientDefinition;
+		// Owner-provided profile view (the Firefly merged-surface pattern:
+		// one URL, both kinds); profileTab=casts pins the cast list and
+		// {fid} gates it fid-less surfaces skip it, like the cast target.
+		expect(targetFor(vibeshift, "profile")).toEqual({
+			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
+		});
+		expect(targetFor(vibeshift, "feed")).toEqual({
+			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
+		});
+		expect(targetFor(vibeshift, "channel")).toBeUndefined();
 	});
 
 	test("targetDeeplinkTargets: the shared composer reproduces the fork's intent exactly", () => {
@@ -725,12 +737,19 @@ describe("kind targets", () => {
 			"quorum",
 			"firefly",
 			"quilcast",
+			"vibeshift",
 		]);
 	});
 
 	test("clientsForRoute: signed true/null/undefined fail open — farcaster offered", () => {
 		const vars: TemplateVars = { username: "zoo", fid: 10215 };
-		const expected = ["farcaster", "quorum", "firefly", "quilcast"];
+		const expected = [
+			"farcaster",
+			"quorum",
+			"firefly",
+			"quilcast",
+			"vibeshift",
+		];
 		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
 			expected,
 		);
@@ -742,8 +761,8 @@ describe("kind targets", () => {
 
 	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
 		const vars: TemplateVars = { username: "decent-artlu" };
-		// quorum's profile target needs {fid}; firefly's and quilcast's
-		// need only {username}.
+		// quorum's and vibeshift's profile targets need {fid}; firefly's
+		// and quilcast's need only {username}.
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
 			"firefly",
 			"quilcast",
@@ -847,10 +866,10 @@ describe("resolveLastUsed — flat inheritance", () => {
 				?.id,
 		).toBe("quorum");
 		// Neither resolves → undefined (no banner, badgeless menu):
-		// vibeshift has no profile target either, and the cast slug
-		// linkcast is incapable for the profile kind.
+		// neynar has no profile target (search-page only), and the cast
+		// slug linkcast is incapable for the profile kind.
 		expect(
-			resolveLastUsed({ slug: "linkcast", kinds: { profile: "vibeshift" } }, "profile", offered),
+			resolveLastUsed({ slug: "linkcast", kinds: { profile: "neynar" } }, "profile", offered),
 		).toBeUndefined();
 		expect(resolveLastUsed({}, "profile", offered)).toBeUndefined();
 	});

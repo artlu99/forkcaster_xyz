@@ -296,6 +296,11 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>firefly</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
+	// vibeshift: cast + profile + feed (the merged profile surface,
+	// profileTab=casts pinned); channel unverified.
+	expect(html).toContain(
+		"<td>vibeshift</td><td>✓</td><td>✓</td><td>✓</td><td>—</td>",
+	);
 	// linkcast: cast only.
 	expect(html).toContain(
 		"<td>linkcast</td><td>✓</td><td>—</td><td>—</td><td>—</td>",
@@ -332,6 +337,11 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 		"profile",
 		"feed",
 		"channel",
+	]);
+	expect(json.clients.find((c) => c.id === "vibeshift")?.kinds).toEqual([
+		"cast",
+		"profile",
+		"feed",
 	]);
 });
 
