@@ -209,6 +209,9 @@ test("GET /:username/:hash SSR-renders the cast card from Shim data", async () =
 	expect(card).not.toContain("farcaster-embed-stats-link");
 	expect(card).not.toContain("<ul>");
 	expect(body).toContain("farcaster-embed-farcaster-link");
+	// Signed (or unknown — fail open): the stats slot is unflagged, the
+	// client-built links keep their farcaster.xyz hrefs.
+	expect(body).not.toContain('data-local="1"');
 	expect(body).toContain('data-username="zoo"');
 	expect(body).toContain(`data-hash="${SHORT_HASH}"`);
 	expect(body).toContain("https://farcaster.tv/");
@@ -229,9 +232,18 @@ test("GET /:username/:hash hides the farcaster link when the author has not sign
 	expect(body).toContain(`https://firefly.social/post/farcaster/${ARTLU_HASH}`);
 	// URL embed unfurl failed (no mock) — hostname fallback still renders.
 	expect(body).toContain("example.com");
-	// ...but the registry's requiresSigned clients (farcaster) are suppressed.
+	// ...but the registry's requiresSigned clients (farcaster) are suppressed,
+	// and no farcaster.xyz cast URL survives anywhere on the page — the
+	// Show-on-Farcaster icon is hidden outright (the library's own
+	// hideFarcasterLogo: the farcaster.xyz page is dead for this author, and
+	// a local twin would self-link this very waypoint).
 	expect(body).not.toContain('data-client="farcaster"');
+	expect(body).not.toContain("farcaster-embed-farcaster-link");
 	expect(body).not.toContain("https://farcaster.xyz/decent-artlu/0xbb54368f");
+	expect(body).not.toContain(`https://farcaster.xyz/decent-artlu/${ARTLU_HASH}`);
+	// The stats slot is flagged: client-built links become no-op local
+	// waypoints instead of dead farcaster.xyz ones.
+	expect(body).toContain('data-local="1"');
 	// Quorum (native scheme, no requiresSigned) still renders — its
 	// quorummobile:// pill ships data-scheme and the deeplink script.
 	expect(body).toContain("quorummobile://");

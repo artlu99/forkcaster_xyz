@@ -288,9 +288,13 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>quorum</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
-	// quilcast: cast + profile.
+	// quilcast: cast + profile + feed (the merged /u/ surface).
 	expect(html).toContain(
-		"<td>quilcast</td><td>✓</td><td>✓</td><td>—</td><td>—</td>",
+		"<td>quilcast</td><td>✓</td><td>✓</td><td>✓</td><td>—</td>",
+	);
+	// firefly: every kind — feed = the merged profile surface (Oct 2026).
+	expect(html).toContain(
+		"<td>firefly</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
 	// linkcast: cast only.
 	expect(html).toContain(
@@ -318,6 +322,12 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 		"cast",
 	]);
 	expect(json.clients.find((c) => c.id === "quorum")?.kinds).toEqual([
+		"cast",
+		"profile",
+		"feed",
+		"channel",
+	]);
+	expect(json.clients.find((c) => c.id === "firefly")?.kinds).toEqual([
 		"cast",
 		"profile",
 		"feed",

@@ -565,7 +565,17 @@ describe("kind targets", () => {
 				androidPackage: "io.dimension.firefly",
 			},
 		});
-		expect(targetFor(firefly, "profile")).toBeUndefined();
+		// Profile — VERIFIED (Oct 2026): the network-infixed form, same
+		// vocabulary as the cast/channel routes (registry comment has the
+		// trail). No signed rule — the unsigned author renders.
+		expect(targetFor(firefly, "profile")).toEqual({
+			web: "https://firefly.social/profile/farcaster/{username}",
+		});
+		// Feed — VERIFIED (Oct 2026, owner): merged surface, the same URL
+		// as the profile (registry comment has the trail).
+		expect(targetFor(firefly, "feed")).toEqual({
+			web: "https://firefly.social/profile/farcaster/{username}",
+		});
 
 		const quorum = findClient("quorum") as ClientDefinition;
 		// Source-verified profile deep link (initialProfile →
@@ -611,7 +621,12 @@ describe("kind targets", () => {
 			web: "https://quilcast.com/u/{username}",
 			pointer: "fine",
 		});
-		expect(targetFor(quilcast, "feed")).toBeUndefined();
+		// Feed — VERIFIED (Oct 2026): the SAME /u/ route — one merged
+		// surface (src/app.tsx Profile: Casts/Replies tabs).
+		expect(targetFor(quilcast, "feed")).toEqual({
+			web: "https://quilcast.com/u/{username}",
+			pointer: "fine",
+		});
 		expect(targetFor(quilcast, "channel")).toBeUndefined();
 	});
 
@@ -708,13 +723,14 @@ describe("kind targets", () => {
 		const vars: TemplateVars = { username: "decent-artlu", fid: 3319217 };
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
 			"quorum",
+			"firefly",
 			"quilcast",
 		]);
 	});
 
 	test("clientsForRoute: signed true/null/undefined fail open — farcaster offered", () => {
 		const vars: TemplateVars = { username: "zoo", fid: 10215 };
-		const expected = ["farcaster", "quorum", "quilcast"];
+		const expected = ["farcaster", "quorum", "firefly", "quilcast"];
 		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
 			expected,
 		);
@@ -726,7 +742,10 @@ describe("kind targets", () => {
 
 	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
 		const vars: TemplateVars = { username: "decent-artlu" };
+		// quorum's profile target needs {fid}; firefly's and quilcast's
+		// need only {username}.
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
+			"firefly",
 			"quilcast",
 		]);
 	});
@@ -812,7 +831,8 @@ describe("resolveLastUsed — flat inheritance", () => {
 		expect(resolveLastUsed({ slug: "quorum" }, "profile", offered)?.id).toBe(
 			"quorum",
 		);
-		// Firefly has no profile target: a feed-only choice never carries.
+		// A feed-only choice never carries (kinds are isolated): firefly
+		// HAS a profile target now, but kinds.feed is not kinds.profile.
 		expect(
 			resolveLastUsed({ slug: "quorum", kinds: { feed: "firefly" } }, "profile", offered)
 				?.id,
@@ -820,14 +840,17 @@ describe("resolveLastUsed — flat inheritance", () => {
 	});
 
 	test("stale/ incapable slugs fall through, then to none", () => {
-		// Own slug firefly lost its target → cast slug quorum still capable.
+		// Own slug linkcast has no profile target (cast-kind only) →
+		// cast slug quorum still capable.
 		expect(
-			resolveLastUsed({ slug: "quorum", kinds: { profile: "firefly" } }, "profile", offered)
+			resolveLastUsed({ slug: "quorum", kinds: { profile: "linkcast" } }, "profile", offered)
 				?.id,
 		).toBe("quorum");
-		// Neither resolves → undefined (no banner, badgeless menu).
+		// Neither resolves → undefined (no banner, badgeless menu):
+		// vibeshift has no profile target either, and the cast slug
+		// linkcast is incapable for the profile kind.
 		expect(
-			resolveLastUsed({ slug: "linkcast", kinds: { profile: "firefly" } }, "profile", offered),
+			resolveLastUsed({ slug: "linkcast", kinds: { profile: "vibeshift" } }, "profile", offered),
 		).toBeUndefined();
 		expect(resolveLastUsed({}, "profile", offered)).toBeUndefined();
 	});

@@ -49,6 +49,29 @@ export function hardenBlankTargets(html: string): string {
 	return html.replaceAll('target="_blank"', 'target="_blank" rel="noopener"');
 }
 
+// For a signed:false author the cast URL the embed stamps on every card
+// (the Show-on-Farcaster icon → farcaster.xyz/{username}/{hash}) is a dead
+// link — farcaster.xyz is read-only for them — while the forkcaster waypoint
+// always resolves. This retargets that one anchor to the local waypoint and
+// relabels it. Class-scoped on purpose: the avatar/profile anchor stays
+// (farcaster.xyz/~/profiles/{fid} works for unsigned accounts), and
+// author-typed farcaster.xyz links in cast text are content — they keep
+// their farcaster-embed-body-link class and are never touched. Applied only
+// when signedness PROVES the link dead (=== false); unknown fails open.
+// Shared with the casts skeleton page, which renders the same cards.
+export function relinkFarcasterAnchor(html: string, castPath: string): string {
+	return html.replace(
+		/<a\b[^>]*\bclass="farcaster-embed-farcaster-link"[^>]*>/g,
+		(tag) =>
+			tag
+				.replace(/href="[^"]*"/, () => `href="${castPath}"`)
+				.replace(
+					/title="Show on Farcaster"/,
+					() => 'title="Open on forkcaster"',
+				),
+	);
+}
+
 // Exported for the casts skeleton page (same enrichment pipeline, same
 // binding + plain-fetch fallback semantics).
 export async function unfurl(
@@ -314,17 +337,26 @@ export async function renderCastHtml(
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
 	try {
+		// signed === false ⇒ the farcaster.xyz cast page is dead for this
+		// author, and the icon's only honest local twin would self-link this
+		// very waypoint — so the Show-on-Farcaster icon is hidden outright
+		// (the library's own option). Unknown signedness fails open: the
+		// icon stays. The stats slot rides the same data-local flag the
+		// casts skeleton page uses — client-built links become (no-op)
+		// local waypoints instead of dead farcaster.xyz ones.
+		const local = signed === false;
 		const cardHtml = hardenBlankTargets(
 			renderToString(
 				(await FarcasterEmbed({
 					username,
 					hash,
 					castData: toCastData(cast, unfurlMap, quotes),
+					...(local ? { options: { hideFarcasterLogo: true } } : {}),
 				})) as never,
 			).replace(
 				STATS_ROW,
 				() =>
-					`<div class="farcaster-embed-stats" data-username="${escapeHtml(username)}" data-hash="${escapeHtml(hash)}">`,
+					`<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(username)}" data-hash="${escapeHtml(hash)}">`,
 			),
 		);
 		// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the

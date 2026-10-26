@@ -259,20 +259,45 @@ export const CLIENTS: ClientDefinition[] = [
 		// pins the charset), rendering the native ChannelDetail
 		// (farcasterChannelId=…) screen. The web href is the owner-confirmed
 		// channel/farcaster/{id} route (network infix is part of their path;
-		// Vercel's bot checkpoint blocks curl verification). Profile/feed
-		// targets: STILL UNKNOWN (re-checked Oct 2026) — the iOS
-		// AASA (firefly.social/.well-known/apple-app-site-association,
-		// appID 7LFDZ96332.io.mask.Mask) claims /profile/*, but a path claim
-		// is not a route format (username? fid? network-infixed?); the web
-		// app's bot checkpoint 403s live checks and the APK navigator
-		// evidence (the channel route's source) hasn't been produced for
-		// profiles. Unseeded until the APK check names the token.
+		// Vercel's bot checkpoint blocks curl verification).
 		channel: {
 			web: "https://firefly.social/channel/farcaster/{channelId}",
 			deeplink: {
 				scheme: "firefly://FarcasterChannel/{channelId}",
 				androidPackage: "io.dimension.firefly",
 			},
+		},
+		// Profile — VERIFIED (Oct 2026):
+		// https://firefly.social/profile/farcaster/{username} — the same
+		// network-infixed vocabulary as the cast and channel routes; the
+		// iOS AASA (appID 7LFDZ96332.io.mask.Mask) claims /profile/*
+		// explicitly. Live-checked through a JS-rendering reader (the
+		// Vercel security checkpoint 403s/429s plain curl): TWO authors
+		// resolve logged-out with full identity cards — zoo ("zoo (@zoo)
+		// on Firefly") and decent-artlu ("Ultra (@decent-artlu) on
+		// Firefly": avatar, handle, wallet, bio, follow counts) — the
+		// latter despite signed:false, so Firefly applies NO signed rule
+		// (unlike farcaster.xyz). The rendered card links its own handle
+		// at the infix form — self-canonical, first-class in their code.
+		// The crawl archive's numeric /profile/{internalId} form is a
+		// separate surface: fids and usernames do NOT resolve there
+		// (verified live). Every other candidate format verified empty:
+		// /profile/{username}, /profile/{fid}, /u/, /user/, bare
+		// /{username} all render generic shells. No verified profile
+		// scheme — web-only (deeplink evidence, if any, waits for the
+		// APK navigator).
+		profile: {
+			web: "https://firefly.social/profile/farcaster/{username}",
+		},
+		// Feed — VERIFIED (Oct 2026, owner): the /feed tab the profile
+		// self-links is their cast-list surface; a logged-out crawler
+		// sees only chrome (the web app's lists are client-side — the
+		// cast route shows the same wall), which is why capture attempts
+		// alone couldn't seed this. Owner device-checked the surface
+		// signed-in and directed the merged-surface assignment: feed
+		// rides the SAME profile URL, like farcaster.xyz.
+		feed: {
+			web: "https://firefly.social/profile/farcaster/{username}",
 		},
 	},
 	// Per-cast format verified against the open-source client
@@ -292,8 +317,24 @@ export const CLIENTS: ClientDefinition[] = [
 		// Quilcast" with the bio as description) and live-checked
 		// (quilcast.com/u/decent-artlu serves exactly that SSR meta for the
 		// right profile). fine-only: the fork's assignment is Quilcast
-		// DESKTOP / Quorum MOBILE. Feed/channel: unknown.
+		// DESKTOP / Quorum MOBILE. Channel: unknown.
 		profile: {
+			web: "https://quilcast.com/u/{username}",
+			pointer: "fine",
+		},
+		// Feed — VERIFIED (Oct 2026): the SAME /u/ route — profile and feed
+		// are one merged surface in Quilcast, like farcaster.xyz. Source:
+		// backmeupplz/quilcast src/app.tsx — the Profile component
+		// (useRoute: r0 === 'u') renders a Feed box with Casts/Replies
+		// tabs: casts = /v2/farcaster/feed/user/casts kept to top-level
+		// casts (keep={c => !c.parent_hash}), replies =
+		// /v2/farcaster/feed/user/replies_and_recasts kept to replies
+		// (keep={c => !!c.parent_hash}). Default tab is casts, so the
+		// landing list shows top-level casts only — replies one tab away
+		// (same shape as the Quorum caveat). Re-live-checked the same day:
+		// quilcast.com/u/zoo SSRs "zoo (@zoo) on Quilcast" + the right
+		// bio. Same template as the profile target, fine-only.
+		feed: {
 			web: "https://quilcast.com/u/{username}",
 			pointer: "fine",
 		},
