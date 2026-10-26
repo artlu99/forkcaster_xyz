@@ -1141,6 +1141,8 @@ test("rank snapshot reorders pills (never hides); null keeps registry order", as
 			"neynar",
 			"quilcast",
 			"vibeshift",
+			"opencaster",
+			"homiehouse",
 		]) {
 			expect(rankedBody).toContain(`data-client="${id}"`);
 		}

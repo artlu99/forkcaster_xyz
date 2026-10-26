@@ -881,6 +881,8 @@ test("signed-check unavailable fails open: Farcaster stays offered", async () =>
 	expect(body).toContain('data-client="quorum" data-kind="profile"');
 	expect(body).toContain('data-client="firefly" data-kind="profile"');
 	expect(body).toContain('data-client="vibeshift" data-kind="profile"');
+	expect(body).toContain('data-client="opencaster" data-kind="profile"');
+	expect(body).toContain('data-client="homiehouse" data-kind="profile"');
 	expect(body).not.toContain("read-only on farcaster.xyz");
 });
 
@@ -908,7 +910,7 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	// rank snapshot reaches the test env), logos and pointer scopes from
 	// the targets, native attempts through the row's DEEPLINK_SCRIPT.
 	// Registry order: quorum first, firefly second, quilcast third,
-	// vibeshift fourth.
+	// vibeshift fourth, opencaster fifth, homiehouse sixth.
 	expect(body).toContain(
 		'class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
 	);
@@ -925,6 +927,12 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 		`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
 	);
 	expect(body).toContain(">Quilcast</a>");
+	expect(body).toContain(
+		`class="pill client-pill" href="https://opencaster.org/profile/${USERNAME}" data-client="opencaster" data-kind="profile"`,
+	);
+	expect(body).toContain(
+		`class="pill client-pill" href="https://homiehouse.app/profile?user=${USERNAME}" data-client="homiehouse" data-kind="profile"`,
+	);
 	// DEEPLINK_SCRIPT ships with the row; telemetry scripts too.
 	expect(body).toContain("(pointer: coarse)");
 	expect(body).toContain("window.__fk");

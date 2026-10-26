@@ -190,6 +190,8 @@ describe("clientsForPage", () => {
 			"firefly",
 			"quilcast",
 			"neynar",
+			"opencaster",
+			"homiehouse",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -200,6 +202,8 @@ describe("clientsForPage", () => {
 			"quilcast",
 			"neynar",
 			"vibeshift",
+			"opencaster",
+			"homiehouse",
 		]);
 	});
 
@@ -221,6 +225,8 @@ describe("clientsForPage", () => {
 			"neynar",
 			"vibeshift",
 			"linkcast",
+			"opencaster",
+			"homiehouse",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -371,6 +377,43 @@ test("linkcast's web route emits the site-canonical bare hex", () => {
 	expect(html).not.toContain("data-intent");
 });
 
+test("opencaster's cast route is the canonical /cast/{fullHash} share link", () => {
+	const opencaster = findClient("opencaster");
+	expect(opencaster).toBeDefined();
+	// Verified against the open-source client (hypersnap/src/lib/
+	// navigation.ts castPath) and live (Oct 2026): /cast/0x{40 hex} is
+	// the site's canonical share link — an exact lookup, not the
+	// bounded-search alias form. Web-only (no assetlinks.json/AASA, no
+	// scheme), so no native data attributes ship.
+	const html = clientPill(opencaster as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://opencaster.org/cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="opencaster"');
+	expect(html).toContain('src="/logos/opencaster.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+});
+
+test("homiehouse's cast route is the full-hash /cast/ URL the server resolves", () => {
+	const homiehouse = findClient("homiehouse");
+	expect(homiehouse).toBeDefined();
+	// Verified in the app bundle (feed rows link `/cast/${e.hash}`) and
+	// live (Oct 2026): the full-hash URL SSRs per-cast metadata (title
+	// "zoo on HomieHouse", canonical + per-cast OG generator); the SHORT
+	// form answers 200 with generic metadata, hence {fullHash}. Web-only
+	// (PWA client — no assetlinks.json, no scheme), so no native data
+	// attributes ship.
+	const html = clientPill(homiehouse as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://homiehouse.app/cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="homiehouse"');
+	expect(html).toContain('src="/logos/homiehouse.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -508,6 +551,8 @@ describe("external-link gate", () => {
 			"explorer.neynar.com",
 			"vibeshift.onchain.cooking",
 			"linkcast.xyz",
+			"opencaster.org",
+			"homiehouse.app",
 		]);
 	});
 });
@@ -640,6 +685,32 @@ describe("kind targets", () => {
 			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
 		});
 		expect(targetFor(vibeshift, "channel")).toBeUndefined();
+
+		const opencaster = findClient("opencaster") as ClientDefinition;
+		// Source + live verified (Oct 2026, registry comment has the
+		// trail): /profile/{username} with the casts tab as the merged
+		// feed surface; /channel/{id} with the router/worker charset.
+		expect(targetFor(opencaster, "profile")).toEqual({
+			web: "https://opencaster.org/profile/{username}",
+		});
+		expect(targetFor(opencaster, "feed")).toEqual({
+			web: "https://opencaster.org/profile/{username}",
+		});
+		expect(targetFor(opencaster, "channel")).toEqual({
+			web: "https://opencaster.org/channel/{channelId}",
+		});
+
+		const homiehouse = findClient("homiehouse") as ClientDefinition;
+		// Live verified (Oct 2026, registry comment has the trail):
+		// /profile?user={username} SSRs per-user identity and is where
+		// cast pages' own ld+json author URLs point. No feed target (the
+		// cast list is not verifiable logged-out) and no channel target
+		// (no channel vocabulary in the bundle).
+		expect(targetFor(homiehouse, "profile")).toEqual({
+			web: "https://homiehouse.app/profile?user={username}",
+		});
+		expect(targetFor(homiehouse, "feed")).toBeUndefined();
+		expect(targetFor(homiehouse, "channel")).toBeUndefined();
 	});
 
 	test("targetDeeplinkTargets: the shared composer reproduces the fork's intent exactly", () => {
@@ -722,12 +793,14 @@ describe("kind targets", () => {
 			"farcaster",
 			"quorum",
 			"firefly",
+			"opencaster",
 		]);
 		// Channels run no /signed check — every state must fail open.
 		expect(clientsForRoute("channel", vars, null).map((c) => c.id)).toEqual([
 			"farcaster",
 			"quorum",
 			"firefly",
+			"opencaster",
 		]);
 	});
 
@@ -738,6 +811,8 @@ describe("kind targets", () => {
 			"firefly",
 			"quilcast",
 			"vibeshift",
+			"opencaster",
+			"homiehouse",
 		]);
 	});
 
@@ -749,6 +824,8 @@ describe("kind targets", () => {
 			"firefly",
 			"quilcast",
 			"vibeshift",
+			"opencaster",
+			"homiehouse",
 		];
 		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
 			expected,
@@ -761,11 +838,13 @@ describe("kind targets", () => {
 
 	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
 		const vars: TemplateVars = { username: "decent-artlu" };
-		// quorum's and vibeshift's profile targets need {fid}; firefly's
-		// and quilcast's need only {username}.
+		// quorum's and vibeshift's profile targets need {fid}; firefly's,
+		// quilcast's, opencaster's, and homiehouse's need only {username}.
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
 			"firefly",
 			"quilcast",
+			"opencaster",
+			"homiehouse",
 		]);
 	});
 

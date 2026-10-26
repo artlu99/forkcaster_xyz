@@ -305,6 +305,16 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>linkcast</td><td>✓</td><td>—</td><td>—</td><td>—</td>",
 	);
+	// opencaster: every kind — profile/feed the merged /profile surface,
+	// channel /channel/{id} (Oct 2026).
+	expect(html).toContain(
+		"<td>opencaster</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
+	);
+	// homiehouse: cast + profile only — /profile?user={username} verified,
+	// feed not verifiable logged-out, no channel vocabulary (Oct 2026).
+	expect(html).toContain(
+		"<td>homiehouse</td><td>✓</td><td>✓</td><td>—</td><td>—</td>",
+	);
 	// Registry-driven: every ACTIVE client renders a row, whatever the roster.
 	for (const client of CLIENTS.filter(
 		(c) => c.status === undefined || c.status === "active",
@@ -342,6 +352,16 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 		"cast",
 		"profile",
 		"feed",
+	]);
+	expect(json.clients.find((c) => c.id === "opencaster")?.kinds).toEqual([
+		"cast",
+		"profile",
+		"feed",
+		"channel",
+	]);
+	expect(json.clients.find((c) => c.id === "homiehouse")?.kinds).toEqual([
+		"cast",
+		"profile",
 	]);
 });
 

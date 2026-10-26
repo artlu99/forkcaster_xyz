@@ -419,6 +419,87 @@ export const CLIENTS: ClientDefinition[] = [
 		web: "https://linkcast.xyz/cast/{fullHashRaw}",
 		requiresExternalLinks: true,
 	},
+	// OpenCaster is Arca Computer's AGPL web client for Hypersnap — the
+	// community-operated Farcaster-data node (its worker proxies the
+	// standard /v2/farcaster/* hub APIs to a fixed public node); forked
+	// from Quorum Desktop, so the quorum entry's sibling. Per-cast format
+	// VERIFIED against the open-source client
+	// (github.com/arcacomputer/opencaster, hypersnap/src/lib/navigation.ts):
+	// castPath() emits /cast/0x{40 lowercase hex} as THE canonical share
+	// link — an exact cast lookup, unlike the /{author}/0x{8..40-hex} alias
+	// form, whose short hashes resolve through a bounded history search
+	// (≤500 recent receipts, first verified match; "An unresolved
+	// author-scoped alias is never a canonical cast share link") — hence
+	// {fullHash}. Re-verified live (Oct 2026): /cast/0x895ecc74… renders
+	// zoo's cast logged-out ("omg so relevant!"). No signed rule: the
+	// unsigned author's cast (decent-artlu/0xbb54368f) renders its
+	// identity and per-cast share image. No native app — no
+	// assetlinks.json/AASA (both serve the SPA catch-all), no custom
+	// scheme; the repo's Electron config is the retained Quorum shell.
+	// Web-only. Profile + feed — VERIFIED (source + live):
+	// /profile/{username} is canonical (root /{username} aliases it;
+	// /profile/{fid} is their stable form) and its casts tab IS the cast
+	// list (getProfileFeed) — the merged surface, like farcaster.xyz;
+	// /following is session-scoped, not a shareable feed. Channel —
+	// VERIFIED (source + live): /channel/{channelId}, charset
+	// ^[a-zA-Z0-9_-]{1,64}$ enforced in router and SSR worker alike;
+	// /channel/farcaster SSRs "farcaster (/farcaster)". Caveat: cast
+	// availability rides the Hypersnap node's history — a cast outside
+	// it answers "This cast was not found on Hypersnap" no matter the
+	// URL.
+	{
+		id: "opencaster",
+		title: "Opencaster",
+		logoUrl: "/logos/opencaster.svg",
+		web: "https://opencaster.org/cast/{fullHash}",
+		profile: { web: "https://opencaster.org/profile/{username}" },
+		feed: { web: "https://opencaster.org/profile/{username}" },
+		channel: { web: "https://opencaster.org/channel/{channelId}" },
+	},
+	// HomieHouse is a PWA client on the Farcaster network with a learning /
+	// crypto-safety framing ("Learn, cast, and connect"); its bundle states
+	// the backend outright: "Hypersnap is the backend API HomieHouse uses
+	// to query social data". Domains: the miniapp manifest's
+	// accountAssociation payload decodes to {"domain":"homiehouse.xyz"}
+	// while its frame homeUrl lives at homiehouse.lol/mini/ask-homie — but
+	// homiehouse.app serves the full app and is SELF-CANONICAL (canonical
+	// + og:url on every verified route point back at .app), so the entry
+	// uses .app.
+	// Per-cast format VERIFIED (Oct 2026) in the app's own bundle (Next.js
+	// chunks served from homiehouse.app): feed rows link
+	// href={`/cast/${e.hash}?returnTo=…`} and the route is tracked via
+	// data-cast-detail-ready. LIVE: the full-hash URL SSRs per-cast
+	// metadata — title "zoo on HomieHouse", canonical/og:url to itself, a
+	// per-cast OG generator at /api/og/cast?hash={fullHash} — and renders
+	// the cast ("omg so relevant!", thread context, like/recast/reply
+	// counts). The SHORT form /cast/0x895ecc74 answers 200 with GENERIC
+	// metadata ("Cast | HomieHouse", homepage og:url): the server resolves
+	// only the full 0x+40-hex form, hence {fullHash}.
+	// Profile — VERIFIED (Oct 2026): /profile?user={username} — cast
+	// pages' own ld+json author URLs point there, the router reads ?user=
+	// on /profile, and the URL SSRs real per-user identity (og:type=
+	// profile, profile:username, ld+json Person; zoo: "primus amanuensis
+	// @qbase"). Logged-out, the body is their onboarding guide around the
+	// profile preview ("Preview your existing profile and casts. Looking
+	// up a username does not sign you in."). Feed target NOT added: the
+	// cast list on that surface is not verifiable logged-out.
+	// No deeplink: PWA only — the onboarding guide's install path is
+	// Add-to-Home-Screen / browser install; no assetlinks.json (the path
+	// serves the SPA shell), no store app, no custom scheme anywhere in
+	// the bundle (only farcaster:// / rainbow:// wallet references).
+	// No signed rule: the known-unsigned author's cast renders ("Ultra on
+	// HomieHouse" with cast text). Not links-only: a general feed/learn/
+	// ask client — the link-less gate canonical renders too. No channel
+	// vocabulary exists in the bundle.
+	{
+		id: "homiehouse",
+		title: "HomieHouse",
+		logoUrl: "/logos/homiehouse.svg",
+		web: "https://homiehouse.app/cast/{fullHash}",
+		profile: {
+			web: "https://homiehouse.app/profile?user={username}",
+		},
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>
