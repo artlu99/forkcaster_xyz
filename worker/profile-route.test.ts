@@ -482,6 +482,60 @@ test("uppercase usernames lowercase before lookup", async () => {
 	expect(await res.text()).toContain("Bass Ackwards.");
 });
 
+test("first-party links echo the validated input; display keeps the entity handle", async () => {
+	// The seam: shim /user/{fid} answers the CANONICAL username — the newest
+	// username proof, which can be an ENS (arfonzo.eth) while the visitor
+	// arrived by the fname (arfonzo). Echo-the-valid-input: navigation links
+	// keep the visitor's own words (any resolvable alias maps to the same
+	// fid), while the identity card, OG meta, and the JSON twin stay on the
+	// canonical entity handle.
+	const ALIAS = "arfonzo";
+	const ENTITY = "arfonzo.eth";
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${ALIAS}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: { ...USER, username: ENTITY },
+		},
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: true,
+		},
+		[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]: CASTS,
+	});
+
+	const profile = await app.request(`/${ALIAS}`);
+	const profileBody = await profile.text();
+	// The pill echoes the input…
+	expect(profileBody).toContain(
+		`href="/${ALIAS}/casts-and-replies">Casts and replies</a>`,
+	);
+	// …while the card and og:title keep the canonical entity handle.
+	expect(profileBody).toContain(`@${ENTITY}`);
+	expect(profileBody).toContain(
+		`<meta property="og:title" content="Ultra (@${ENTITY})" />`,
+	);
+
+	const casts = await app.request(`/${ALIAS}/casts-and-replies`);
+	const castsBody = await casts.text();
+	// The head's Profile link echoes the input back…
+	expect(castsBody).toContain(`href="/${ALIAS}">Profile</a>`);
+	// …and the rendered author stays the entity.
+	expect(castsBody).toContain(
+		'<p class="farcaster-embed-author-display-name">Ultra</p>',
+	);
+
+	// Gate normalization rides along: typed capitals echo lowercase.
+	const caps = await app.request("/Arfonzo");
+	expect(await caps.text()).toContain(
+		`href="/arfonzo/casts-and-replies">Casts and replies</a>`,
+	);
+
+	// The agent twin stays canonical — machines get the entity username.
+	const json = await app.request(`/${ALIAS}?format=json`);
+	expect((await json.json()).username).toBe(ENTITY);
+});
+
 test("reserved exact routes still win by registration order", async () => {
 	// /transparency (registered before the parametric profile route) keeps
 	// serving its page — a fetch-less read (no LMDIS env ⇒ null snapshots).

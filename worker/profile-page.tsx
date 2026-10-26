@@ -373,7 +373,13 @@ export function renderProfileHtml(
 			: "";
 
 	// Waypoint law, strict dial: the identity card IS the page — no cast
-	// list here. The list lives on /{username}/casts-and-replies.
+	// list here. The list lives on /{username}/casts-and-replies. The pill
+	// echoes the validated route input (echo-the-valid-input): shim resolves
+	// any resolvable alias — fname, ENS, basename — to the same fid, so
+	// first-party navigation keeps the visitor's own words instead of
+	// rewriting to the entity's canonical handle (what /user/{fid} answers
+	// is the NEWEST username proof, not necessarily what was asked for).
+	// Display, OG/canonical, and external client targets stay canonical.
 	const body = `
 ${PROFILE_STYLE}
 ${auto.html}
@@ -388,7 +394,7 @@ ${bio ? `<p class="profile-bio">${renderBio(bio)}</p>` : ""}
 </div>
 ${menu}
 ${notice}
-<p class="actions"><a class="pill" href="/${encodeURIComponent(handle)}/casts-and-replies">Casts and replies</a></p>`;
+<p class="actions"><a class="pill" href="/${encodeURIComponent(username)}/casts-and-replies">Casts and replies</a></p>`;
 
 	const og = {
 		ogTitle: title,
@@ -600,12 +606,15 @@ export async function renderCastsHtml(
 			? `<p class="notice">This account hasn't signed the social smart contract — it is read-only on farcaster.xyz, so Farcaster is not offered here.</p>`
 			: "";
 
+	// Echo-the-valid-input on the back-link too: /{input} round-trips the
+	// visitor's own words, while the visible @handle below stays the
+	// canonical entity username.
 	const body = `
 ${PROFILE_STYLE}
 ${auto.html}
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
-<p class="profile-handle"><a href="/${encodeURIComponent(handle)}">Profile</a></p>
+<p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a></p>
 </div>
 ${menu}
 ${notice}
