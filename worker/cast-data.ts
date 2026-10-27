@@ -169,7 +169,7 @@ export function toOgDescription(
 		const handle = primaryHandle(quote?.user, "");
 		if (!handle || !quote?.hash) continue;
 		const quoteText = quote.text ? toDescription(quote.text, 120) : "";
-		lines.push(`↷ @${handle}:${quoteText ? ` ${quoteText}` : ""}`);
+		lines.push(`> @${handle}:${quoteText ? ` ${quoteText}` : ""}`);
 	}
 	const parent = text
 		? toDescription(text, lines.length > 0 ? 200 : 280)

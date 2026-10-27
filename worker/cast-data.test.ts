@@ -149,9 +149,9 @@ describe("toOgDescription", () => {
 		expect(toOgDescription(undefined, [])).toBeUndefined();
 	});
 
-	test("hydrated quotes ride in as ↷ lines with the primary handle", () => {
+	test("hydrated quotes ride in as > lines with the primary handle", () => {
 		expect(toOgDescription("parent text", [quoted])).toBe(
-			"parent text\n\n↷ @quoted: the original take",
+			"parent text\n\n> @quoted: the original take",
 		);
 	});
 
@@ -167,12 +167,12 @@ describe("toOgDescription", () => {
 		expect(parent?.startsWith("x")).toBe(true);
 		expect(parent?.endsWith("…")).toBe(true);
 		expect(parent).toHaveLength(200);
-		expect(line).toBe("↷ @quoted: the original take");
+		expect(line).toBe("> @quoted: the original take");
 	});
 
 	test("no parent text renders the quote line alone", () => {
 		expect(toOgDescription(undefined, [quoted])).toBe(
-			"↷ @quoted: the original take",
+			"> @quoted: the original take",
 		);
 	});
 
