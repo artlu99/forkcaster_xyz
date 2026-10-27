@@ -59,12 +59,7 @@ const CHANNEL_STYLE = `<style>
 .channel-handle { color: var(--muted); margin: 2px 0 0; }
 .channel-description { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .channel-facts { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; color: var(--muted); font-size: 13px; }
-/* Pointer-class pill picker (same pattern as the profile unsigned way
-   out): the full trio ships in the SSR HTML — byte-identical for every
-   device, no UA sniffing — and CSS hides the coarse-only pill on
-   desktop, where Quorum's web build has no channel page. */
-@media (pointer: coarse) { .fine-only { display: none; } }
-@media (pointer: fine) { .coarse-only { display: none; } }
+/* Pointer-class pill scoping lives in the shared shell stylesheet. */
 </style>`;
 
 // The way out (owner call: desktop = Farcaster + Firefly; phones add

@@ -309,12 +309,7 @@ const PROFILE_STYLE = `<style>
 .profile-copy.profile-copied .icon-copy { display: none; }
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
 .profile-empty { color: var(--muted); font-size: 14px; }
-/* Pointer-class pill scoping: registry targets may carry a fine/coarse
-   pointer scope — the scoped pills ship in the SSR HTML
-   (byte-identical for every device, no UA sniffing) and CSS picks.
-   pointer:none devices see both — a graceful default. */
-@media (pointer: coarse) { .fine-only { display: none; } }
-@media (pointer: fine) { .coarse-only { display: none; } }
+/* Pointer-class pill scoping lives in the shared shell stylesheet. */
 .casts-page-head { margin: 8px 0 0; }
 .casts-page-head .profile-handle a { color: var(--muted); text-decoration: none; }
 .casts-page-head .profile-handle a:hover, .casts-page-head .profile-handle a:focus-visible { color: var(--accent); }

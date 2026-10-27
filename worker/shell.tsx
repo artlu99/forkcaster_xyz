@@ -188,6 +188,13 @@ main { padding-bottom: 8px; }
   color: var(--bg);
   pointer-events: none;
 }
+/* Pointer-class pill scoping: registry targets may carry a fine/coarse
+   pointer scope (quorum: phones only — its desktop build renders no
+   casts) — the scoped pills ship in the SSR HTML
+   (byte-identical for every device, no UA sniffing) and CSS picks.
+   pointer:none devices see both — a graceful default. */
+@media (pointer: coarse) { .fine-only { display: none; } }
+@media (pointer: fine) { .coarse-only { display: none; } }
 .site-footer {
   margin-top: 20px;
   padding-top: 14px;

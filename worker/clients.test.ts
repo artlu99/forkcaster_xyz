@@ -357,6 +357,20 @@ describe("roster native targets", () => {
 			'data-scheme="quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo"',
 		);
 		expect(html).toContain("data-intent=");
+		// The cast pill is coarse-only: desktop Quorum renders no casts
+		// (the web build's /farcaster is a "Coming soon" placeholder), so
+		// the desktop pill would be a homepage fling — hidden there, kept
+		// on phones where the scheme attempt opens the thread.
+		expect(html).toContain('class="pill client-pill coarse-only"');
+		expect(targetFor(quorum as ClientDefinition, "cast")).toEqual({
+			web: "https://www.quorummessenger.com/",
+			deeplink: {
+				scheme:
+					"quorummobile://feed?castHashPrefix={fullHash}&username={username}",
+				androidPackage: "com.quilibrium.quorummobile",
+			},
+			pointer: "coarse",
+		});
 	});
 });
 
@@ -771,8 +785,9 @@ describe("kind targets", () => {
 		expect(clientPill(quilcast, vars, false, "profile")).toContain(
 			'class="pill client-pill fine-only"',
 		);
-		// Cast mode stays byte-identical: cast targets never carry a
-		// pointer scope, so the class attribute is unchanged.
+		// Pointer-less entries (farcaster) keep the exact two-field cast
+		// target: byte-stability for every current consumer. Quorum's
+		// scoped cast target is pinned in its scheme test above.
 		const farcaster = findClient("farcaster") as ClientDefinition;
 		expect(
 			clientPill(

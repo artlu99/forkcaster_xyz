@@ -82,6 +82,17 @@ export interface ClientDefinition {
 	/** Native app target — activates the mobile scheme attempt. Absent ⇒ web-only. */
 	deeplink?: DeeplinkTarget;
 	/**
+	 * Pointer scope for the CAST pill — the same semantics as
+	 * {@link ClientTarget.pointer} (the `.fine-only`/`.coarse-only` CSS
+	 * mechanism), applied to the cast fields' assembled target. Absent =
+	 * universal. Scope a cast entry when the client cannot serve casts on
+	 * the other pointer class at all (quorum: its desktop build renders no
+	 * casts, so its pill there would be a homepage fling). The scoped
+	 * markup ships byte-identical to every device; the CSS media queries
+	 * live in the shared shell stylesheet.
+	 */
+	pointer?: "fine" | "coarse";
+	/**
 	 * Non-cast targets: the capability matrix. The registry is the
 	 * single source of truth for verified per-thing URL facts — renderers
 	 * resolve through targetFor/targetDeeplinkTargets and keep only their
@@ -198,6 +209,18 @@ export const CLIENTS: ClientDefinition[] = [
 			scheme: "quorummobile://feed?castHashPrefix={fullHash}&username={username}",
 			androidPackage: "com.quilibrium.quorummobile",
 		},
+		// CAST PILL IS COARSE-ONLY (Oct 2026, owner call after a user
+		// report): desktop Quorum cannot serve casts at all — the
+		// web/desktop build's /farcaster route is a literal "Coming soon"
+		// placeholder (verified at source: quorum-desktop
+		// src/components/Router/Router.tsx + farcaster/FarcasterPage.tsx;
+		// app.quorummessenger.com 404s every deep path) — so on fine
+		// pointers the pill was a homepage fling, the exact outcome the
+		// design rejects. Phones keep the pill: the scheme attempt opens
+		// the cast thread directly. The profile/feed/channel targets
+		// below were already coarse-only; this extends the rule to the
+		// cast row.
+		pointer: "coarse",
 		// Profile — SOURCE-VERIFIED (quorum-mobile app/(tabs)/feed/index.tsx
 		// `initialProfile` → SocialFeedModal profile screen): profileFid
 		// required, profileUsername optional. Channel — SOURCE-VERIFIED: the
@@ -749,16 +772,19 @@ export function targetDeeplinkTargets(
 
 /**
  * A client's target for a route kind. `cast` assembles the EXISTING
- * web/deeplink fields (byte-stability for every current consumer); the
- * other kinds read their additive field.
+ * web/deeplink fields (byte-stability for every current consumer) plus the
+ * optional cast-level pointer scope — omitted entirely when undeclared, so
+ * pointer-less clients resolve to the exact two-field object they always
+ * did; the other kinds read their additive field.
  */
 export function targetFor(
 	client: ClientDefinition,
 	kind: RouteKind,
 ): ClientTarget | undefined {
 	if (kind === "cast") {
-		return client.web === undefined
-			? undefined
+		if (client.web === undefined) return undefined;
+		return client.pointer !== undefined
+			? { web: client.web, deeplink: client.deeplink, pointer: client.pointer }
 			: { web: client.web, deeplink: client.deeplink };
 	}
 	return client[kind];
