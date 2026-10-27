@@ -257,6 +257,68 @@ export const farcasterTvProvider: CastProvider = {
 	},
 };
 
+// --- hash-only rescue: farcaster.tv /~/{hash} -------------------------------
+//
+// Shim /h is a partial index (kept-warm fids only), so a cold hash misses
+// even though the cast exists. farcaster.tv's /~/{hash} route resolves a
+// FULL hash directly against the live Warpcast backend — no fid, no
+// username, exactly what the /~/conversations alias needs (raw nodes can't:
+// castById demands fid + full hash). The quote-blindness that demotes the
+// provider in the race is irrelevant here — only hash/fid/username are
+// read, never embeds.
+
+export type HashRescue =
+	| { kind: "found"; fid: number; fullHash: string; username?: string }
+	/** farcaster.tv resolves the live chain — its miss is authoritative. */
+	| { kind: "miss" }
+	/** Transport/shape failure — unknown state, not a verdict. */
+	| { kind: "error" };
+
+export async function rescueHashViaFarcasterTv(
+	hash: string,
+): Promise<HashRescue> {
+	try {
+		const res = await fetch(`https://farcaster.tv/~/${hash}`, {
+			signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+		});
+		if (res.status === 404) return { kind: "miss" };
+		if (!res.ok) return { kind: "error" };
+		const data = (await res.json().catch(() => undefined)) as
+			| {
+					result?: {
+						casts?: Array<{
+							hash?: string;
+							author?: { fid?: number; username?: string };
+						}>;
+					};
+			  }
+			| undefined;
+		const match = (data?.result?.casts ?? []).find(
+			(
+				raw,
+			): raw is {
+				hash: string;
+				author?: { fid?: number; username?: string };
+			} => typeof raw?.hash === "string" && resolvesHash(raw.hash, hash),
+		);
+		if (!match || typeof match.author?.fid !== "number") {
+			return { kind: "miss" };
+		}
+		const { username } = match.author;
+		return {
+			kind: "found",
+			fid: match.author.fid,
+			fullHash: match.hash,
+			// Warpcast's username field IS the fname-primary handle the
+			// identity law wants; absent → the caller's /u/{fid} rescue.
+			username:
+				typeof username === "string" && username !== "" ? username : undefined,
+		};
+	} catch {
+		return { kind: "error" };
+	}
+}
+
 // --- raw Snapchain nodes: haatz + snap (complete, fid + full hash only) ---
 //
 // Both expose the Snapchain HTTP gateway API family: /v1/castById needs

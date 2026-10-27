@@ -1073,16 +1073,93 @@ test("alias redirect carries the primary handle (identity law)", async () => {
 	expect(res.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
 });
 
-test("alias: shim miss ⇒ 404; username-less with /u miss ⇒ 404; shim down ⇒ 503", async () => {
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/h/${ALIAS_HASH}`]: {
-			success: false,
-			error: "getCastByHash: Cast not found",
-		},
-	});
+// shimMock can only answer JSON-at-200; the rescue also needs non-2xx
+// shapes, so these tests wire their own URL-routed mocks.
+
+test("alias: a cold shim index falls to the farcaster.tv rescue — 302 + shim warm", async () => {
+	let warmed = 0;
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/h/${ALIAS_HASH}`) {
+			// Shim's miss is HTTP 200 {"success":false} — a cold index,
+			// NOT a verdict.
+			return Response.json({ success: false, error: "Cast not found" });
+		}
+		if (url === `https://farcaster.tv/~/${ALIAS_HASH}`) {
+			return Response.json({
+				result: {
+					casts: [{ hash: ALIAS_HASH, author: { fid: FID, username: USERNAME } }],
+				},
+			});
+		}
+		if (url === "https://shim.artlu.xyz/refresh") {
+			warmed++;
+			return Response.json({ success: true });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/~/conversations/${ALIAS_HASH}`);
+	expect(res.status).toBe(302);
+	expect(res.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
+	// The warm rides waitUntil (absent in tests — the promise floats);
+	// give it a beat, then confirm the next visitor's /h would hit.
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(warmed).toBe(1);
+
+	// A rescued cast without a username lands in the same /u tail as a
+	// shim-found one.
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/h/${ALIAS_HASH}`) {
+			return Response.json({ success: false });
+		}
+		if (url === `https://farcaster.tv/~/${ALIAS_HASH}`) {
+			return Response.json({
+				result: { casts: [{ hash: ALIAS_HASH, author: { fid: FID } }] },
+			});
+		}
+		if (url === "https://shim.artlu.xyz/u/3319217") {
+			return Response.json({ success: true, username: USERNAME });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const noName = await app.request(`/~/conversations/${ALIAS_HASH}`);
+	expect(noName.status).toBe(302);
+	expect(noName.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
+});
+
+test("alias: the rescue's miss is the authoritative 404; its failure is unknown ⇒ 503", async () => {
+	// farcaster.tv resolves the live chain — only ITS miss is a verdict.
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/h/${ALIAS_HASH}`) {
+			return Response.json({ success: false });
+		}
+		if (url === `https://farcaster.tv/~/${ALIAS_HASH}`) {
+			return new Response("not found", { status: 404 });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
 	const miss = await app.request(`/~/conversations/${ALIAS_HASH}`);
 	expect(miss.status).toBe(404);
 
+	// A rescue transport failure is not a verdict — unknown ⇒ 503
+	// (the cast may exist; retry is meaningful).
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/h/${ALIAS_HASH}`) {
+			return Response.json({ success: false });
+		}
+		if (url === `https://farcaster.tv/~/${ALIAS_HASH}`) {
+			throw new Error("farcaster.tv unreachable");
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const down = await app.request(`/~/conversations/${ALIAS_HASH}`);
+	expect(down.status).toBe(503);
+});
+
+test("alias: username-less with /u miss ⇒ 404; shim down ⇒ 503", async () => {
 	// Cast found but /u authoritatively has no username — a real dead end.
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/h/${ALIAS_HASH}`]: {
@@ -1094,7 +1171,8 @@ test("alias: shim miss ⇒ 404; username-less with /u miss ⇒ 404; shim down �
 	const noName = await app.request(`/~/conversations/${ALIAS_HASH}`);
 	expect(noName.status).toBe(404);
 
-	// Shim down ⇒ 503 + Retry-After — there is nothing to fail open to.
+	// Shim down ⇒ 503 + Retry-After — a transport failure never rescues
+	// (only an HTTP-200 miss proves the index was consulted and is cold).
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/h/${ALIAS_HASH}`]: new Error("shim unavailable"),
 	});

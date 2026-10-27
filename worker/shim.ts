@@ -19,6 +19,7 @@ export const userUrl = (fid: number): string => `${SHIM_BASE}/user/${fid}`;
 export const castsAndRepliesUrl = (username: string, limit: number): string =>
 	`${SHIM_BASE}/${username}/casts-and-replies?limit=${limit}`;
 export const signedUrl = (fid: number): string => `${SHIM_BASE}/signed/${fid}`;
+export const refreshUrl = (): string => `${SHIM_BASE}/refresh`;
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
 
@@ -131,6 +132,22 @@ export async function getCastByHash(
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * POST /refresh {fids:[fid]} — pull that fid's recent casts into shim's
+ * Postgres index, so a hash /h missed (cold — the index only holds
+ * kept-warm fids) hits next time. Fire-and-forget by contract: callers
+ * run it under waitUntil and never await it on the response path; the
+ * generous cap only bounds the background lifetime. Never throws.
+ */
+export function warmShimHashIndex(fid: number): Promise<unknown> {
+	return fetch(refreshUrl(), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ fids: [fid] }),
+		signal: AbortSignal.timeout(15_000),
+	}).catch(() => undefined);
 }
 
 /**

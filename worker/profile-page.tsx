@@ -29,7 +29,10 @@
 
 import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
-import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
+import {
+	rescueHashViaFarcasterTv,
+	UPSTREAM_TIMEOUT_MS,
+} from "./cast-source.ts";
 import {
 	primaryHandle,
 	quoteTargetsOf,
@@ -64,6 +67,7 @@ import {
 	getUserByFid,
 	hUrl,
 	getUsernameByFid,
+	warmShimHashIndex,
 	type ShimCast,
 	type ShimUser,
 } from "./shim.ts";
@@ -724,7 +728,10 @@ ${listHtml}`;
 //
 // The purest waypoint in the family: no surface at all. Resolve the hash via
 // shim /h (the quote-hydrator's call) and 302 to the canonical
-// /{username}/{fullHash} cast waypoint.
+// /{username}/{fullHash} cast waypoint. /h is a partial index (kept-warm
+// fids only), so a cold hash 404s while the cast very much exists — the
+// farcaster.tv hash-only rescue (cast-source.ts) covers that gap, and a
+// rescued alias warms shim's index for every visitor after the first.
 
 export type ResolvedConversationAlias =
 	| { kind: "found"; username: string; fullHash: string }
@@ -733,6 +740,7 @@ export type ResolvedConversationAlias =
 
 export async function resolveConversationAlias(
 	hash: string,
+	opts?: { waitUntil?: (p: Promise<unknown>) => void },
 ): Promise<ResolvedConversationAlias> {
 	// /h answers misses at HTTP 200 ({"success":false}) — non-ok or a thrown
 	// request means the service, not the cast, is the problem.
@@ -749,20 +757,57 @@ export async function resolveConversationAlias(
 	} catch {
 		return { kind: "unreachable" };
 	}
-	if (!cast?.hash) return { kind: "not-found" };
+	// The tail's invariant, typed the ShimLookup-found way: both paths
+	// below deliver a cast whose hash is present — shim's via the guard,
+	// the rescue's by construction (rescued.fullHash: string). ShimCast
+	// stays spec-faithful (`hash?: string` — presence-optional, never
+	// null when present; the spec's generator marks required/nullable
+	// explicitly), so the guarantee is carried HERE, not by weakening
+	// the wire type.
+	let found: ShimCast & { hash: string };
+	if (!cast?.hash) {
+		// Cold index, not a verdict: rescue via farcaster.tv's hash-only
+		// route. Only ITS miss is authoritative (it resolves the live
+		// chain); a transport failure stays unknown ⇒ 503. A rescue warms
+		// shim's index fire-and-forget — the redirect never waits on it.
+		const rescued = await rescueHashViaFarcasterTv(hash);
+		if (rescued.kind === "error") return { kind: "unreachable" };
+		if (rescued.kind === "miss") return { kind: "not-found" };
+		opts?.waitUntil?.(warmShimHashIndex(rescued.fid));
+		found = {
+			fid: rescued.fid,
+			hash: rescued.fullHash,
+			// farcaster.tv's username is the Warpcast handle — the
+			// fname-primary shape the tail below expects; absent → /u.
+			user: rescued.username
+				? { fid: rescued.fid, username: rescued.username }
+				: undefined,
+		};
+	} else {
+		// The guard pinned cast.hash truthy; the spread restates it so
+		// the object meets the found shape (TS keeps property narrowing
+		// on accesses, not on the parent's assignability).
+		found = { ...cast, hash: cast.hash };
+	}
+	// The tail's invariant, typed the ShimLookup-found way: both paths
+	// deliver a cast whose hash is present — shim's via the guard above,
+	// the rescue's by construction (rescued.fullHash: string). ShimCast
+	// stays spec-faithful (`hash?: string` — presence-optional, never
+	// null; the spec's generator marks required/nullable explicitly), so
+	// the guarantee is carried HERE, not by weakening the wire type.
 	// The alias's single job is producing /{username}/{fullHash}: the
 	// PRIMARY handle (identity law — fname first) when the cast carries a
 	// user, else shim /u/{fid} (now fname-first itself). A network failure
 	// there is an outage (503 — the cast exists, we just can't route it);
 	// an authoritative /u miss is a real dead end (404).
 	let username: string | undefined =
-		cast.user?.fname ?? cast.user?.username ?? undefined;
+		found.user?.fname ?? found.user?.username ?? undefined;
 	if (!username) {
-		if (typeof cast.fid !== "number") return { kind: "not-found" };
+		if (typeof found.fid !== "number") return { kind: "not-found" };
 		try {
 			username =
 				(await getUsernameByFid(
-					cast.fid,
+					found.fid,
 					AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
 				)) ?? undefined;
 		} catch {
@@ -770,5 +815,5 @@ export async function resolveConversationAlias(
 		}
 		if (!username) return { kind: "not-found" };
 	}
-	return { kind: "found", username, fullHash: cast.hash };
+	return { kind: "found", username, fullHash: found.hash };
 }

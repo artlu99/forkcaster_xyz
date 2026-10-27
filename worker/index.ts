@@ -477,11 +477,25 @@ app.get("/:username/casts-and-replies", async (c) => {
 
 // Warpcast legacy thread shape (/~/conversations/0x…): the purest waypoint —
 // no surface at all. Resolve via shim /h (misses answer HTTP 200
-// {"success":false}; short hashes miss too — measured) and 302 — NOT 301, so
-// the mapping stays cache-free — to the canonical /{username}/{fullHash} cast
-// waypoint. Relative Location keeps dual-serve hosts self-contained.
+// {"success":false}; short hashes miss too — measured); a miss falls to the
+// farcaster.tv hash-only rescue (shim's index is partial — cold hashes miss
+// while the cast exists), which also warms shim fire-and-forget. 302 — NOT
+// 301, so the mapping stays cache-free — to the canonical
+// /{username}/{fullHash} cast waypoint. Relative Location keeps dual-serve
+// hosts self-contained.
 app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
-	const resolved = await resolveConversationAlias(c.req.param().hash);
+	const resolved = await resolveConversationAlias(c.req.param().hash, {
+		// The rescue's shim warm is fire-and-forget; callers without an
+		// executionCtx (tests) just let the promise float — same guard as
+		// the telemetry writes above.
+		waitUntil: (p) => {
+			try {
+				c.executionCtx.waitUntil(p);
+			} catch {
+				// No executionCtx — best-effort.
+			}
+		},
+	});
 	if (resolved.kind === "unreachable") {
 		return c.body(null, 503, { "retry-after": "60" });
 	}
