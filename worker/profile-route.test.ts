@@ -105,7 +105,11 @@ test("profile page renders the full hydrated entity as the identity card", async
 	// Minimal key-form <title> (cast-page convention); the rich form rides
 	// on og:title.
 	expect(body).toContain("<title>decent-artlu · forkcaster</title>");
-	expect(body).toContain("@decent-artlu");
+	// Card handle line: bold primary (identity law — legacy entity ⇒ the
+	// newest-proof username IS the primary), no attestation parens.
+	expect(body).toContain(
+		"<p class=\"profile-handle\">@<strong>decent-artlu</strong></p>",
+	);
 	expect(body).toContain("Bass Ackwards.");
 	// Bio URLs linkify (owner-approved exception to the plain-text bio):
 	// the URL is href and its own text, new tab, noopener.
@@ -485,10 +489,11 @@ test("uppercase usernames lowercase before lookup", async () => {
 test("first-party links echo the validated input; display keeps the entity handle", async () => {
 	// The seam: shim /user/{fid} answers the CANONICAL username — the newest
 	// username proof, which can be an ENS (arfonzo.eth) while the visitor
-	// arrived by the fname (arfonzo). Echo-the-valid-input: navigation links
-	// keep the visitor's own words (any resolvable alias maps to the same
-	// fid), while the identity card, OG meta, and the JSON twin stay on the
-	// canonical entity handle.
+	// arrived by the fname (arfonzo). This fixture is a LEGACY entity (no
+	// fname/attestations — old shim or stale cache): it pins both that
+	// first-party links echo the input and that the pre-identity-law
+	// rendering is unchanged (the newest-proof username carries display,
+	// OG, canonical, and the JSON twin).
 	const ALIAS = "arfonzo";
 	const ENTITY = "arfonzo.eth";
 	// The alias resolves to the fid; the entity answers the canonical
@@ -547,6 +552,55 @@ test("first-party links echo the validated input; display keeps the entity handl
 		`href="/${ALIAS}/${CAST_HASH}" title="Open on forkcaster"`,
 	);
 	expect(unsignedBody).not.toContain(`href="/${ENTITY}/${CAST_HASH}"`);
+});
+
+test("identity law: the fname is the primary handle; ENS names are attestations", async () => {
+	// The 2026-10-27 rethink of "canonical": the fname — the account's
+	// FIRST name — is primary; any number of ENS names (L1 + L2) are
+	// attestations, rendered in parens after it. The shim entity carries
+	// the split alongside the newest-proof username. Arriving by the ENS
+	// must still present the fname as the identity, canonicalize to the
+	// fname URL, and echo the typed alias in first-party links.
+	const attestations = ["arfonzo.eth", "artlu.base.eth", "spare.eth", "extra.eth"];
+	globalThis.fetch = shimMock({
+		"https://shim.artlu.xyz/f/arfonzo.eth": { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: { ...USER, username: "arfonzo.eth", fname: "arfonzo", attestations },
+		},
+		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: true },
+		"https://shim.artlu.xyz/arfonzo.eth/casts-and-replies?limit=10": CASTS,
+	});
+
+	const res = await app.request("/arfonzo.eth", undefined, {
+		PRIMARY_ORIGIN: "https://forkcaster.xyz",
+	});
+	const body = await res.text();
+	// The card: bold primary, attestations in parens — capped at 3…
+	expect(body).toContain(
+		"<p class=\"profile-handle\">@<strong>arfonzo</strong> (arfonzo.eth, artlu.base.eth, spare.eth)</p>",
+	);
+	// …og:title and canonical carry the primary…
+	expect(body).toContain(
+		'<meta property="og:title" content="Ultra (@arfonzo)" />',
+	);
+	expect(body).toContain(
+		'<link rel="canonical" href="https://forkcaster.xyz/arfonzo" />',
+	);
+	// …while first-party links echo the typed alias.
+	expect(body).toContain(
+		`href="/arfonzo.eth/casts-and-replies">Casts and replies</a>`,
+	);
+
+	// The JSON twin: primary username, attestations uncapped (data, not
+	// display).
+	const json = await app.request("/arfonzo.eth?format=json");
+	const twin = (await json.json()) as {
+		username: string;
+		attestations?: string[];
+	};
+	expect(twin.username).toBe("arfonzo");
+	expect(twin.attestations).toEqual(attestations);
 });
 
 test("reserved exact routes still win by registration order", async () => {

@@ -45,10 +45,19 @@ export type ShimCast = {
  * (all fields null), so the miss signal is `username == null` — not a status
  * code. `proNft` is deliberately typed `unknown` — no non-null sample has
  * ever been observed, so no shape is assumed (profile pages don't render it).
+ *
+ * Identity law (2026-10-27): the fname is the account's PRIMARY handle and
+ * any number of ENS names are attestations. Both arrive from shim only when
+ * it knows the proofs — optional here, so stale shim caches (old entity
+ * shape) and a not-yet-upgraded shim degrade to the pre-law rendering.
  */
 export type ShimUser = {
 	fid?: number;
 	username?: string | null;
+	/** The account's fname — the PRIMARY handle under the identity law. */
+	fname?: string | null;
+	/** Verified ENS names (L1 + L2/basenames), in shim proof order. */
+	attestations?: string[] | null;
 	displayName?: string | null;
 	pfpUrl?: string | null;
 	bio?: string | null;

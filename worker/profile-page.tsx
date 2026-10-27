@@ -18,11 +18,14 @@
 // content source when shim is unreachable.
 //
 // Echo-the-valid-input: first-party links across the family carry the
-// gate-validated route input, not the entity handle — shim resolves any
+// gate-validated route input, not the primary handle — shim resolves any
 // resolvable alias (fname, ENS, basename) to the same fid, while
 // /user/{fid} answers the NEWEST username proof, which can differ from
-// what was typed. Display, OG/canonical, external client targets, and
-// the JSON twin stay canonical.
+// what was typed. Identity law (2026-10-27 rethink of "canonical"): the
+// fname is the account's PRIMARY handle — the first name — and any number
+// of ENS names are attestations, rendered in parens after it (capped).
+// Display, OG/canonical, external client targets, and the JSON twin carry
+// the primary; first-party navigation keeps the visitor's own words.
 
 import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
@@ -105,6 +108,61 @@ export type ResolvedProfile =
 	  }
 	| { kind: "not-found" }
 	| { kind: "unreachable" };
+
+// --- Identity law: primary handle + attestations -------------------------------
+
+/**
+ * Identity law (2026-10-27 rethink of "canonical"): the fname is the
+ * account's PRIMARY handle — the first name — while any number of ENS
+ * names (L1 or L2/basenames) are attestations. `username` is what
+ * /user/{fid} answers — the NEWEST proof, which under an old shim or a
+ * stale cache is also the best known handle — so primary prefers the
+ * fname and falls back through it to the validated route input.
+ */
+function primaryHandle(user: ShimUser, input: string): string {
+	return user.fname ?? user.username ?? input;
+}
+
+/** Attestations render in parens after the primary — the family cap: 3. */
+const ATTESTATION_CAP = 3;
+
+/**
+ * The attestations to show: shim's proof-order list (deduped, primary
+ * stripped), capped. Without the array (old shim/cold cache) the entity
+ * username is still a verified proof name — surface it alone when it
+ * differs from the primary. `cap` is Infinity for the JSON twin, which
+ * carries the data uncapped.
+ */
+function attestationsOf(user: ShimUser, primary: string, cap = ATTESTATION_CAP): string[] {
+	const raw = Array.isArray(user.attestations)
+		? user.attestations
+		: user.username && user.username !== primary
+			? [user.username]
+			: [];
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const name of raw) {
+		if (typeof name !== "string" || name === primary || seen.has(name))
+			continue;
+		seen.add(name);
+		out.push(name);
+		if (out.length >= cap) break;
+	}
+	return out;
+}
+
+/**
+ * The card's handle line: `@<strong>arfonzo</strong> (arfonzo.eth)` —
+ * primary bold, attestations muted in parens. The parens are omitted when
+ * there are none, so a legacy entity renders exactly its old line (plus
+ * the bold primary).
+ */
+function handleLine(user: ShimUser, primary: string): string {
+	const list = attestationsOf(user, primary)
+		.map((name) => escapeHtml(name))
+		.join(", ");
+	return `@<strong>${escapeHtml(primary)}</strong>${list ? ` (${list})` : ""}`;
+}
 
 /**
  * Resolve once: /f (identity verdict) fires in parallel with the timeline
@@ -235,6 +293,8 @@ const PROFILE_STYLE = `<style>
 .profile-head { min-width: 0; }
 .profile-title { font-size: 22px; font-weight: 700; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
 .profile-handle { color: var(--muted); margin: 2px 0 0; }
+/* The primary (fname) reads as the identity; attestations stay muted. */
+.profile-handle strong { color: var(--ink); font-weight: 600; }
 .profile-bio { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .profile-bio a { color: var(--accent); text-decoration: none; }
 .profile-bio a:hover, .profile-bio a:focus-visible { text-decoration: underline; }
@@ -337,15 +397,17 @@ export function renderProfileHtml(
 		return { status: 503, html: unavailablePage(username) };
 	}
 	const { user, fid } = profile;
-	// Identity is proven by now, but keep the honest fallback chain anyway.
-	const handle = user.username ?? username;
+	// Identity law: primary = fname, falling back to the newest-proof
+	// username (old shim/cold cache) and the validated route input. The
+	// fallback chain stays honest — nothing is faked when shim answers.
+	const primary = primaryHandle(user, username);
 	const displayName = user.displayName ?? null;
-	const title = displayName ? `${displayName} (@${handle})` : `@${handle}`;
+	const title = displayName ? `${displayName} (@${primary})` : `@${primary}`;
 	const bio = collapseText(user.bio);
 
 	const avatar = user.pfpUrl
 		? `<img class="profile-avatar" src="${escapeHtml(user.pfpUrl)}" alt="" />`
-		: `<div class="profile-avatar profile-avatar-fallback" aria-hidden="true">${escapeHtml(handle.charAt(0).toUpperCase())}</div>`;
+		: `<div class="profile-avatar profile-avatar-fallback" aria-hidden="true">${escapeHtml(primary.charAt(0).toUpperCase())}</div>`;
 
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
@@ -356,7 +418,7 @@ export function renderProfileHtml(
 	// offers it). The badge and the banner follow the flat resolution:
 	// the kind's own slug, else the cast slug, else nothing (badgeless
 	// menu, no banner). Registry order without a rank snapshot.
-	const vars: TemplateVars = { username: handle, fid };
+	const vars: TemplateVars = { username: primary, fid };
 	const resolved = resolveLastUsed(
 		prefs,
 		"profile",
@@ -388,8 +450,8 @@ ${auto.html}
 <div class="profile-card">
 ${avatar}
 <div class="profile-head">
-<h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
-<p class="profile-handle">@${escapeHtml(handle)}</p>
+<h1 class="profile-title">${escapeHtml(displayName ?? `@${primary}`)}</h1>
+<p class="profile-handle">${handleLine(user, primary)}</p>
 ${bio ? `<p class="profile-bio">${renderBio(bio)}</p>` : ""}
 <ul class="profile-facts">${facts.join("")}</ul>
 </div>
@@ -400,16 +462,16 @@ ${notice}
 
 	const og = {
 		ogTitle: title,
-		description: bio || `Casts from @${handle} on Farcaster`,
+		description: bio || `Casts from @${primary} on Farcaster`,
 		...(user.pfpUrl ? { image: user.pfpUrl } : {}),
 	};
 	const canonicalUrl = primaryOrigin
-		? `${primaryOrigin}/${encodeURIComponent(handle)}`
+		? `${primaryOrigin}/${encodeURIComponent(primary)}`
 		: undefined;
 	return {
 		status: 200,
 		html: shell(
-			`${handle} · forkcaster`,
+			`${primary} · forkcaster`,
 			body,
 			og,
 			// Copy helper + the stateful layer's scripts (telemetry __fk, the
@@ -449,8 +511,10 @@ export function renderProfileJson(
 		};
 	}
 	const { user, fid, casts, timelineOk } = profile;
-	const handle = user.username ?? username;
-	const body: Record<string, unknown> = { username: handle, fid };
+	const primary = primaryHandle(user, username);
+	const attestations = attestationsOf(user, primary, Infinity);
+	const body: Record<string, unknown> = { username: primary, fid };
+	if (attestations.length > 0) body.attestations = attestations;
 	if (user.displayName) body.displayName = user.displayName;
 	if (user.bio) body.bio = user.bio;
 	if (user.pfpUrl) body.pfp = user.pfpUrl;
@@ -463,7 +527,7 @@ export function renderProfileJson(
 			...(typeof cast.timestamp === "number"
 				? { timestamp: new Date(cast.timestamp * 1000).toISOString() }
 				: {}),
-			url: `${origin}/${handle}/${cast.hash}`,
+			url: `${origin}/${primary}/${cast.hash}`,
 		}));
 	if (rows.length > 0) body.casts = rows;
 	if (!timelineOk) body.note = "timeline unavailable";
@@ -473,7 +537,7 @@ export function renderProfileJson(
 		body.note =
 			"account hasn't signed the social smart contract; the profile is read-only on farcaster.xyz";
 	}
-	body.farcaster = `https://farcaster.xyz/${handle}`;
+	body.farcaster = `https://farcaster.xyz/${primary}`;
 	return { status: 200, body };
 }
 
@@ -508,14 +572,16 @@ export async function renderCastsHtml(
 		return { status: 503, html: unavailablePage(username, key) };
 	}
 	const { user, fid, casts, timelineOk, signed } = profile;
-	const handle = user.username ?? username;
+	const primary = primaryHandle(user, username);
 	const displayName = user.displayName ?? null;
 
 	// Shim timeline rows are author-implied — attach the hydrated entity so
-	// each card renders exactly like it does on its own cast page.
+	// each card renders exactly like it does on its own cast page. The
+	// author handle is the primary (identity law), so embed cards link the
+	// fname everywhere they surface it.
 	const author: ShimCast["user"] = {
 		fid,
-		username: handle,
+		username: primary,
 		displayName: displayName ?? undefined,
 		pfpUrl: user.pfpUrl ?? undefined,
 		bio: user.bio ?? undefined,
@@ -558,11 +624,11 @@ export async function renderCastsHtml(
 			// local waypoints; unknown signedness fails open and the flag
 			// never ships.
 			const local = signed === false;
-			const statsSlot = `<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(handle)}" data-hash="${escapeHtml(cast.hash as string)}">`;
+			const statsSlot = `<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(primary)}" data-hash="${escapeHtml(cast.hash as string)}">`;
 			const card = hardenBlankTargets(
 				renderToString(
 					(await FarcasterEmbed({
-						username: handle,
+						username: primary,
 						hash: cast.hash,
 						castData: toCastData(
 							{ ...cast, user: author },
@@ -599,7 +665,7 @@ export async function renderCastsHtml(
 	// kind — farcaster + quorum are the seeded feed targets (quorum
 	// coarse-only/scheme-only; unsigned suppresses farcaster entirely
 	// and the notice explains). Flat inheritance from the cast slug.
-	const vars: TemplateVars = { username: handle, fid };
+	const vars: TemplateVars = { username: primary, fid };
 	const resolved = resolveLastUsed(
 		prefs,
 		"feed",
@@ -619,12 +685,12 @@ export async function renderCastsHtml(
 			: "";
 
 	// Echo-the-valid-input (see header): the back-link echoes the input,
-	// the visible @handle below stays the canonical entity username.
+	// the visible @handle below carries the primary (identity law).
 	const body = `
 ${PROFILE_STYLE}
 ${auto.html}
 <div class="casts-page-head">
-<h1 class="profile-title">${escapeHtml(displayName ?? `@${handle}`)}</h1>
+<h1 class="profile-title">${escapeHtml(displayName ?? `@${primary}`)}</h1>
 <p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a></p>
 </div>
 ${menu}
@@ -633,14 +699,14 @@ ${listHtml}`;
 
 	// OG preview identical to the profile's: same title/description/image.
 	const og = {
-		ogTitle: displayName ? `${displayName} (@${handle})` : `@${handle}`,
+		ogTitle: displayName ? `${displayName} (@${primary})` : `@${primary}`,
 		description:
 			(user.bio ? user.bio.replace(/\s+/g, " ").trim() : "") ||
-			`Casts from @${handle} on Farcaster`,
+			`Casts from @${primary} on Farcaster`,
 		...(user.pfpUrl ? { image: user.pfpUrl } : {}),
 	};
 	const canonicalUrl = primaryOrigin
-		? `${primaryOrigin}/${encodeURIComponent(handle)}/casts-and-replies`
+		? `${primaryOrigin}/${encodeURIComponent(primary)}/casts-and-replies`
 		: undefined;
 	return {
 		status: 200,
