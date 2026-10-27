@@ -170,11 +170,18 @@ export const CLIENTS: ClientDefinition[] = [
 	// and SocialFeedModal auto-opens that thread on mount: full 40-hex
 	// hashes take the direct hypersnap lookup (isFullCastHash), short
 	// prefixes resolve via the username+URL path — hence {fullHash}.
-	// WEB HAS NO CAST ROUTE: quorummessenger.com serves the quorum-desktop
-	// build (react-router: /messages, /spaces, /farcaster…; /feed 404s), so
-	// the https href is an honest homepage stub and the scheme is the only
-	// per-cast target. The Feed tab requires a Farcaster account connected
-	// inside Quorum — without one the app lands on its sign-in screen.
+	// WEB HAS NO CAST ROUTE (re-verified Oct 2026, source + live): the
+	// quorum-desktop router (src/components/Router/Router.tsx) registers
+	// /messages, /spaces, /discover, /bookmarks, /wallet and a bare
+	// /farcaster whose FarcasterPage renders a literal "Coming soon" empty
+	// state — no path or query params, no cast rendering anywhere. The web
+	// beta now lives at app.quorummessenger.com (www is the marketing site,
+	// title "Quilibrium") but its server 404s every deep path (/farcaster,
+	// /feed), so deep links die at the edge — only the app root resolves.
+	// The https href therefore stays an honest homepage stub and the scheme
+	// is the only per-cast target. The Feed tab requires a Farcaster account
+	// connected inside Quorum — without one the app lands on its sign-in
+	// screen.
 	// LIVE VERIFICATION: iOS device-tested — the pill opens Quorum directly
 	// to the cast thread; Android is source-verified via the intent:// form
 	// but not yet device-tested. Vendor release note: Quilibrium signs
