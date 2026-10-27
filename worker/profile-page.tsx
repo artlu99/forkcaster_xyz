@@ -32,13 +32,18 @@ import { FarcasterEmbed } from "react-farcaster-embed";
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
 import {
 	primaryHandle,
-	quoteHashesOf,
+	quoteTargetsOf,
 	STATS_ROW,
 	toCastData,
 	urlEmbedsOf,
 	type UnfurlResult,
 } from "./cast-data.ts";
-import { hardenBlankTargets, relinkFarcasterAnchor, unfurl } from "./cast-page.tsx";
+import {
+	fetchQuote,
+	hardenBlankTargets,
+	relinkFarcasterAnchor,
+	unfurl,
+} from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
 	TRACK_SCRIPT,
@@ -54,7 +59,6 @@ import type { ClientPrefs } from "./clients.ts";
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	getCastsAndReplies,
-	getCastByHash,
 	getFidByUsername,
 	getSignedStatus,
 	getUserByFid,
@@ -590,9 +594,7 @@ export async function renderCastsHtml(
 		urlEmbedsOf(cast).map((u) => unfurl(u, env)),
 	);
 	const quoteJobs = casts.flatMap((cast) =>
-		quoteHashesOf(cast).map((h) =>
-			getCastByHash(h, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)),
-		),
+		quoteTargetsOf(cast).map((t) => fetchQuote(t)),
 	);
 	const unfurlResults = await Promise.allSettled(unfurlJobs);
 	const quoteResults = await Promise.allSettled(quoteJobs);
@@ -608,7 +610,7 @@ export async function renderCastsHtml(
 			const r = unfurlResults[unfurlIndex++];
 			unfurlMap.set(u, r?.status === "fulfilled" ? r.value : undefined);
 		}
-		const quotes = quoteHashesOf(cast).map(() => {
+		const quotes = quoteTargetsOf(cast).map(() => {
 			const r = quoteResults[quoteIndex++];
 			return r?.status === "fulfilled" ? r.value : undefined;
 		});

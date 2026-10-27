@@ -120,6 +120,31 @@ const QUOTED_CAST = {
 		pfpUrl: "https://img.example.test/q.png",
 	},
 };
+// The measured Oct 2026 live case: /h answers "Cast not found" for this
+// cast while /wc/hyp/{hash} returns it — the hash-only index misses.
+const FALLBACK_QUOTED = {
+	fid: 271878,
+	hash: "0xb897c07bb65e9625b2eafe1ebc1a28027c938e53",
+	text: "the hash-index-missing original",
+	timestamp: 1_790_000_000,
+	user: {
+		fid: 271878,
+		username: "hyp",
+		displayName: "Metaphorical",
+		pfpUrl: "https://img.example.test/hyp.png",
+	},
+};
+// Quotes FALLBACK_QUOTED via a castId that has NO /h mock — hydration
+// must fall back through /u/{fid} → /wc/{username}/{hash}.
+const QUOTE_FALLBACK_CAST = {
+	...SHIM_CAST,
+	hash: "0xfaceb00c2e1ed7dfe53da94c03ad972ef7fc5fd4",
+	embeds: [
+		{
+			castId: { fid: 271878, hash: "0xb897c07bb65e9625b2eafe1ebc1a28027c938e53" },
+		},
+	],
+};
 // Regression: the real /zoo/0x79794547 cast — a quote embed + a URL embed.
 // The bundle reads quote.author.pfp.url unguarded; quotes are dropped and
 // URL embeds render as link cards.
@@ -153,6 +178,32 @@ beforeEach(() => {
 			"https://shim.artlu.xyz/h/0xa7c5f47033da848d6d16dac11c61838634a50c23"
 		) {
 			return Response.json({ success: true, cast: QUOTED_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/wc/zoo/0xfaceb00c") {
+			return Response.json({ success: true, cast: QUOTE_FALLBACK_CAST });
+		}
+		if (
+			url ===
+			"https://shim.artlu.xyz/h/0xb897c07bb65e9625b2eafe1ebc1a28027c938e53"
+		) {
+			return Response.json({
+				success: false,
+				error: "getCastByHash: Cast not found",
+			});
+		}
+		if (url === "https://shim.artlu.xyz/u/271878") {
+			return Response.json({ success: true, username: "hyp" });
+		}
+		if (
+			url ===
+			"https://shim.artlu.xyz/wc/hyp/0xb897c07bb65e9625b2eafe1ebc1a28027c938e53"
+		) {
+			return Response.json({ success: true, cast: FALLBACK_QUOTED });
+		}
+		// The UNKNOWN_SIGNED_CAST quote's fallback leg: the fid lookup
+		// itself misses, so hydration fails and the quote degrades.
+		if (url === "https://shim.artlu.xyz/u/3854") {
+			return Response.json({ success: false });
 		}
 		if (
 			url ===
@@ -544,10 +595,23 @@ test("GET ?format=json fails open on the signed check and points unhydrated quot
 	// No /signed mock for fid 7777777: the check throws — fail open means
 	// NO note, same as the HTML path.
 	expect("note" in body).toBe(false);
-	// No /h mock for the quoted cast: hydration fails, but the quote
-	// survives as a Firefly pointer built from the embed's castId hash.
+	// No /h mock for the quoted cast and the /u/{fid} fallback leg misses
+	// too: the whole hydration chain fails, but the quote survives as a
+	// Firefly pointer built from the embed's castId hash.
 	expect(body.quotes).toEqual([
 		"https://firefly.social/post/farcaster/0x11111111deadbeef",
+	]);
+});
+
+test("GET ?format=json hydrates quotes through the /h-miss /u→/wc fallback", async () => {
+	const res = await app.request("/zoo/0xfaceb00c?format=json");
+	expect(res.status).toBe(200);
+
+	const body = await res.json();
+	// /h answers "Cast not found"; the castId's fid rescues the quote —
+	// a forkcaster pointer, not the Firefly degradation.
+	expect(body.quotes).toEqual([
+		"http://localhost/hyp/0xb897c07bb65e9625b2eafe1ebc1a28027c938e53",
 	]);
 });
 
@@ -656,6 +720,17 @@ test("GET ?embeds=quotes serves the shim-resolved quote-card fragment", async ()
 test("GET ?embeds=quotes is a silent 404 for missing casts", async () => {
 	const res = await app.request("/zoo/0xdeadbeef?embeds=quotes");
 	expect(res.status).toBe(404);
+});
+
+test("GET ?embeds=quotes renders fallback-hydrated quote cards (/h miss, /u→/wc hit)", async () => {
+	const res = await app.request("/zoo/0xfaceb00c?embeds=quotes");
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	expect(body).toContain("quote-embeds");
+	// The quoted cast's own text + author, rescued past the hash-index miss.
+	expect(body).toContain("the hash-index-missing original");
+	expect(body).toContain("Metaphorical");
 });
 
 test("GET /transparency serves terse facts; JSON twin; casts for username 'transparency' unaffected", async () => {

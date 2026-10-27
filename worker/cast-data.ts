@@ -173,14 +173,22 @@ export function urlEmbedsOf(cast: ShimCast): string[] {
 	).slice(0, 3);
 }
 
-// Quote embeds destined for Shim /h hydration: capped at 3. Same sharing
-// story as urlEmbedsOf: resolve hydrates, the JSON renderer pairs against
-// the results position by position.
-export function quoteHashesOf(cast: ShimCast): string[] {
-	return (cast.embeds ?? [])
-		.map((embed) => embed.castId?.hash)
-		.filter((h): h is string => typeof h === "string")
-		.slice(0, 3);
+// Quote embeds destined for Shim hydration: capped at 3. Each target
+// carries the embed's castId fid beside the hash — /h is a hash-only index
+// that misses live casts (measured Oct 2026), and the fid is what makes
+// fetchQuote's /u → /wc fallback possible. Same sharing story as
+// urlEmbedsOf: resolve hydrates, the JSON renderer pairs against the
+// results position by position.
+export type QuoteTarget = { hash: string; fid?: number };
+
+export function quoteTargetsOf(cast: ShimCast): QuoteTarget[] {
+	const targets: QuoteTarget[] = [];
+	for (const embed of cast.embeds ?? []) {
+		const { hash, fid } = embed.castId ?? {};
+		if (typeof hash !== "string") continue;
+		targets.push(typeof fid === "number" ? { hash, fid } : { hash });
+	}
+	return targets.slice(0, 3);
 }
 
 // Image embed URLs in embed order. The HTML renderer uses the first for

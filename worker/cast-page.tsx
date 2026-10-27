@@ -22,8 +22,9 @@ import {
 	hasExternalLinks,
 	imageUrlsOf,
 	primaryHandle,
+	type QuoteTarget,
 	type UnfurlResult,
-	quoteHashesOf,
+	quoteTargetsOf,
 	STATS_ROW,
 	toCastData,
 	toDescription,
@@ -38,7 +39,13 @@ import {
 } from "./cast-scripts.ts";
 import type { ClientPrefs } from "./clients.ts";
 import type { TemplateVars } from "./client-registry.ts";
-import { getCastByHash, getSignedStatus, type ShimCast } from "./shim.ts";
+import {
+	getCastByHash,
+	getCastByUsernameHash,
+	getSignedStatus,
+	getUsernameByFid,
+	type ShimCast,
+} from "./shim.ts";
 import { escapeHtml, shell } from "./shell.tsx";
 
 // react-farcaster-embed emits every card anchor as a bare target="_blank"
@@ -112,11 +119,32 @@ export async function unfurl(
 }
 
 // Quote embeds are hydrated through Shim /h/{fullHash} (message embeds carry
-// the full hash). Hydrated quotes map through toCastData, which provides the
-// author.pfp the bundle reads unguarded. Hydration failure drops the quote —
-// old casts get pruned from Snapchain when storage lapses.
-function fetchQuote(hash: string): Promise<ShimCast | undefined> {
-	return getCastByHash(hash, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
+// the full hash), but /h is a hash-only index and misses live casts
+// (measured Oct 2026: a trish quote answered "Cast not found" while
+// /wc/{username}/{hash} returned the message), so a miss falls back to the
+// fid+hash path the castId embed carries: /u/{fid} → username →
+// /wc/{username}/{hash}. One shared 5s window caps the whole chain — a
+// quote never costs more latency than a single /h call did. Hydrated quotes
+// map through toCastData (which provides the author.pfp the bundle reads
+// unguarded) at depth 1 — their own quotes are never hydrated. Hydration
+// failure still drops the quote — old casts get pruned from Snapchain when
+// storage lapses.
+// Exported for the casts skeleton page (same enrichment pipeline).
+export async function fetchQuote(
+	target: QuoteTarget,
+): Promise<ShimCast | undefined> {
+	const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+	const direct = await getCastByHash(target.hash, signal);
+	if (direct || target.fid === undefined) return direct;
+	try {
+		const username = await getUsernameByFid(target.fid, signal);
+		if (!username) return undefined;
+		const lookup = await getCastByUsernameHash(username, target.hash, signal);
+		return lookup.status === "found" ? lookup.cast : undefined;
+	} catch {
+		// /u network failure (it propagates rejections) — drop the quote.
+		return undefined;
+	}
 }
 
 function castPage(
@@ -263,10 +291,10 @@ export async function resolveCast(
 	// carry no {castId} embeds, so quotes are naturally empty there — the
 	// page fills them in client-side (QUOTE_FILL_SCRIPT).
 	const urlEmbeds = urlEmbedsOf(foundCast);
-	const quoteHashes = quoteHashesOf(foundCast);
+	const quoteTargets = quoteTargetsOf(foundCast);
 	const unfurls = Promise.allSettled(urlEmbeds.map((u) => unfurl(u, env)));
 	const quoteFetches = Promise.allSettled(
-		quoteHashes.map((h) => fetchQuote(h)),
+		quoteTargets.map((t) => fetchQuote(t)),
 	);
 
 	// Has the author signed the social smart contract? Unknown (null)
@@ -430,9 +458,9 @@ export async function renderQuotesFragment(
 	);
 	if (outcome.kind === "error") return { status: 503, html: "" };
 	if (outcome.kind === "miss") return { status: 404, html: "" };
-	const quoteHashes = quoteHashesOf(outcome.cast);
+	const quoteTargets = quoteTargetsOf(outcome.cast);
 	const quoteFetches = await Promise.allSettled(
-		quoteHashes.map((h) => fetchQuote(h)),
+		quoteTargets.map((t) => fetchQuote(t)),
 	);
 	const cards: string[] = [];
 	for (const settled of quoteFetches) {
@@ -525,13 +553,13 @@ export function renderCastJson(
 	// Quotes are never dropped (unlike the HTML card): hydrated quotes map
 	// to forkcaster pointers; hydration failure or a username-less cast
 	// falls back to Firefly via the embed's castId hash.
-	const pointers = quoteHashesOf(cast).map((embedHash, i) => {
+	const pointers = quoteTargetsOf(cast).map((target, i) => {
 		const quote = quotes[i];
 		const quotePrimary = primaryHandle(quote?.user, "");
 		if (quotePrimary && quote?.hash) {
 			return `${origin}/${quotePrimary}/${quote.hash}`;
 		}
-		return `https://firefly.social/post/farcaster/${embedHash}`;
+		return `https://firefly.social/post/farcaster/${target.hash}`;
 	});
 	if (pointers.length > 0) body.quotes = pointers;
 

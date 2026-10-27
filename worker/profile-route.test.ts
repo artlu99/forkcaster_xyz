@@ -657,7 +657,8 @@ const REPLIES = {
 			hash: REPLY_HASH,
 			text: "second cast",
 			timestamp: CAST_TS,
-			// Quote embed with no /h mock ⇒ hydration fails, quote dropped.
+			// Quote embed with no /h or /u mock ⇒ the hydration chain
+			// (/h, then the /u→/wc fallback) fails, quote dropped.
 			embeds: [{ castId: { fid: 3854, hash: "0x11111111deadbeef" } }],
 			parentCastId: { fid: FID, hash: REPLY_HASH },
 		},
