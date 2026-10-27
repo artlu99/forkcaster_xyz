@@ -530,6 +530,47 @@ export const CLIENTS: ClientDefinition[] = [
 			web: "https://homiehouse.app/profile?user={username}",
 		},
 	},
+	// Terminus, an iOS client that reads and writes Hypersnap directly.
+	// Scheme VERIFIED against the app's source: Info.plist registers
+	// CFBundleURLSchemes "terminus" (project.yml), and AppLink.route(for:)
+	// (App/Views/Navigation.swift) maps terminus://cast/<0x+40 hex>,
+	// terminus://user/<username> and terminus://channel/<id> onto the
+	// thread, profile and channel screens — hence {fullHash}. LIVE CHECK
+	// (Oct 2026, iOS simulator, signed in): terminus://cast/0x895ecc74…
+	// opened zoo's "omg so relevant!" thread; terminus://user/zoo opened
+	// zoo's profile on its Posts list (so profile and feed are one
+	// surface); terminus://channel/itookaphoto opened "I Took a Photo!".
+	// Also device-tested on a physical iPhone (Oct 2026).
+	// WEB HAS NO CAST ROUTE: Terminus is iOS-only, with no web build and no
+	// Android app, so the https href is the public TestFlight invite — an
+	// honest stub, the page to get the app on — and every pill is
+	// coarse-only, phones only. No signed rule: it shows whatever the node
+	// holds, unsigned authors included. Not links-only.
+	{
+		id: "terminus",
+		title: "Terminus",
+		logoUrl: "/logos/terminus.png",
+		web: "https://testflight.apple.com/join/cSPBnkud",
+		deeplink: {
+			scheme: "terminus://cast/{fullHash}",
+		},
+		pointer: "coarse",
+		profile: {
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://user/{username}" },
+			pointer: "coarse",
+		},
+		feed: {
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://user/{username}" },
+			pointer: "coarse",
+		},
+		channel: {
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://channel/{channelId}" },
+			pointer: "coarse",
+		},
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>
