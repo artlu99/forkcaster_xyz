@@ -175,7 +175,11 @@ export function toOgDescription(
 		? toDescription(text, lines.length > 0 ? 200 : 280)
 		: undefined;
 	if (!parent && lines.length === 0) return undefined;
-	return [parent, ...lines].filter(Boolean).join("\n");
+	// Blank line between the parent text and the quote block; quote lines
+	// stay tight together (blank lines eat into bot truncation budgets).
+	if (!parent) return lines.join("\n");
+	if (lines.length === 0) return parent;
+	return `${parent}\n\n${lines.join("\n")}`;
 }
 
 // The bundle renders a replies/recasts/likes row from engagement data the

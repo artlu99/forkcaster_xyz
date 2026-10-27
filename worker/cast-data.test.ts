@@ -151,7 +151,7 @@ describe("toOgDescription", () => {
 
 	test("hydrated quotes ride in as ↷ lines with the primary handle", () => {
 		expect(toOgDescription("parent text", [quoted])).toBe(
-			"parent text\n↷ @quoted: the original take",
+			"parent text\n\n↷ @quoted: the original take",
 		);
 	});
 
@@ -163,7 +163,7 @@ describe("toOgDescription", () => {
 
 	test("a quote line shrinks the parent budget to 200", () => {
 		const out = toOgDescription("x".repeat(400), [quoted]) ?? "";
-		const [parent, line] = out.split("\n");
+		const [parent, line] = out.split("\n\n");
 		expect(parent?.startsWith("x")).toBe(true);
 		expect(parent?.endsWith("…")).toBe(true);
 		expect(parent).toHaveLength(200);
@@ -178,6 +178,7 @@ describe("toOgDescription", () => {
 
 	test("at most two quote lines", () => {
 		const out = toOgDescription("p", [quoted, quoted, quoted]) ?? "";
-		expect(out.split("\n")).toHaveLength(3);
+		const [, block] = out.split("\n\n");
+		expect(block.split("\n")).toHaveLength(2);
 	});
 });

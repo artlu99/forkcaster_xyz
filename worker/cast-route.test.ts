@@ -297,10 +297,10 @@ test("GET quote cast folds the quoted cast into og:description", async () => {
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	// The hydrated quote rides in as a ↷ line (primary handle), so
-	// link-preview bots surface the cast being quoted.
+	// The hydrated quote rides in as a ↷ line (primary handle, blank-line
+	// separated), so link-preview bots surface the cast being quoted.
 	expect(body).toContain(
-		`<meta property="og:description" content="${CAST_TEXT}\n↷ @quoteduser: the original quoted take" />`,
+		`<meta property="og:description" content="${CAST_TEXT}\n\n↷ @quoteduser: the original quoted take" />`,
 	);
 	// The quote-less cast keeps the byte-identical plain description.
 	const plain = await app.request(`/zoo/${SHORT_HASH}`);
