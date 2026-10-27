@@ -146,9 +146,36 @@ function openGraphFor(
 }
 
 // Collapse newlines/whitespace and truncate for meta description attributes.
-export function toDescription(text: string): string {
+export function toDescription(text: string, cap = 280): string {
 	const flat = text.replace(/\s+/g, " ").trim();
-	return flat.length > 280 ? `${flat.slice(0, 279)}…` : flat;
+	return flat.length > cap ? `${flat.slice(0, cap - 1)}…` : flat;
+}
+
+// OG description with the quoted cast folded in: link-preview bots never
+// run the client-side quote fill-in, so a quote-cast embed otherwise hides
+// the very cast being quoted. Only HYDRATED quotes with a resolvable
+// handle contribute (OG meta never depends on quotes for well-formedness —
+// a quote-blind partial win simply omits the line). The parent text
+// shrinks to 200 chars when a quote line rides along — bots truncate
+// around there, so the quote must start early enough to be seen.
+// Quote-less casts render byte-identically to the plain toDescription form.
+export function toOgDescription(
+	text: string | undefined,
+	quotes: Array<ShimCast | undefined>,
+): string | undefined {
+	const lines: string[] = [];
+	for (const quote of quotes) {
+		if (lines.length >= 2) break;
+		const handle = primaryHandle(quote?.user, "");
+		if (!handle || !quote?.hash) continue;
+		const quoteText = quote.text ? toDescription(quote.text, 120) : "";
+		lines.push(`↷ @${handle}:${quoteText ? ` ${quoteText}` : ""}`);
+	}
+	const parent = text
+		? toDescription(text, lines.length > 0 ? 200 : 280)
+		: undefined;
+	if (!parent && lines.length === 0) return undefined;
+	return [parent, ...lines].filter(Boolean).join("\n");
 }
 
 // The bundle renders a replies/recasts/likes row from engagement data the

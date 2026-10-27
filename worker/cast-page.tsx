@@ -27,7 +27,7 @@ import {
 	quoteTargetsOf,
 	STATS_ROW,
 	toCastData,
-	toDescription,
+	toOgDescription,
 	urlEmbedsOf,
 } from "./cast-data.ts";
 import { autoOpenUi, clientActionsHtml } from "./cast-actions.tsx";
@@ -406,7 +406,7 @@ export async function renderCastHtml(
 		const firstImage = imageUrlsOf(cast)[0];
 		const og = {
 			ogTitle,
-			description: cast.text ? toDescription(cast.text) : undefined,
+			description: toOgDescription(cast.text, quotes),
 			image: firstImage ?? cast.user?.pfpUrl,
 			largeImage: firstImage !== undefined,
 		};

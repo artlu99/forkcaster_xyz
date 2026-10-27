@@ -6,7 +6,12 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ShimCast } from "./shim.ts";
-import { classifyUrl, externalUrlEmbedsOf, hasExternalLinks } from "./cast-data.ts";
+import {
+	classifyUrl,
+	externalUrlEmbedsOf,
+	hasExternalLinks,
+	toOgDescription,
+} from "./cast-data.ts";
 
 const FULL = `0x${"ab".repeat(20)}`;
 const QUOTE_HASH = `0x${"cd".repeat(20)}`;
@@ -127,5 +132,52 @@ describe("externalUrlEmbedsOf / hasExternalLinks", () => {
 		expect(
 			hasExternalLinks(cast([{ url: "https://basescan.org/tx/0xbed8" }])),
 		).toBe(true);
+	});
+});
+
+describe("toOgDescription", () => {
+	const quoted = {
+		hash: QUOTE_HASH,
+		text: "the original take",
+		user: { username: "quoteduser", fname: "quoted" },
+	};
+
+	test("quote-less casts keep the plain description", () => {
+		expect(toOgDescription("hello", [])).toBe("hello");
+		// Unhydrated entries contribute nothing.
+		expect(toOgDescription("hello", [undefined])).toBe("hello");
+		expect(toOgDescription(undefined, [])).toBeUndefined();
+	});
+
+	test("hydrated quotes ride in as ↷ lines with the primary handle", () => {
+		expect(toOgDescription("parent text", [quoted])).toBe(
+			"parent text\n↷ @quoted: the original take",
+		);
+	});
+
+	test("quotes without a resolvable handle are skipped, not guessed", () => {
+		expect(
+			toOgDescription("parent text", [{ ...quoted, user: undefined }]),
+		).toBe("parent text");
+	});
+
+	test("a quote line shrinks the parent budget to 200", () => {
+		const out = toOgDescription("x".repeat(400), [quoted]) ?? "";
+		const [parent, line] = out.split("\n");
+		expect(parent?.startsWith("x")).toBe(true);
+		expect(parent?.endsWith("…")).toBe(true);
+		expect(parent).toHaveLength(200);
+		expect(line).toBe("↷ @quoted: the original take");
+	});
+
+	test("no parent text renders the quote line alone", () => {
+		expect(toOgDescription(undefined, [quoted])).toBe(
+			"↷ @quoted: the original take",
+		);
+	});
+
+	test("at most two quote lines", () => {
+		const out = toOgDescription("p", [quoted, quoted, quoted]) ?? "";
+		expect(out.split("\n")).toHaveLength(3);
 	});
 });

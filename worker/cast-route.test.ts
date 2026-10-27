@@ -292,6 +292,24 @@ test("GET /:username/:hash SSR-renders the cast card from Shim data", async () =
 	);
 });
 
+test("GET quote cast folds the quoted cast into og:description", async () => {
+	const res = await app.request("/zoo/0x79794547");
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	// The hydrated quote rides in as a ↷ line (primary handle), so
+	// link-preview bots surface the cast being quoted.
+	expect(body).toContain(
+		`<meta property="og:description" content="${CAST_TEXT}\n↷ @quoteduser: the original quoted take" />`,
+	);
+	// The quote-less cast keeps the byte-identical plain description.
+	const plain = await app.request(`/zoo/${SHORT_HASH}`);
+	const plainBody = await plain.text();
+	expect(plainBody).toContain(
+		`<meta property="og:description" content="${CAST_TEXT}" />`,
+	);
+});
+
 test("GET /:username/:hash hides the farcaster link when the author has not signed", async () => {
 	const res = await app.request("/decent-artlu/0xbb54368f");
 	expect(res.status).toBe(200);
