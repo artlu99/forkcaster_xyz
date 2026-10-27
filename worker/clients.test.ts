@@ -192,6 +192,7 @@ describe("clientsForPage", () => {
 			"neynar",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -204,6 +205,7 @@ describe("clientsForPage", () => {
 			"vibeshift",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		]);
 	});
 
@@ -227,6 +229,7 @@ describe("clientsForPage", () => {
 			"linkcast",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -306,9 +309,9 @@ describe("deeplinkTargets", () => {
 });
 
 describe("roster native targets", () => {
-	test("farcaster and quorum are the clients with native schemes", () => {
+	test("farcaster, quorum and terminus are the clients with native schemes", () => {
 		const withScheme = CLIENTS.filter((c) => c.deeplink).map((c) => c.id);
-		expect(withScheme).toEqual(["farcaster", "quorum"]);
+		expect(withScheme).toEqual(["farcaster", "quorum", "terminus"]);
 	});
 
 	test("farcaster's scheme resolves per cast; androidPackage composes intent", () => {
@@ -369,6 +372,44 @@ describe("roster native targets", () => {
 					"quorummobile://feed?castHashPrefix={fullHash}&username={username}",
 				androidPackage: "com.quilibrium.quorummobile",
 			},
+			pointer: "coarse",
+		});
+	});
+
+	test("terminus's scheme opens the cast thread; the href is the TestFlight invite", () => {
+		const terminus = findClient("terminus");
+		expect(terminus).toBeDefined();
+		// Verified against the app's source (AppLink.route(for:) maps
+		// terminus://cast/<0x+40 hex> onto the thread screen) and live on
+		// iOS. iOS-only: no androidPackage, so no intent form. The web href
+		// is the public TestFlight invite — Terminus has no web build.
+		const targets = deeplinkTargets(terminus as ClientDefinition, VARS);
+		expect(targets).toEqual({
+			scheme: "terminus://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",
+		});
+		const html = clientPill(terminus as ClientDefinition, VARS, false);
+		expect(html).toContain('href="https://testflight.apple.com/join/cSPBnkud"');
+		expect(html).toContain(
+			'data-scheme="terminus://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+		);
+		expect(html).not.toContain("data-intent=");
+		expect(html).toContain('data-client="terminus"');
+		expect(html).toContain('src="/logos/terminus.png"');
+		// Coarse-only: on desktop the pill could only fling to TestFlight.
+		expect(html).toContain('class="pill client-pill coarse-only"');
+		expect(targetFor(terminus as ClientDefinition, "profile")).toEqual({
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://user/{username}" },
+			pointer: "coarse",
+		});
+		expect(targetFor(terminus as ClientDefinition, "feed")).toEqual({
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://user/{username}" },
+			pointer: "coarse",
+		});
+		expect(targetFor(terminus as ClientDefinition, "channel")).toEqual({
+			web: "https://testflight.apple.com/join/cSPBnkud",
+			deeplink: { scheme: "terminus://channel/{channelId}" },
 			pointer: "coarse",
 		});
 	});
@@ -567,6 +608,7 @@ describe("external-link gate", () => {
 			"linkcast.xyz",
 			"opencaster.org",
 			"homiehouse.app",
+			"testflight.apple.com",
 		]);
 	});
 });
@@ -809,6 +851,7 @@ describe("kind targets", () => {
 			"quorum",
 			"firefly",
 			"opencaster",
+			"terminus",
 		]);
 		// Channels run no /signed check — every state must fail open.
 		expect(clientsForRoute("channel", vars, null).map((c) => c.id)).toEqual([
@@ -816,6 +859,7 @@ describe("kind targets", () => {
 			"quorum",
 			"firefly",
 			"opencaster",
+			"terminus",
 		]);
 	});
 
@@ -828,6 +872,7 @@ describe("kind targets", () => {
 			"vibeshift",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		]);
 	});
 
@@ -841,6 +886,7 @@ describe("kind targets", () => {
 			"vibeshift",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		];
 		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
 			expected,
@@ -860,6 +906,7 @@ describe("kind targets", () => {
 			"quilcast",
 			"opencaster",
 			"homiehouse",
+			"terminus",
 		]);
 	});
 
