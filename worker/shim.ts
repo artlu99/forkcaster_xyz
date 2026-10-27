@@ -33,6 +33,10 @@ export type ShimCast = {
 	user?: {
 		fid?: number;
 		username?: string;
+		/** The account's fname — the PRIMARY handle under the identity law. */
+		fname?: string | null;
+		/** Verified ENS names — attestations (carried, not rendered, on casts). */
+		attestations?: string[] | null;
 		displayName?: string;
 		pfpUrl?: string;
 		bio?: string;

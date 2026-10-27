@@ -566,7 +566,15 @@ test("identity law: the fname is the primary handle; ENS names are attestations"
 		"https://shim.artlu.xyz/f/arfonzo.eth": { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: {
 			success: true,
-			user: { ...USER, username: "arfonzo.eth", fname: "arfonzo", attestations },
+			// displayName overridden so the fixture can't be misread as a
+			// real account — this is the shape, not anyone's profile.
+			user: {
+				...USER,
+				displayName: "Arfonzo",
+				username: "arfonzo.eth",
+				fname: "arfonzo",
+				attestations,
+			},
 		},
 		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: true },
 		"https://shim.artlu.xyz/arfonzo.eth/casts-and-replies?limit=10": CASTS,
@@ -582,7 +590,7 @@ test("identity law: the fname is the primary handle; ENS names are attestations"
 	);
 	// …og:title and canonical carry the primary…
 	expect(body).toContain(
-		'<meta property="og:title" content="Ultra (@arfonzo)" />',
+		'<meta property="og:title" content="Arfonzo (@arfonzo)" />',
 	);
 	expect(body).toContain(
 		'<link rel="canonical" href="https://forkcaster.xyz/arfonzo" />',
@@ -1041,6 +1049,23 @@ test("username-less cast falls back to shim /u/{fid}", async () => {
 			cast: { ...ALIAS_CAST, user: undefined },
 		},
 		"https://shim.artlu.xyz/u/3319217": { success: true, username: USERNAME },
+	});
+	const res = await app.request(`/~/conversations/${ALIAS_HASH}`);
+	expect(res.status).toBe(302);
+	expect(res.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
+});
+
+test("alias redirect carries the primary handle (identity law)", async () => {
+	// The newest proof is the ENS; the fname is primary. The 302 target
+	// carries the fname, not the entity's newest-proof username.
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/h/${ALIAS_HASH}`]: {
+			success: true,
+			cast: {
+				...ALIAS_CAST,
+				user: { fid: FID, username: `${USERNAME}.eth`, fname: USERNAME },
+			},
+		},
 	});
 	const res = await app.request(`/~/conversations/${ALIAS_HASH}`);
 	expect(res.status).toBe(302);

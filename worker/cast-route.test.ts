@@ -80,6 +80,25 @@ const KENNY_CAST = {
 		bio: "the coordination protocol - /poidh - @poidhbot",
 	},
 };
+// Identity-law fixture: the author's newest proof is the ENS; the fname
+// is primary. Arriving by the ENS alias must present the fname everywhere
+// (og:title, canonical, stats slot, JSON author) — one canonical per cast.
+const ARFONZO_SHORT = "0x9be1cc77";
+const ARFONZO_FULL = "0x9be1cc77aa11bb22cc33dd44ee55ff66aa77bb88";
+const ENS_AUTHOR_CAST = {
+	...SHIM_CAST,
+	fid: 191503,
+	hash: ARFONZO_FULL,
+	user: {
+		fid: 191503,
+		username: "arfonzo.eth",
+		fname: "arfonzo",
+		displayName: "Arfonzo",
+		pfpUrl:
+			"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/ab8e1aa9/original",
+		bio: "two names, one fid",
+	},
+};
 // fid with no /signed mock: its signed-check fetch throws (fail-open path).
 // Its quote embed has no /h mock either: hydration fails, quote is dropped.
 const UNKNOWN_SIGNED_CAST = {
@@ -323,7 +342,7 @@ test("404 page escapes the percent-decoded username (XSS regression)", async () 
 	);
 });
 
-test("cast page <title> escapes the percent-decoded username (XSS regression)", async () => {
+test("cast page <title> never echoes the percent-decoded username (XSS regression)", async () => {
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
 		const url = String(input);
 		if (url.includes("shim.artlu.xyz/wc/")) {
@@ -342,9 +361,13 @@ test("cast page <title> escapes the percent-decoded username (XSS regression)", 
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	// The payload must stay escaped inside <title>, never close it early.
+	// The payload never renders raw — and since the identity law the found
+	// page's <title> carries the cast's PRIMARY handle, so the route input
+	// no longer reaches <title> at all (the not-found test above pins
+	// escapeHtml where the input still renders).
 	expect(body).not.toContain("</title><script>");
-	expect(body).toContain("<title>&lt;/title&gt;&lt;script&gt;");
+	expect(body).not.toContain("alert(1)");
+	expect(body).toContain("<title>zoo/0xdeadbeef · forkcaster</title>");
 });
 
 test("GET /:username/:hash falls back to a link-only page when Shim is unreachable", async () => {
@@ -926,6 +949,47 @@ test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither
 	expect(plainBody).not.toContain("canonical");
 	expect(plainBody).not.toContain("og:url");
 	expect(plainBody).not.toContain("fc:miniapp");
+});
+
+test("identity law on cast pages: the fname is the author handle everywhere", async () => {
+	// The newest proof is the ENS (arfonzo.eth); the fname (arfonzo) is
+	// primary. Arriving by the ENS alias still presents the fname in the
+	// og:title, the stats slot, and — the law's real payoff — the
+	// canonical: one canonical URL per cast, independent of arrival alias.
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/arfonzo.eth/${ARFONZO_SHORT}`) {
+			return Response.json({ success: true, cast: ENS_AUTHOR_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/signed/191503") {
+			return Response.json({ success: true, signed: true });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+
+	const res = await app.request(`/arfonzo.eth/${ARFONZO_SHORT}`, undefined, {
+		PRIMARY_ORIGIN: "https://forkcaster.xyz",
+	});
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain(
+		'<meta property="og:title" content="Arfonzo (@arfonzo)" />',
+	);
+	expect(body).toContain(
+		`<link rel="canonical" href="https://forkcaster.xyz/arfonzo/${ARFONZO_FULL}" />`,
+	);
+	expect(body).toContain(`data-username="arfonzo"`);
+
+	// The JSON twin stays on the law: author username + farcaster link.
+	const json = await app.request(`/arfonzo.eth/${ARFONZO_SHORT}?format=json`);
+	const twin = (await json.json()) as {
+		author: { username: string };
+		farcaster: string;
+	};
+	expect(twin.author.username).toBe("arfonzo");
+	// The farcaster link keeps the share-URL form: primary handle + the
+	// hash as typed in the route.
+	expect(twin.farcaster).toBe("https://farcaster.xyz/arfonzo/0x9be1cc77");
 });
 
 test("GET /mcp: server card for browsers, 405 for SSE probes", async () => {

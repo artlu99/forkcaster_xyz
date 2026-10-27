@@ -31,6 +31,7 @@ import { renderToString } from "preact-render-to-string";
 import { FarcasterEmbed } from "react-farcaster-embed";
 import { UPSTREAM_TIMEOUT_MS } from "./cast-source.ts";
 import {
+	primaryHandle,
 	quoteHashesOf,
 	STATS_ROW,
 	toCastData,
@@ -114,14 +115,9 @@ export type ResolvedProfile =
 /**
  * Identity law (2026-10-27 rethink of "canonical"): the fname is the
  * account's PRIMARY handle — the first name — while any number of ENS
- * names (L1 or L2/basenames) are attestations. `username` is what
- * /user/{fid} answers — the NEWEST proof, which under an old shim or a
- * stale cache is also the best known handle — so primary prefers the
- * fname and falls back through it to the validated route input.
+ * names (L1 or L2/basenames) are attestations. `primaryHandle` (cast-data)
+ * resolves it; this file adds the attestation rendering.
  */
-function primaryHandle(user: ShimUser, input: string): string {
-	return user.fname ?? user.username ?? input;
-}
 
 /** Attestations render in parens after the primary — the family cap: 3. */
 const ATTESTATION_CAP = 3;
@@ -757,11 +753,13 @@ export async function resolveConversationAlias(
 		return { kind: "unreachable" };
 	}
 	if (!cast?.hash) return { kind: "not-found" };
-	// The alias's single job is producing /{username}/{fullHash}: a
-	// username-less cast falls back to shim /u/{fid}. A network failure there
-	// is an outage (503 — the cast exists, we just can't route it); an
-	// authoritative /u miss is a real dead end (404).
-	let username: string | undefined = cast.user?.username ?? undefined;
+	// The alias's single job is producing /{username}/{fullHash}: the
+	// PRIMARY handle (identity law — fname first) when the cast carries a
+	// user, else shim /u/{fid} (now fname-first itself). A network failure
+	// there is an outage (503 — the cast exists, we just can't route it);
+	// an authoritative /u miss is a real dead end (404).
+	let username: string | undefined =
+		cast.user?.fname ?? cast.user?.username ?? undefined;
 	if (!username) {
 		if (typeof cast.fid !== "number") return { kind: "not-found" };
 		try {

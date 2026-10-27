@@ -166,7 +166,8 @@ function identityFromCast(
 ): Identity {
 	const fid = cast.fid ?? cast.user?.fid ?? null;
 	return {
-		username: cast.user?.username ?? "",
+		// Identity law: the author handle is the primary (fname first).
+		username: cast.user?.fname ?? cast.user?.username ?? "",
 		fid: typeof fid === "number" ? fid : null,
 		fullHash: cast.hash,
 		hash: requestedHash,

@@ -21,6 +21,7 @@ import {
 import {
 	hasExternalLinks,
 	imageUrlsOf,
+	primaryHandle,
 	type UnfurlResult,
 	quoteHashesOf,
 	STATS_ROW,
@@ -345,27 +346,35 @@ export async function renderCastHtml(
 		// casts skeleton page uses — client-built links become (no-op)
 		// local waypoints instead of dead farcaster.xyz ones.
 		const local = signed === false;
+		// Identity law: the cast's author handle everywhere is the PRIMARY
+		// (fname first) — the embed's own links, the stats slot, the OG
+		// title, and the canonical/pill vars. Absent user degrades to the
+		// route input (today's bytes).
+		const primary = primaryHandle(cast.user, username);
 		const cardHtml = hardenBlankTargets(
 			renderToString(
 				(await FarcasterEmbed({
-					username,
+					username: primary,
 					hash,
-					castData: toCastData(cast, unfurlMap, quotes),
+					castData: toCastData(
+						cast.user ? { ...cast, user: { ...cast.user, username: primary } } : cast,
+						unfurlMap,
+						quotes,
+					),
 					...(local ? { options: { hideFarcasterLogo: true } } : {}),
 				})) as never,
 			).replace(
 				STATS_ROW,
 				() =>
-					`<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(username)}" data-hash="${escapeHtml(hash)}">`,
+					`<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(primary)}" data-hash="${escapeHtml(hash)}">`,
 			),
 		);
 		// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the
 		// cast: author handle as title, cast text as description, first
 		// image embed (else the avatar) as image.
-		const handle = cast.user?.username ?? username;
 		const ogTitle = cast.user?.displayName
-			? `${cast.user.displayName} (@${handle})`
-			: `@${handle}`;
+			? `${cast.user.displayName} (@${primary})`
+			: `@${primary}`;
 		const firstImage = imageUrlsOf(cast)[0];
 		const og = {
 			ogTitle,
@@ -374,7 +383,7 @@ export async function renderCastHtml(
 			largeImage: firstImage !== undefined,
 		};
 		const vars: TemplateVars = {
-			username,
+			username: primary,
 			hash,
 			fullHash: cast.hash,
 			// Same fallback the signed check uses; undefined on fid-less
@@ -430,7 +439,8 @@ export async function renderQuotesFragment(
 		const quote = settled.status === "fulfilled" ? settled.value : undefined;
 		if (!quote?.hash) continue;
 		try {
-			const quoteUsername = quote.user?.username ?? username;
+			// Identity law: quote cards carry the quoted author's primary.
+			const quoteUsername = primaryHandle(quote.user, username);
 			const card = hardenBlankTargets(
 				renderToString(
 					(await FarcasterEmbed({
@@ -480,8 +490,11 @@ export function renderCastJson(
 	}
 	const { cast, unfurlMap, quotes, signed } = resolved;
 
+	// Identity law: the author handle is the primary (fname first); absent
+	// user degrades to the route input.
+	const primary = primaryHandle(cast.user, username);
 	const author: Record<string, unknown> = {
-		username: cast.user?.username ?? username,
+		username: primary,
 	};
 	if (cast.user?.displayName !== undefined) {
 		author.displayName = cast.user.displayName;
@@ -514,14 +527,15 @@ export function renderCastJson(
 	// falls back to Firefly via the embed's castId hash.
 	const pointers = quoteHashesOf(cast).map((embedHash, i) => {
 		const quote = quotes[i];
-		if (quote?.user?.username && quote.hash) {
-			return `${origin}/${quote.user.username}/${quote.hash}`;
+		const quotePrimary = primaryHandle(quote?.user, "");
+		if (quotePrimary && quote?.hash) {
+			return `${origin}/${quotePrimary}/${quote.hash}`;
 		}
 		return `https://firefly.social/post/farcaster/${embedHash}`;
 	});
 	if (pointers.length > 0) body.quotes = pointers;
 
-	body.farcaster = `https://farcaster.xyz/${username}/${hash}`;
+	body.farcaster = `https://farcaster.xyz/${primary}/${hash}`;
 	body.firefly = `https://firefly.social/post/farcaster/${cast.hash}`;
 
 	// signed === false is the only note trigger; unknown/failed fails open.
