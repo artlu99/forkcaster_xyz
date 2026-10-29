@@ -4,7 +4,8 @@
 // offline-generated snapshots, read from lmdis through the per-isolate
 // TTL cache; absent → dashes). HTML for humans, JSON for agents (same
 // negotiation as cast pages).
-import type { RankSnapshot, RankRow } from "../scripts/client-rank-lib.ts";
+import { sort } from "radash";
+import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
 import { FID_SOURCES, type FidSnapshot } from "../scripts/fid-race-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
@@ -70,7 +71,15 @@ function renderTable(headers: string[], rows: string[][]): string {
 
 function statsTable(snapshot: Snapshot | null | undefined): string {
 	const byId = new Map((snapshot?.providers ?? []).map((p) => [p.id, p]));
-	const rows = PROVIDERS.map((p) => {
+	// Wins desc — the race's own headline — with the fastest p50 as the
+	// tiebreak; providers without snapshot data sink to the bottom. radash
+	// sort is stable, so the chained sorts compose (p50 first, then wins).
+	const ordered = sort(
+		sort(PROVIDERS, (p) => byId.get(p.id)?.p50Ms ?? Number.MAX_SAFE_INTEGER),
+		(p) => byId.get(p.id)?.wins ?? -1,
+		true,
+	);
+	const rows = ordered.map((p) => {
 		const s = byId.get(p.id);
 		return [
 			p.id,
@@ -84,20 +93,26 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 	const asOf =
 		snapshot == null
 			? ""
-			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · answers later than 0.7 seconds are not counted</li>`;
+			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · answers later than 0.7 seconds are not counted · sorted by wins</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
 	return `${renderTable(["id", "wins", "p50", "p95", "err%", "host"], rows)}${asOfHtml}`;
 }
 
 const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
-// The fid-race rows in roster order — the row label IS the source id
-// (shim = this site's reader; haatz/snap = the raw gateways, tracked
+// The fid-race rows sorted like statsTable — wins desc, p50 tiebreak,
+// sources without data sinking to the bottom (the row label IS the source
+// id: shim = this site's reader; haatz/snap = the raw gateways, tracked
 // independently). The vocabulary lives in the fid-race lib, typecheck-
 // coupled to cast-source.ts's FidRace ids.
 
 function fidTable(snapshot: FidSnapshot | null | undefined): string {
-	const rows = FID_SOURCES.map((source) => {
+	const ordered = sort(
+		sort(FID_SOURCES, (s) => snapshot?.sources[s]?.p50Ms ?? Number.MAX_SAFE_INTEGER),
+		(s) => snapshot?.sources[s]?.wins ?? -1,
+		true,
+	);
+	const rows = ordered.map((source) => {
 		const stats = snapshot?.sources[source];
 		return [
 			source,
@@ -109,7 +124,7 @@ function fidTable(snapshot: FidSnapshot | null | undefined): string {
 	const asOf =
 		snapshot == null
 			? ""
-			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${snapshot.legs.haatz + snapshot.legs.snap} lookups raced</li>`;
+			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${snapshot.legs.haatz + snapshot.legs.snap} lookups raced · sorted by wins</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
 	return `${renderTable(["source", "wins", "p50", "p95"], rows)}${asOfHtml}`;
 }
@@ -139,25 +154,33 @@ const CLIENT_COVERAGE = ACTIVE_CLIENTS.map((client) => ({
 }));
 
 function rankTable(rank: RankSnapshot | null | undefined): string {
-	const rows = new Map((rank?.rows ?? []).map((r) => [r.id, r]));
-	const body = RANK_IDS.map((id) => {
-		const r: RankRow | undefined = rows.get(id);
-		const share =
-			r?.share != null ? `${r.share}%` : "—";
-		return [
-			id,
-			r ? String(r.first) : "—",
-			r ? String(r.pill) : "—",
-			r ? String(r.goNow) : "—",
-			r ? String(r.auto) : "—",
-			r ? String(r.score) : "—",
-			share,
-		];
-	});
+	// Observed clients first, sorted by the published score (the render
+	// owns its order via radash sort — immune to snapshot row order);
+	// never-clicked clients keep their dashes in registry order at the
+	// bottom — reordering never hides anyone.
+	const observed = sort(rank?.rows ?? [], (r) => r.score, true);
+	const observedIds = new Set(observed.map((r) => r.id));
+	const body = [
+		...observed.map((r) => {
+			const share = r.share != null ? `${r.share}%` : "—";
+			return [
+				r.id,
+				String(r.first),
+				String(r.pill),
+				String(r.goNow),
+				String(r.auto),
+				String(r.score),
+				share,
+			];
+		}),
+		...RANK_IDS.filter((id) => !observedIds.has(id)).map(
+			(id) => [id, "—", "—", "—", "—", "—", "—"],
+		),
+	];
 	const asOf =
 		rank == null
 			? ""
-			: `<li>From <code>${escapeHtml(rank.generatedAt)}</code> · last ${rank.window.hours} hours · ${rank.total} selections${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares show at ${WARMING_UP_MIN}+ selections` : ""}</li>`;
+			: `<li>From <code>${escapeHtml(rank.generatedAt)}</code> · last ${rank.window.hours} hours · ${rank.total} selections${rank.sampled ? " · sampled" : ""}${rank.warmingUp ? ` · shares show at ${WARMING_UP_MIN}+ selections` : ""} · sorted by score</li>`;
 	const weights = `<li>${WEIGHTS_NOTE}</li>`;
 	const asOfHtml = asOf === "" ? `<ul>${weights}</ul>` : `<ul>${weights}${asOf}</ul>`;
 	return `${renderTable(["app", "first picks", "selections", "open now", "automatic", "score", "share"], body)}${asOfHtml}`;

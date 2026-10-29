@@ -222,6 +222,40 @@ test("rank table: no snapshot — dashes and no as-of line", () => {
 	expect(html).not.toContain("shares show at 100+ selections");
 });
 
+test("tables sort by their headline: races by wins, rank by score, no-data rows last", () => {
+	const html = renderTransparencyHtml({
+		snapshot: SNAPSHOT,
+		rank: RANK,
+		fid: FID,
+	});
+	// Race table: farcaster-tv (82 wins) above shim (18 wins); the
+	// never-raced providers' dash rows sink below both.
+	expect(html.indexOf("<td>farcaster-tv</td>")).toBeLessThan(
+		html.indexOf("<td>shim</td>"),
+	);
+	expect(html.indexOf("<td>shim</td>")).toBeLessThan(
+		html.indexOf("<td>shim-potato</td><td>—</td>"),
+	);
+	// Fid table: snap (31 wins) above shim (12) above haatz (9) — scoped to
+	// the section so the race table's rows can't collide.
+	const fidSection = html.slice(html.indexOf("Author id races"));
+	expect(fidSection.indexOf("<td>snap</td><td>31</td>")).toBeLessThan(
+		fidSection.indexOf("<td>shim</td><td>12</td>"),
+	);
+	expect(fidSection.indexOf("<td>shim</td><td>12</td>")).toBeLessThan(
+		fidSection.indexOf("<td>haatz</td><td>9</td>"),
+	);
+	// Rank table: firefly (21.4) above farcaster (1.7); never-clicked
+	// clients keep their dash rows below both (the <td>—</td> cell run is
+	// unique to the rank table — the coverage matrix marks those clients ✓).
+	expect(html.indexOf("<td>firefly</td><td>10</td>")).toBeLessThan(
+		html.indexOf("<td>farcaster</td><td>1</td>"),
+	);
+	expect(html.indexOf("<td>farcaster</td><td>1</td>")).toBeLessThan(
+		html.indexOf("<td>quorum</td><td>—</td><td>—</td><td>—</td>"),
+	);
+});
+
 test("JSON twin: clientRank live with zero-filled roster and published weights", () => {
 	const json = transparencyJson(SNAPSHOT, RANK) as {
 		clientRank: {
