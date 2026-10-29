@@ -7,6 +7,7 @@
 		"@dotenvx/dotenvx": "^2.36.0",
 		"@preact/preset-vite": "^2.10.6",
 		"@types/node": "^26.6.5",
+		"shortcutkit": "0.8.1",
 		"vite": "^8.3.4",
 		"wrangler": "^4.149.0"
 	},
@@ -20,6 +21,7 @@
 		"stats": "dotenvx run -- bun scripts/race-stats.ts",
 		"stats:fid": "dotenvx run -- bun scripts/fid-race.ts",
 		"stats:rank": "dotenvx run -- bun scripts/client-rank.ts",
+		"shortcut:quilcast": "bun scripts/quilcast-shortcut.ts",
 		"cf-typegen": "wrangler types"
 	},
 	"type": "module",

@@ -52,6 +52,8 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 ├── wrangler.jsonc             # main=worker/index.ts; not_found_handling=none
 ├── public/farcaster-embed.css # linked from SSR HTML
 ├── public/logos/              # per-client marks for the action row
+├── quilcast-router-shortcut.md # the iOS/macOS share-sheet router: mapping, build/sign, distribution
+├── shortcuts/                 # generated .shortcut artifact (unsigned; `bun run shortcut:quilcast`)
 ├── worker/
 │   ├── index.ts               # Hono app; export { app }; default { fetch }
 │   ├── client-registry.ts     # client registry (verified templates; zero-dep, vendored-able)
@@ -82,6 +84,8 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── fid-race-lib.ts        # pure fid-race query builders (fixture-tested)
 │   ├── client-rank.ts         # offline rank job: CLICK_STATS AE SQL → weighted snapshot → lmdis
 │   ├── client-rank-lib.ts     # pure query builders + weighting (fixture-tested)
+│   ├── stats-alert.ts         # ntfy threshold alerter over the live lmdis snapshots (`stats:check`; --dry)
+│   ├── quilcast-shortcut.ts   # generates the quilcast → share-sheet shortcut (mapping in quilcast-router-shortcut.md)
 │   └── probe/                 # live-service probes (lmdis, AE SQL, shim timing)
 └── src/                       # landing only (App.tsx)
 ```
