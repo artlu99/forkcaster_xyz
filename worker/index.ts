@@ -122,34 +122,85 @@ app.get("/mcp", (c) => {
 	return c.html(mcpLandingHtml());
 });
 
+// /transparency — edge-cached SSR. The three store reads (parallel: a
+// fan-out of concurrent lmdis GETs costs the same as one — the server's
+// reads don't queue, measured 2026-10) plus the HTML render run at most
+// once per colo per TTL window; every other visitor is served from the
+// edge cache. A cold isolate can no longer stall a visitor, and cached
+// hits trigger zero lmdis reads — the cache LOWERS upstream volume. The
+// Accept-only JSON variant bypasses the shared cache: caching it under
+// the bare URL would poison every browser hit (?format=json keeps its
+// own URL-scoped key).
+// caches.default is the Workers Cache API — the DOM lib's CacheStorage
+// type lacks `default`, so a structural alias keeps both lib worlds happy.
+type EdgeCache = {
+	match(key: Request): Promise<Response | undefined>;
+	put(key: Request, response: Response): Promise<void>;
+};
+const edgeCache = (): EdgeCache | undefined =>
+	(globalThis as unknown as { caches?: { default: EdgeCache } }).caches?.default;
+
+const TRANSPARENCY_S_MAXAGE = 60;
+
 app.get("/transparency", async (c) => {
 	const wantsJson = negotiatesJson(c);
-	// Three cacheTtl'd reads (per-isolate) feed the HTML page and the JSON
-	// twin; absent/unreachable snapshots → dashes/coming-soon. Silent. The
-	// rank + fid reads run in parallel (each caps a cold lmdis at 2s).
-	const snapshot = await getRaceStatsSnapshot(c.env);
-	const [rank, fid] = await Promise.all([
+	const acceptOnlyJson = wantsJson && c.req.query("format") !== "json";
+	const shared = acceptOnlyJson ? undefined : edgeCache();
+	const cacheKey = new Request(c.req.url);
+	const hit = shared ? await shared.match(cacheKey) : undefined;
+	if (hit) return hit;
+	// One fan-out of the three per-isolate-TTL'd stores; absent/unreachable
+	// snapshots → dashes/coming-soon (each read caps a cold lmdis at 2s).
+	const [snapshot, rank, fid] = await Promise.all([
+		getRaceStatsSnapshot(c.env),
 		getRankSnapshot(c.env),
 		getFidRaceSnapshot(c.env),
 	]);
-	if (wantsJson) return c.json(transparencyJson(snapshot, rank, fid));
-	const primaryOrigin = (c.env as Env | undefined)?.PRIMARY_ORIGIN;
-	return c.html(
-		renderTransparencyHtml({
-			canonicalUrl: primaryOrigin ? `${primaryOrigin}/transparency` : undefined,
-			snapshot,
-			rank,
-			fid,
-		}),
-	);
+	const res: Response = wantsJson
+		? c.json(transparencyJson(snapshot, rank, fid))
+		: c.html(
+				renderTransparencyHtml({
+					canonicalUrl: (c.env as Env | undefined)?.PRIMARY_ORIGIN
+						? `${(c.env as Env | undefined)?.PRIMARY_ORIGIN}/transparency`
+						: undefined,
+					snapshot,
+					rank,
+					fid,
+				}),
+			);
+	res.headers.set("Cache-Control", `public, s-maxage=${TRANSPARENCY_S_MAXAGE}`);
+	if (shared) {
+		try {
+			c.executionCtx.waitUntil(shared.put(cacheKey, res.clone()));
+		} catch {
+			// no execution context (bun tests) — response still returns
+		}
+	}
+	return res;
 });
 
 // Raw agent-facing snapshot — the same cached read the transparency page
-// uses, no rendering. 404 when there is no snapshot to serve.
+// uses, no rendering. 404 when there is no snapshot to serve. Edge-cached
+// like the transparency page (200s only — a missing snapshot keeps
+// 404ing fresh), so agent polling doesn't punch through to lmdis.
 app.get("/race-stats.json", async (c) => {
+	const shared = edgeCache();
+	const cacheKey = new Request(c.req.url);
+	const hit = shared ? await shared.match(cacheKey) : undefined;
+	if (hit) return hit;
 	const snapshot = await getRaceStatsSnapshot(c.env);
 	if (snapshot === null) return c.body(null, 404);
-	return c.json(snapshot, 200, { "cache-control": "public, max-age=21600" });
+	const res = c.json(snapshot, 200, {
+		"cache-control": "public, s-maxage=300, max-age=21600",
+	});
+	if (shared) {
+		try {
+			c.executionCtx.waitUntil(shared.put(cacheKey, res.clone()));
+		} catch {
+			// no execution context (bun tests) — response still returns
+		}
+	}
+	return res;
 });
 
 // Agent-facing index: the JSON surfaces this worker serves.
