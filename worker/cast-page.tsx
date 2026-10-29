@@ -15,6 +15,7 @@ import {
 	type ProviderId,
 	type ProviderTiming,
 	raceCast,
+	raceRoster,
 	shimProvider,
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
@@ -330,15 +331,19 @@ export type ResolvedCast =
 export async function resolveCast(
 	username: string,
 	hash: string,
-	env?: { UNFURL?: Fetcher },
+	env?: { UNFURL?: Fetcher; SHIM_POTATO_BASE?: string },
 	opts: { boxMs?: number | null } = {},
 ): Promise<ResolvedCast> {
 	// The race is capped at 5s per provider (cast-source.ts): a cold sharded
 	// lookup can otherwise hang for 15s+ (measured on a missing cast).
-	const race =
+	// JSON: strict shim-only. HTML: the default roster plus the shim-potato
+	// canary leg when SHIM_POTATO_BASE is set (raceRoster).
+	const race = await raceCast(
+		{ username, hash },
 		opts.boxMs === null
-			? await raceCast({ username, hash }, { providers: [shimProvider] })
-			: await raceCast({ username, hash }, { boxMs: opts.boxMs });
+			? { providers: [shimProvider] }
+			: { providers: raceRoster(env?.SHIM_POTATO_BASE), boxMs: opts.boxMs },
+	);
 	if (race.kind !== "found") return race;
 	const foundCast: ShimCast & { hash: string } = race.cast;
 

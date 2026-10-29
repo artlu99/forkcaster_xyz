@@ -17,6 +17,9 @@ import { escapeHtml, shell } from "./shell.tsx";
 // cast-source.ts fails the typecheck here instead of drifting silently.
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
 	shim: "shim.artlu.xyz",
+	// PLAN8 canary leg — live at this host; races only when
+	// SHIM_POTATO_BASE is set, and its misses never 404 (cast-source.ts).
+	"shim-potato": "shim-potato.artlu.xyz (canary)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com",
 	snap: "snap.farcaster.xyz:3381",

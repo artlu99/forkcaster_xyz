@@ -154,7 +154,7 @@ mcp-publisher publish                                        # submits server.js
 
 ## Cast source race
 
-Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fan out with per-provider abort + 5s cap, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error).
+Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fan out with per-provider abort + 5s cap, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error). A fifth complete leg — **shim-potato** (`shim-potato.artlu.xyz`, self-hosted) — joins the race when the `SHIM_POTATO_BASE` var is set: same canonical shape, but its misses are **not** authoritative (it can never 404 a cast the race would otherwise resolve), and the JSON twin stays shim-only either way.
 
 **Sufficiency matrix** (measured Oct 2026) against the internal `ShimCast` contract (text, hash, unix-seconds ts, raw `{url}`/`{castId}` embeds, inline user data):
 

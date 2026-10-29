@@ -9,6 +9,9 @@
 /** Static roster — keep in sync with worker/cast-source.ts (near-static by design). */
 export const ROSTER = [
 	{ id: "shim", role: "complete" },
+	// PLAN8 canary leg: zero row until SHIM_POTATO_BASE goes live (no shim-potato
+	// rows in RACE_STATS before that). Trimmed again at cutover.
+	{ id: "shim-potato", role: "complete" },
 	{ id: "haatz", role: "complete" },
 	{ id: "snap", role: "complete" },
 	{ id: "farcaster-tv", role: "partial" },

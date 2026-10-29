@@ -8,18 +8,18 @@
 // call site's exact failure semantics — see the per-function notes.
 
 /** Base URL of the owner-run Snapchain reader. */
-export const SHIM_BASE = "https://shim.artlu.xyz";
+export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
 
 export const wcUrl = (username: string, hash: string): string =>
-	`${SHIM_BASE}/wc/${username}/${hash}`;
-export const hUrl = (hash: string): string => `${SHIM_BASE}/h/${hash}`;
-export const fUrl = (username: string): string => `${SHIM_BASE}/f/${username}`;
-export const uUrl = (fid: number): string => `${SHIM_BASE}/u/${fid}`;
-export const userUrl = (fid: number): string => `${SHIM_BASE}/user/${fid}`;
+	`${SHIM_CLOUD_BASE}/wc/${username}/${hash}`;
+export const hUrl = (hash: string): string => `${SHIM_CLOUD_BASE}/h/${hash}`;
+export const fUrl = (username: string): string => `${SHIM_CLOUD_BASE}/f/${username}`;
+export const uUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/u/${fid}`;
+export const userUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/user/${fid}`;
 export const castsAndRepliesUrl = (username: string, limit: number): string =>
-	`${SHIM_BASE}/${username}/casts-and-replies?limit=${limit}`;
-export const signedUrl = (fid: number): string => `${SHIM_BASE}/signed/${fid}`;
-export const refreshUrl = (): string => `${SHIM_BASE}/refresh`;
+	`${SHIM_CLOUD_BASE}/${username}/casts-and-replies?limit=${limit}`;
+export const signedUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/signed/${fid}`;
+export const refreshUrl = (): string => `${SHIM_CLOUD_BASE}/refresh`;
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
 
@@ -96,8 +96,23 @@ export async function getCastByUsernameHash(
 	hash: string,
 	signal: AbortSignal,
 ): Promise<ShimLookup> {
+	return getCastByUsernameHashFrom(SHIM_CLOUD_BASE, username, hash, signal);
+}
+
+/**
+ * The same lookup against an arbitrary shim-shaped host — the shim-potato
+ * canary leg races this (cast-source.ts). The response contract is the
+ * canonical shim's, byte for byte: HTTP 200 `{"success":false}`/empty
+ * body on a miss, non-2xx is an outage, not a verdict.
+ */
+export async function getCastByUsernameHashFrom(
+	base: string,
+	username: string,
+	hash: string,
+	signal: AbortSignal,
+): Promise<ShimLookup> {
 	try {
-		const res = await fetch(wcUrl(username, hash), { signal });
+		const res = await fetch(`${base}/wc/${username}/${hash}`, { signal });
 		if (!res.ok) {
 			return { status: "error", message: `HTTP ${res.status}` };
 		}

@@ -7,11 +7,13 @@
 		{ "pattern": "forkcaster.xyz", "custom_domain": true },
 		{ "pattern": "warpcats.com", "custom_domain": true }
 	],
-	"vars": { "PRIMARY_ORIGIN": "https://forkcaster.xyz" },
+	// SHIM_POTATO_BASE: the shim-potato canary host (PLAN8). Empty = the canary leg is
+	// NOT raced (default roster). Activation: set the URL + deploy; the
+	// leg's wins are real, its misses never 404 (cast-source.ts).
+	"vars": { "PRIMARY_ORIGIN": "https://forkcaster.xyz", "SHIM_POTATO_BASE": "https://shim-potato.artlu.xyz" },
 	"assets": { "not_found_handling": "none" },
 	"observability": { "enabled": true },
 	"analytics_engine_datasets": [{ "binding": "RACE_STATS" }, { "binding": "CLICK_STATS" }, { "binding": "FID_RACE" }],
 	"upload_source_maps": true,
 	"services": [{ "binding": "UNFURL", "service": "unfurl" }]
-	// "vars": {  "MY_VARIABLE": "production_value" }
 }

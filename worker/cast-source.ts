@@ -13,7 +13,19 @@
 //                its wins are marked partial and only allowed after the box
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
 //
-// The signed (ban) check is deliberately NOT part of this race: it stays a
+// The shim-potato CANARY (PLAN8): a second shim-shaped host stacked as a fifth
+// complete leg whenever SHIM_POTATO_BASE is set (see raceRoster). Purpose is
+// measurement, not redundancy — identical eligibility to shim, so wins,
+// p50/p95 and error rates are directly comparable head-to-head (the same
+// structure that makes haatz-vs-snap legible). Two dials keep it safe:
+// - shim-potato's FOUND can win like any complete provider (central hash
+//   validation still guards every win);
+// - shim-potato's MISS is NOT authoritative (missAuthoritative: false) — a cold
+//   or diverging shim-potato index can never 404 a cast the race would otherwise
+//   resolve. Only shim keeps the fast authoritative miss.
+// The JSON twin stays shim-only either way (strict canonical source).
+//
+// The signed (ban) check is not part of this race: it stays a
 // shim dependency, orthogonal to cast content (see resolveCast).
 //
 // No caching is introduced here: one fan-out per render keeps the last-used
@@ -21,7 +33,8 @@
 
 import { sort } from "radash";
 import {
-	getCastByUsernameHash,
+	SHIM_CLOUD_BASE,
+	getCastByUsernameHashFrom,
 	getFidByUsername,
 	resolvesHash,
 	type ShimCast,
@@ -30,7 +43,12 @@ import {
 
 export type { ShimCast, ShimEmbed };
 
-export type ProviderId = "shim" | "haatz" | "snap" | "farcaster-tv";
+export type ProviderId =
+	| "shim"
+	| "shim-potato"
+	| "haatz"
+	| "snap"
+	| "farcaster-tv";
 
 /**
  * How resolveFid's two-source identity race settled on a raw-node leg —
@@ -63,6 +81,13 @@ export type ProviderResult =
 export interface CastProvider {
 	id: ProviderId;
 	complete: boolean;
+	/**
+	 * Whether this provider's `miss` is an authoritative not-found verdict.
+	 * Defaults to true for complete providers (the parity rule); a canary
+	 * leg like shim-potato opts out so its verdicts stay telemetry-only. Partial
+	 * providers never have miss authority either way.
+	 */
+	missAuthoritative?: boolean;
 	/** Whether this provider can key off (username, hash) alone. */
 	canServe(vars: CastVars): boolean;
 	fetchCast(vars: CastVars, signal: AbortSignal): Promise<ProviderResult>;
@@ -133,26 +158,52 @@ async function getJsonWithStatus(
 	return { status: res.status, data };
 }
 
-// --- shim (complete, canonical shape, any hash form) — identity calls
-// --- live in shim.ts; this adapter maps them onto race semantics.
+// --- shim + shim-potato (complete, canonical shape, any hash form) — identity
+// --- calls live in shim.ts; this factory maps them onto race semantics.
+// --- shim-potato is the same adapter pointed at the canary host (PLAN8).
 
-export const shimProvider: CastProvider = {
-	id: "shim",
-	complete: true,
-	canServe: () => true,
-	async fetchCast(vars, signal) {
-		const lookup = await getCastByUsernameHash(
-			vars.username,
-			vars.hash,
-			signal,
-		);
-		if (lookup.status === "error") {
-			return { kind: "error", provider: "shim", message: lookup.message };
-		}
-		if (lookup.status === "miss") return { kind: "miss", provider: "shim" };
-		return { kind: "found", provider: "shim", complete: true, cast: lookup.cast };
-	},
-};
+export function shimProviderFor(id: "shim" | "shim-potato", base: string): CastProvider {
+	return {
+		id,
+		complete: true,
+		// Only the canonical shim's miss 404s the race (plus the fast-404
+		// special case below); shim-potato's misses are telemetry only.
+		missAuthoritative: id === "shim",
+		canServe: () => true,
+		async fetchCast(vars, signal) {
+			const lookup = await getCastByUsernameHashFrom(
+				base,
+				vars.username,
+				vars.hash,
+				signal,
+			);
+			if (lookup.status === "error") {
+				return { kind: "error", provider: id, message: lookup.message };
+			}
+			if (lookup.status === "miss") return { kind: "miss", provider: id };
+			return { kind: "found", provider: id, complete: true, cast: lookup.cast };
+		},
+	};
+}
+
+export const shimProvider = shimProviderFor("shim", SHIM_CLOUD_BASE);
+
+/**
+ * The shim-potato canary leg — same contract, different host. Wins are real
+ * (head-to-head measurement); misses never 404 the race.
+ */
+export const shimPotatoProvider = (base: string): CastProvider =>
+	shimProviderFor("shim-potato", base);
+
+/**
+ * The HTML race roster: the static four, plus shim-potato when the canary is
+ * switched on (SHIM_POTATO_BASE set). Undefined = raceCast's default roster.
+ * The JSON twin deliberately stays shim-only — resolveCast passes
+ * [shimProvider] there regardless.
+ */
+export function raceRoster(potatoBase: string | undefined): CastProvider[] | undefined {
+	return potatoBase ? [...PROVIDERS, shimPotatoProvider(potatoBase)] : undefined;
+}
 
 // --- farcaster.tv (quote-blind partial, any hash form via prefix match) ---
 
@@ -535,9 +586,12 @@ type RaceEvent =
  * - A complete provider's validated `found` wins immediately.
  * - A partial (quote-blind) `found` may only win once the box expires —
  *   boxMs 0 disables the wait (partial wins as soon as it lands).
- * - A miss from a COMPLETE provider is authoritative ⇒ not-found, even if
- *   a partial found landed first (parity with the old shim-miss ⇒ 404).
- *   Shim's miss additionally resolves the race immediately (fast 404s).
+ * - A miss from a COMPLETE provider with miss authority is authoritative
+ *   ⇒ not-found, even if a partial found landed first (parity with the
+ *   old shim-miss ⇒ 404). Shim's miss additionally resolves the race
+ *   immediately (fast 404s). The shim-potato canary opts out of miss authority
+ *   (missAuthoritative: false) — its misses count in telemetry but never
+ *   404 a cast the race could still resolve.
  * - Anything else after all providers settle ⇒ unreachable.
  * Losers are aborted when the race resolves.
  */
@@ -554,7 +608,10 @@ export async function raceCast(
 	});
 	if (eligible.length === 0)
 		return { kind: "unreachable", timings: [], elapsedMs: 0 };
-	const isComplete = new Map(eligible.map((p) => [p.id, p.complete]));
+	// Miss authority: complete providers by default, canary legs opt out.
+	const missVerdict = new Map(
+		eligible.map((p) => [p.id, p.complete && p.missAuthoritative !== false]),
+	);
 
 	const controllers = new Map<ProviderId, AbortController>();
 	const timings: ProviderTiming[] = [];
@@ -681,7 +738,7 @@ export async function raceCast(
 				completeMiss = true;
 				break;
 			}
-			if (isComplete.get(event.provider)) completeMiss = true;
+			if (missVerdict.get(event.provider)) completeMiss = true;
 		}
 	}
 	if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);

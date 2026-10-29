@@ -768,7 +768,12 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	expect(json.data.providers).toHaveLength(4);
+	// Five: the four racers plus the shim-potato canary row (dashes until the
+	// SHIM_POTATO_BASE var goes live — PLAN8).
+	expect(json.data.providers).toHaveLength(5);
+	expect(json.data.providers.map((p: { id: string }) => p.id)).toContain(
+		"shim-potato",
+	);
 	expect(json.racingStats.status).toBe("coming-soon");
 	// counters became one entry per counter when click-through tracking
 	// shipped (declared shape change) — both entries keep the negative list.
