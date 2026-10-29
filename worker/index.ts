@@ -26,6 +26,7 @@ import {
 	renderProfileJson,
 	resolveConversationAlias,
 	resolveProfile,
+	resolveProfileFidAlias,
 } from "./profile-page.tsx";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { getFidRaceSnapshot } from "./fid-race-store.ts";
@@ -506,6 +507,41 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		`/${encodeURIComponent(resolved.username)}/${resolved.fullHash}`,
 		302,
 	);
+});
+
+// Farcaster's fid-profile shape (/~/profiles/{fid} — farcaster.xyz renders
+// the profile right there; the /~/profiles/{username} shape answers too).
+// Our waypoint law keeps ONE canonical surface per account, so this alias is
+// a redirect, not a second page. Username shape: canonicalizes with zero
+// fetches (the profile charset gate + lowercase do the rest downstream).
+// Fid shape: shim /u/{fid} — the conversations alias's own /u tail — then
+// 302 — never 301, the mapping stays cache-free — with a RELATIVE Location
+// to /{username}. /u semantics mirror the profile family: non-2xx/throw ⇒
+// 503 + Retry-After (identity has no fail-open source), HTTP-200 miss ⇒ 404.
+app.get("/~/profiles/:id{[a-zA-Z0-9._-]{1,20}}", async (c) => {
+	const id = c.req.param().id;
+	// The all-digits shape is a fid; anything else is the username shape.
+	if (/^[0-9]+$/.test(id)) {
+		const fid = Number(id);
+		// Past Number.MAX_SAFE_INTEGER the digits are a lie — 404 without
+		// querying (real fids are nowhere near the precision cliff).
+		if (!Number.isSafeInteger(fid)) return c.body(null, 404);
+		const resolved = await resolveProfileFidAlias(fid);
+		if (resolved.kind === "unreachable") {
+			return c.body(null, 503, { "retry-after": "60" });
+		}
+		if (resolved.kind === "not-found") return c.body(null, 404);
+		return c.redirect(`/${encodeURIComponent(resolved.username)}`, 302);
+	}
+	return c.redirect(`/${encodeURIComponent(id.toLowerCase())}`, 302);
+});
+
+// Trailing slash rides the site-wide 301 policy (same shape, minus the
+// slash, search preserved) — see /~/channel above.
+app.get("/~/profiles/:id{[a-zA-Z0-9._-]{1,20}}/", (c) => {
+	const id = c.req.param().id;
+	const search = new URL(c.req.url).search;
+	return c.redirect(`/~/profiles/${id}${search}`, 301);
 });
 
 export default {

@@ -67,6 +67,7 @@ import {
 	getUserByFid,
 	hUrl,
 	getUsernameByFid,
+	uUrl,
 	warmShimHashIndex,
 	type ShimCast,
 	type ShimUser,
@@ -816,4 +817,51 @@ export async function resolveConversationAlias(
 		if (!username) return { kind: "not-found" };
 	}
 	return { kind: "found", username, fullHash: found.hash };
+}
+
+// --- Farcaster fid-profile alias (/~/profiles/{fid}) ---------------------------
+//
+// farcaster.xyz renders profiles at /~/profiles/{fid} (and answers the
+// /~/profiles/{username} shape too). The username shape canonicalizes with
+// zero fetches in the route handler; the fid shape needs identity: shim
+// /u/{fid} — the same tail the conversations alias uses — then 302 to the
+// canonical /{username} waypoint. Waypoint law keeps ONE surface per
+// account: the alias never renders.
+
+export type ResolvedProfileFidAlias =
+	| { kind: "found"; username: string }
+	| { kind: "not-found" }
+	| { kind: "unreachable" };
+
+export async function resolveProfileFidAlias(
+	fid: number,
+): Promise<ResolvedProfileFidAlias> {
+	// Profile-family discipline for a load-bearing identity call: the 8s
+	// window, one retry on transport failure or non-ok (getFidByUsername
+	// set the precedent — a shim non-2xx is an outage signal, NOT a miss).
+	// The parse below can't throw (res.json is .catch-guarded), so the try
+	// carries exactly the fetch: a throw after the retry is the only road
+	// to "unreachable" here.
+	try {
+		const res = await withOneRetry(
+			(signal) => fetch(uUrl(fid), { signal }),
+			(r) => !r.ok,
+		);
+		if (!res.ok) return { kind: "unreachable" };
+		const data = (await res.json().catch(() => undefined)) as
+			| { success?: boolean; username?: string }
+			| undefined;
+		// shim /u is fname-first: the username field IS the primary handle
+		// (identity law) — exactly what the redirect target must carry.
+		const username =
+			typeof data?.username === "string" && data.username !== ""
+				? data.username
+				: null;
+		// An HTTP-200 miss is the verdict: the index was consulted and has
+		// no username for this fid.
+		if (!username) return { kind: "not-found" };
+		return { kind: "found", username };
+	} catch {
+		return { kind: "unreachable" };
+	}
 }

@@ -1191,6 +1191,88 @@ test("alias: non-0x shapes never match the route (no upstream calls)", async () 
 	expect(calls).toBe(0);
 });
 
+// --- /~/profiles/{fid}: farcaster's fid-profile shape, canonicalized ----------
+
+test("/~/profiles/{fid} 302s to the canonical profile waypoint", async () => {
+	globalThis.fetch = shimMock({
+		"https://shim.artlu.xyz/u/10215": { success: true, username: USERNAME },
+	});
+	const res = await app.request("/~/profiles/10215");
+	expect(res.status).toBe(302);
+	// Relative Location (dual-serve hosts stay self-contained); the target
+	// is the PRIMARY handle — shim /u is fname-first.
+	expect(res.headers.get("location")).toBe(`/${USERNAME}`);
+});
+
+test("/~/profiles/{fid}: /u 200-miss ⇒ 404; non-2xx/throw ⇒ 503 + Retry-After", async () => {
+	// HTTP 200 with no username — the index was consulted, the verdict
+	// is real.
+	globalThis.fetch = shimMock({
+		"https://shim.artlu.xyz/u/10215": { success: true },
+	});
+	expect((await app.request("/~/profiles/10215")).status).toBe(404);
+
+	// A non-2xx is an outage signal, NOT a miss — profile-family
+	// discipline (one retry, then 503).
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/u/10215") {
+			return new Response("boom", { status: 500 });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const notOk = await app.request("/~/profiles/10215");
+	expect(notOk.status).toBe(503);
+	expect(notOk.headers.get("retry-after")).toBe("60");
+
+	// Transport failure — same unknown ⇒ 503 (retry included).
+	let calls = 0;
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim.artlu.xyz/u/10215") {
+			calls++;
+			throw new Error("shim unavailable");
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const down = await app.request("/~/profiles/10215");
+	expect(down.status).toBe(503);
+	expect(down.headers.get("retry-after")).toBe("60");
+	expect(calls).toBe(2); // withOneRetry: the 8s window rides one retry
+});
+
+test("/~/profiles/{username} canonicalizes with zero fetches", async () => {
+	let calls = 0;
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		calls++;
+		throw new Error(`Unexpected fetch in test: ${input}`);
+	}) as typeof fetch;
+	// Capitals ride the profile gate: the redirect target is lowercased.
+	const capped = await app.request("/~/profiles/Decent-Artlu");
+	expect(capped.status).toBe(302);
+	expect(capped.headers.get("location")).toBe(`/${USERNAME}`);
+	expect(calls).toBe(0);
+});
+
+test("/~/profiles: garbage shapes 404 with zero upstream fetches", async () => {
+	let calls = 0;
+	globalThis.fetch = mock(async () => {
+		calls++;
+		throw new Error("Unexpected fetch in test");
+	}) as typeof fetch;
+	// Beyond Number.MAX_SAFE_INTEGER — the digits are a lie.
+	expect(
+		(await app.request("/~/profiles/99999999999999999999")).status,
+	).toBe(404);
+	// The route's charset pattern never matches this — Hono's own 404.
+	expect((await app.request("/~/profiles/bad!id")).status).toBe(404);
+	// The trailing-slash form 301s to the canonical alias (query kept).
+	const slashed = await app.request("/~/profiles/10215/?format=json");
+	expect(slashed.status).toBe(301);
+	expect(slashed.headers.get("location")).toBe("/~/profiles/10215?format=json");
+	expect(calls).toBe(0);
+});
+
 // --- Phase 2: the stateful layer (badge + auto-open on the user routes) -------
 
 const signedTrueMock = () =>
