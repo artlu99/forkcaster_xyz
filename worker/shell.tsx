@@ -2,7 +2,7 @@
 // used by cast pages and /transparency alike. Escape everything that
 // touches user or upstream text with escapeHtml; cast text is untrusted.
 
-import { siGithub, siGithubsponsors, siOpenaccess } from "../shared/footer-icons.ts";
+import { siGithub, siGithubsponsors, siOpenaccess } from "simple-icons";
 import { iconMark } from "../shared/icon-mark.ts";
 
 // Shared with transparency.tsx — the only escaper for hand-built HTML.
@@ -242,9 +242,9 @@ main { padding-bottom: 8px; }
 ${bodyHtml}
 </main>
 <footer class="site-footer">
-  <a href="https://github.com/artlu99/forkcaster_xyz">${iconMark(siGithub)}MIT license</a>
-  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${iconMark(siGithubsponsors)}Contributing</a>
-  <a href="/transparency">${iconMark(siOpenaccess)}Transparency</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz">${iconMark(siGithub.svg)}MIT license</a>
+  <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${iconMark(siGithubsponsors.svg)}Contributing</a>
+  <a href="/transparency">${iconMark(siOpenaccess.svg)}Transparency</a>
 </footer>
 ${clientScript ?? ""}
 </body>
