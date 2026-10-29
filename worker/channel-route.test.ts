@@ -289,7 +289,7 @@ test("canonical always carries /~/channel/{id}; the bare /channel/{id} alias is 
 });
 
 test("the bare /channel/{id} shape 404s with zero upstream fetches", async () => {
-	// Owner call: the bare alias was removed. A plain id matches no route
+	// A plain id matches no route
 	// (the cast route needs a 0x hash) — 404, and the Warpcast API is
 	// never asked.
 	let calls = 0;

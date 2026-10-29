@@ -178,8 +178,8 @@ ${channelActionsHtml(id, external)}`;
 	};
 	// Canonical + og:url carry the /~/channel/{id} shape — the form
 	// farcaster.xyz itself canonicalizes to (warpcast.com 301s there), so
-	// forkcaster serves only that shape (owner call: the bare /channel/{id}
-	// alias was removed).
+	// forkcaster serves only that shape (the bare /channel/{id} shape 404s
+	// with zero fetches — a plain id would shadow a user named "channel").
 	const canonicalUrl = primaryOrigin
 		? `${primaryOrigin}/~/channel/${encodeURIComponent(id)}`
 		: undefined;

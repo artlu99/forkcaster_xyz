@@ -49,9 +49,9 @@ export type UnfurlResult = {
 };
 
 /**
- * The author handle a surface should carry — the identity law (2026-10-27
- * rethink of "canonical"): the fname is the account's PRIMARY handle (the
- * first name); any number of ENS names are attestations. `username` on
+ * The author handle a surface should carry — the identity law: the fname
+ * is the account's PRIMARY handle (the first name); any number of ENS
+ * names are attestations. `username` on
  * shim answers is the NEWEST proof and stays the backward-compat shape,
  * so primary prefers fname and falls back through it to the caller's own
  * fallback (usually the gate-validated route input). Absent user (raw

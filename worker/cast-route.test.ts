@@ -432,7 +432,7 @@ test("cast page <title> never echoes the percent-decoded username (XSS regressio
 	const body = await res.text();
 	// The payload never renders raw — and since the identity law the found
 	// page's <title> carries the cast's PRIMARY handle, so the route input
-	// no longer reaches <title> at all (the not-found test above pins
+	// doesn't reach <title> (the not-found test above pins
 	// escapeHtml where the input still renders).
 	expect(body).not.toContain("</title><script>");
 	expect(body).not.toContain("alert(1)");

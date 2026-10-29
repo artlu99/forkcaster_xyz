@@ -19,6 +19,7 @@ import {
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
+	type CastData,
 	hasExternalLinks,
 	imageUrlsOf,
 	primaryHandle,
@@ -78,6 +79,61 @@ export function relinkFarcasterAnchor(html: string, castPath: string): string {
 					() => 'title="Open on forkcaster"',
 				),
 	);
+}
+
+// Render one embed card — the pipeline every card surface shares:
+// react-farcaster-embed SSR, hardened blank targets, and the library's
+// zero-count stats stub swapped for the live-stats slot (the script fills
+// every `.farcaster-embed-stats[data-username]` slot on the page; each
+// degrades alone). Knobs, per surface:
+//   local    — the farcaster.xyz cast URL is dead/unwanted on this
+//              surface: the slot ships data-local="1" and LIVE_STATS_SCRIPT
+//              writes local waypoint links instead of farcaster.xyz ones.
+//   hideIcon — hide the Show-on-Farcaster icon outright (the library's own
+//              option). The individual cast page uses it for proven-unsigned
+//              authors: the icon's only honest local twin would self-link
+//              this very waypoint.
+//   castPath — retarget the icon to this local waypoint and relabel it
+//              "Open on forkcaster". List pages use it: the waypoint is
+//              another page — never a self-link — and it resolves for
+//              every author, signed or not.
+//   noStats  — drop the zero-stub stats row entirely (quote cards carry
+//              no live-stats slot).
+// The ONE card pipeline: the individual cast page (hideIcon+local for
+// proven-unsigned authors), the quote fragment (noStats), and the casts
+// list (local+castPath) all render through it.
+export async function renderEmbedCard(opts: {
+	username: string;
+	hash: string;
+	castData: CastData;
+	local?: boolean;
+	hideIcon?: boolean;
+	castPath?: string;
+	noStats?: boolean;
+}): Promise<string> {
+	let html = hardenBlankTargets(
+		renderToString(
+			(await FarcasterEmbed({
+				username: opts.username,
+				hash: opts.hash,
+				castData: opts.castData,
+				...(opts.hideIcon
+					? { options: { hideFarcasterLogo: true } }
+					: {}),
+			})) as never,
+		),
+	);
+	html = opts.noStats
+		? // Quote cards carry no live-stats slot: keep the bare slot div,
+			// drop the zero-count stub (the script never fills a slot without
+			// data-username, so this row stays inert).
+			html.replace(STATS_ROW, (_match, opening: string) => opening)
+		: html.replace(
+				STATS_ROW,
+				() =>
+					`<div class="farcaster-embed-stats"${opts.local ? ' data-local="1"' : ""} data-username="${escapeHtml(opts.username)}" data-hash="${escapeHtml(opts.hash)}">`,
+			);
+	return opts.castPath ? relinkFarcasterAnchor(html, opts.castPath) : html;
 }
 
 // Exported for the casts skeleton page (same enrichment pipeline, same
@@ -379,24 +435,17 @@ export async function renderCastHtml(
 		// title, and the canonical/pill vars. Absent user degrades to the
 		// route input (today's bytes).
 		const primary = primaryHandle(cast.user, username);
-		const cardHtml = hardenBlankTargets(
-			renderToString(
-				(await FarcasterEmbed({
-					username: primary,
-					hash,
-					castData: toCastData(
-						cast.user ? { ...cast, user: { ...cast.user, username: primary } } : cast,
-						unfurlMap,
-						quotes,
-					),
-					...(local ? { options: { hideFarcasterLogo: true } } : {}),
-				})) as never,
-			).replace(
-				STATS_ROW,
-				() =>
-					`<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(primary)}" data-hash="${escapeHtml(hash)}">`,
+		const cardHtml = await renderEmbedCard({
+			username: primary,
+			hash,
+			castData: toCastData(
+				cast.user ? { ...cast, user: { ...cast.user, username: primary } } : cast,
+				unfurlMap,
+				quotes,
 			),
-		);
+			local,
+			hideIcon: local,
+		});
 		// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the
 		// cast: author handle as title, cast text as description, first
 		// image embed (else the avatar) as image.
@@ -469,18 +518,16 @@ export async function renderQuotesFragment(
 		try {
 			// Identity law: quote cards carry the quoted author's primary.
 			const quoteUsername = primaryHandle(quote.user, username);
-			const card = hardenBlankTargets(
-				renderToString(
-					(await FarcasterEmbed({
-						username: quoteUsername,
-						hash: quote.hash,
-						castData: toCastData(quote),
-					})) as never,
-				),
-			)
-				// Quote cards carry no live-stats slot: drop the zero-stub row.
-				.replace(STATS_ROW, "$1");
-			cards.push(card);
+			cards.push(
+				await renderEmbedCard({
+					username: quoteUsername,
+					hash: quote.hash,
+					castData: toCastData(quote),
+					// Quote cards carry no live-stats slot: the zero-stub
+					// row is dropped inside the helper.
+					noStats: true,
+				}),
+			);
 		} catch {
 			// A broken quote card must never take the fragment down.
 		}

@@ -21,14 +21,12 @@
 // gate-validated route input, not the primary handle — shim resolves any
 // resolvable alias (fname, ENS, basename) to the same fid, while
 // /user/{fid} answers the NEWEST username proof, which can differ from
-// what was typed. Identity law (2026-10-27 rethink of "canonical"): the
+// what was typed. Identity law: the
 // fname is the account's PRIMARY handle — the first name — and any number
 // of ENS names are attestations, rendered in parens after it (capped).
 // Display, OG/canonical, external client targets, and the JSON twin carry
 // the primary; first-party navigation keeps the visitor's own words.
 
-import { renderToString } from "preact-render-to-string";
-import { FarcasterEmbed } from "react-farcaster-embed";
 import {
 	rescueHashViaFarcasterTv,
 	UPSTREAM_TIMEOUT_MS,
@@ -36,17 +34,11 @@ import {
 import {
 	primaryHandle,
 	quoteTargetsOf,
-	STATS_ROW,
 	toCastData,
 	urlEmbedsOf,
 	type UnfurlResult,
 } from "./cast-data.ts";
-import {
-	fetchQuote,
-	hardenBlankTargets,
-	relinkFarcasterAnchor,
-	unfurl,
-} from "./cast-page.tsx";
+import { fetchQuote, renderEmbedCard, unfurl } from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
 	TRACK_SCRIPT,
@@ -122,7 +114,7 @@ export type ResolvedProfile =
 // --- Identity law: primary handle + attestations -------------------------------
 
 /**
- * Identity law (2026-10-27 rethink of "canonical"): the fname is the
+ * Identity law: the fname is the
  * account's PRIMARY handle — the first name — while any number of ENS
  * names (L1 or L2/basenames) are attestations. `primaryHandle` (cast-data)
  * resolves it; this file adds the attestation rendering.
@@ -545,10 +537,16 @@ export function renderProfileJson(
 //
 // The farcaster.xyz URL-shape mirror, and the ONE list surface: the profile
 // is the identity card (no casts), this page renders each cast IN FULL —
-// exactly the individual cast page's pipeline: react-farcaster-embed SSR,
-// unfurl-enriched URL embeds (≤3 per cast), /h-hydrated quotes (≤3 per
-// cast), blank-target hardening, live-stats slot per card (the stats
-// script fills every slot). Shim's timeline rows carry no inline user, so
+// exactly the individual cast page's pipeline (renderEmbedCard):
+// react-farcaster-embed SSR, unfurl-enriched URL embeds (≤3 per cast),
+// /h-hydrated quotes (≤3 per cast), blank-target hardening, live-stats
+// slot per card (the stats script fills every slot). One deliberate
+// divergence from the individual cast page: every card links HOME — the
+// Show-on-Farcaster anchor and the stats slot's client-built links point
+// at the forkcaster waypoint, which always resolves, signed or not (the
+// individual cast page hides the icon for proven-unsigned authors, where
+// a retarget would self-link; here the waypoint is another page). Shim's
+// timeline rows carry no inline user, so
 // the profile entity is attached as the author. The OG preview is IDENTICAL
 // to the profile's (same card visual, deeper page); canonical/og:url stay
 // on this page's own URL. No JSON twin — the link is omitted rather than
@@ -605,6 +603,7 @@ export async function renderCastsHtml(
 	for (const cast of casts) {
 		// No hash ⇒ unroutable — skip rather than render a dead card.
 		if (!cast.hash) continue;
+		const hash = cast.hash;
 		const unfurlMap = new Map<string, UnfurlResult | undefined>();
 		for (const u of urlEmbedsOf(cast)) {
 			const r = unfurlResults[unfurlIndex++];
@@ -615,35 +614,20 @@ export async function renderCastsHtml(
 			return r?.status === "fulfilled" ? r.value : undefined;
 		});
 		try {
-			// Same stats slot the individual cast page ships — the
-			// live-stats script fills every slot on the page. For a proven
-			// unsigned author the slot is flagged (data-local): the
-			// farcaster.xyz cast URL is dead for them, so the script writes
-			// local waypoints; unknown signedness fails open and the flag
-			// never ships.
-			const local = signed === false;
-			const statsSlot = `<div class="farcaster-embed-stats"${local ? ' data-local="1"' : ""} data-username="${escapeHtml(primary)}" data-hash="${escapeHtml(cast.hash as string)}">`;
-			const card = hardenBlankTargets(
-				renderToString(
-					(await FarcasterEmbed({
-						username: primary,
-						hash: cast.hash,
-						castData: toCastData(
-							{ ...cast, user: author },
-							unfurlMap,
-							quotes,
-						),
-					})) as never,
-				),
-			).replace(STATS_ROW, () => statsSlot);
 			cards.push(
-				local
-					? relinkFarcasterAnchor(
-							card,
-							// First-party link ⇒ echoes the validated input.
-							`/${encodeURIComponent(username)}/${cast.hash}`,
-						)
-					: card,
+				await renderEmbedCard({
+					username: primary,
+					hash,
+					castData: toCastData({ ...cast, user: author }, unfurlMap, quotes),
+					// Every card links home (waypoint law): the card's cast
+					// anchor and its live-stats links point at the forkcaster
+					// waypoint, which always resolves — the farcaster.xyz cast
+					// page is dead for a proven-unsigned author and merely
+					// off-route for everyone else. First-party link ⇒ echoes
+					// the validated route input.
+					local: true,
+					castPath: `/${encodeURIComponent(username)}/${hash}`,
+				}),
 			);
 		} catch {
 			// A broken card must never take the list down.

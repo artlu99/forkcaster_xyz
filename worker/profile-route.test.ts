@@ -555,7 +555,7 @@ test("first-party links echo the validated input; display keeps the entity handl
 });
 
 test("identity law: the fname is the primary handle; ENS names are attestations", async () => {
-	// The 2026-10-27 rethink of "canonical": the fname — the account's
+	// Identity law: the fname — the account's
 	// FIRST name — is primary; any number of ENS names (L1 + L2) are
 	// attestations, rendered in parens after it. The shim entity carries
 	// the split alongside the newest-proof username. Arriving by the ENS
@@ -723,7 +723,14 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 	);
 	expect(body).toContain("first cast");
 	expect(body).toContain("second cast");
-	expect(body).toContain("farcaster-embed-farcaster-link");
+	// Waypoint law: every card links home — the icon retargets to the
+	// cast's forkcaster page (this author is signed; signedness never
+	// gated the cards), and the stats slot ships data-local so the fill
+	// script writes local links too.
+	expect(body).toContain(
+		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
+	);
+	expect(body).toContain('data-local="1"');
 	expect(body).not.toContain("hashless");
 	// Per-card live-stats slot + the multi-slot fill script.
 	expect(body).toContain(`data-hash="${CAST_HASH}"`);
@@ -826,13 +833,16 @@ test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
 	expect(body).toContain("first cast");
 });
 
-test("unsigned casts page: dead farcaster.xyz cast anchors retarget to the forkcaster waypoint", async () => {
-	// signed:false ⇒ farcaster.xyz is read-only for the author, so the
-	// cast URL the embed stamps on every card (Show-on-Farcaster icon)
-	// and the client-built stats links point at a dead page there. The
-	// cards retarget those — and only those — to the local waypoint;
-	// the profile anchor stays (it works unsigned) and author-typed
-	// farcaster.xyz links in cast text are content, untouched.
+test("casts page: every card's farcaster.xyz cast anchors link the forkcaster waypoint", async () => {
+	// Waypoint law for the list: the cast URL the embed stamps on every
+	// card (Show-on-Farcaster icon) and the client-built stats links point
+	// at the local waypoint — it always resolves, while the farcaster.xyz
+	// cast page is dead for a proven-unsigned author and merely off-route
+	// for everyone else. The cards retarget those — and only those — to
+	// the local waypoint; the profile anchor stays (it works unsigned)
+	// and author-typed farcaster.xyz links in cast text are content,
+	// untouched. The signed page below proves signedness is irrelevant
+	// to the cards (it only ever gated the client menu).
 	const withFarcasterBodyLink = {
 		success: true,
 		casts: [
@@ -872,18 +882,18 @@ test("unsigned casts page: dead farcaster.xyz cast anchors retarget to the forkc
 		`<a href="https://farcaster.xyz/${USERNAME}/${CAST_HASH}" target="_blank" rel="noopener" class="farcaster-embed-body-link">`,
 	);
 
-	// The signed page keeps every original farcaster.xyz anchor (fail
-	// open: only a PROVEN-unsigned author gets the retarget). The bare
-	// "data-local" string ships inside LIVE_STATS_SCRIPT itself, so the
-	// attribute form is the discriminator.
+	// The signed page retargets identically — the waypoint is the honest
+	// cast link on this surface for every author. The bare "data-local"
+	// string ships inside LIVE_STATS_SCRIPT itself, so the attribute form
+	// is the discriminator.
 	globalThis.fetch = repliesMock();
 	const signedBody = await (
 		await app.request(`/${USERNAME}/casts-and-replies`)
 	).text();
 	expect(signedBody).toContain(
-		`<a href="https://farcaster.xyz/${USERNAME}/${CAST_HASH}" title="Show on Farcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
+		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
 	);
-	expect(signedBody).not.toContain('data-local="1"');
+	expect(signedBody).toContain('data-local="1"');
 });
 
 test("profile card escapes hostile upstream text (XSS regression)", async () => {
