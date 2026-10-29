@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
-import { siGithub, siGithubsponsors, siModelcontextprotocol, siOpenaccess } from 'simple-icons'
+import { siGithub, siGithubsponsors, siModelcontextprotocol, siOpenaccess } from '../shared/footer-icons.ts'
 import { iconMark } from '../shared/icon-mark.ts'
 // Dependency-free — same parser the worker uses for the cookie, and the
 // registry's read-only per-kind summary line.
@@ -124,7 +124,7 @@ function App() {
           <a href="https://github.com/artlu99/forkcaster_xyz">
             <span
               className="repo-mark"
-              dangerouslySetInnerHTML={{ __html: iconMark(siGithub.svg) }}
+              dangerouslySetInnerHTML={{ __html: iconMark(siGithub) }}
             />
             MIT license
           </a>{' '}
@@ -133,7 +133,7 @@ function App() {
             <span
               className="repo-mark"
               dangerouslySetInnerHTML={{
-                __html: iconMark(siGithubsponsors.svg),
+                __html: iconMark(siGithubsponsors),
               }}
             />
             Contributing
@@ -143,7 +143,7 @@ function App() {
             <span
               className="repo-mark"
               dangerouslySetInnerHTML={{
-                __html: iconMark(siOpenaccess.svg),
+                __html: iconMark(siOpenaccess),
               }}
             />
             Transparency
@@ -153,7 +153,7 @@ function App() {
             <span
               className="repo-mark"
               dangerouslySetInnerHTML={{
-                __html: iconMark(siModelcontextprotocol.svg),
+                __html: iconMark(siModelcontextprotocol),
               }}
             />
             MCP
