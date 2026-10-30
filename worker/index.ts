@@ -1,6 +1,13 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import {
+	getShell,
+	shellCacheKey,
+	shellRequestEligible,
+	shellWorthCaching,
+	putShell,
+} from "./edge-cache.ts";
+import {
 	renderChannelHtml,
 	renderChannelJson,
 	resolveChannel,
@@ -302,6 +309,23 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// a 700ms completeness box (cast-source.ts); JSON rides the complete-leg
 	// fleet roster (shim + potatos) with strict statuses.
 	const wantsJson = negotiatesJson(c);
+	// The shell gate (worker/edge-cache.ts): personalization-free requests
+	// may serve a cached found-complete shell — bots and first-time clicks
+	// get the edge; cookie-holders keep today's personalized render. Only
+	// found-complete shells ever enter the cache (the invariant), so a
+	// cached response is byte-identical to the cold render a previewer
+	// would immortalize.
+	const shellKey = shellRequestEligible({
+		cookiePresent: getCookie(c, LAST_CLIENT_COOKIE) !== undefined,
+		noredirect: c.req.query("noredirect") === "1",
+		wantsJson,
+	})
+		? shellCacheKey(new URL(c.req.url))
+		: undefined;
+	if (shellKey) {
+		const hit = await getShell(shellKey);
+		if (hit) return hit;
+	}
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
@@ -393,7 +417,29 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		c.req.query("noredirect") === "1",
 		rank,
 	);
-	return c.html(html, status);
+	const res = c.html(html, status);
+	// The invariant gate: only found-complete shells enter the cache —
+	// link-only (fail-open) pages, consensus 404s, outages and partials
+	// pass through fresh, so a stale or empty preview can never be served
+	// from it. The fill is non-blocking (tests without an executionCtx
+	// fill inline).
+	if (
+		shellKey &&
+		shellWorthCaching({
+			status,
+			kind: resolved.kind,
+			partial: resolved.kind === "found" && resolved.partial,
+		})
+	) {
+		res.headers.set("x-forkcaster-shell", "fill");
+		const put = putShell(shellKey, res.clone());
+		try {
+			c.executionCtx.waitUntil(put);
+		} catch {
+			await put;
+		}
+	}
+	return res;
 });
 
 // Profile landing pages — the FIRST parametric single-segment route,

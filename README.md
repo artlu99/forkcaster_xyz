@@ -45,7 +45,7 @@ Cloudflare Worker (Hono; dual-domain; registration-order routing)
 - **Identity law** — the fname is the PRIMARY handle everywhere; ENS names are attestations.
 - **Echo-the-valid-input** — first-party links carry the gate-validated route input; display, OG, and client targets carry the primary.
 - **Privacy: no identifiable tracking, only analytics.** One anonymous click datapoint per client selection; the negative list (no cast IDs, no usernames, no IPs, no UA strings, no identifiers) is verbatim-checkable in `worker/track.ts` and declared on `/transparency`. Pages make no third-party requests — logos are self-hosted because a hotlinked logo would leak every visitor's IP to that client's servers. The one cookie carries a client slug, nothing else.
-- **Cookie-conditional ⇒ uncacheable** — personalization and caching never fight because caching was never introduced; one fan-out per render.
+- **Personalization is the cache boundary.** Cookie-free requests may be served a cached **shell** — a found, complete server render (OG meta included) edge-cached 12h under salted keys; anything cookie-conditional (badge, auto-open, pill order) is never cached, and neither are 404s, 503s, link-only pages, partials, or JSON variants. Cached hits are byte-identical to cold renders, so link previews are unaffected; cookie-holders keep the personalized render. Bump `SHELL_SALT` in `worker/edge-cache.ts` to invalidate every shell (there is no global purge).
 - **Registry as the one roster** — clients and their verification provenance are enumerated exactly once, in `worker/client-registry.ts`.
 
 ## Stack
@@ -171,7 +171,7 @@ Decisions:
 - **Ban signal**: `signed: false` emits a short note field; unknown/failed check fails open silently (same fail-open semantics as the HTML action row).
 - **Discoverability**: HTML pages emit `<link rel="alternate" type="application/json" href="?format=json">`.
 - **Deferred**: UA-allowlist morphing (GPTBot, ClaudeBot, …) as a later progressive enhancement. Must stay an allowlist — Telegram/Discord/iMessage preview bots must keep receiving HTML + OG meta.
-- No page-level caching today (the upstream fleet is the cache); if edge caching is ever added, the variant must join the cache key.
+- Cast HTML shells edge-cache 12h (`worker/edge-cache.ts` — found-complete only, cookie-free requests only, salted keys); every JSON variant bypasses the cache entirely and must stay that way.
 
 ## MCP
 
@@ -209,7 +209,7 @@ Cast lookups race the provider fleet (`worker/cast-source.ts`, rpc-racer pattern
 | snap (`snap.farcaster.xyz:3381`, official gateway; 443 hangs) | ⚠️ same as haatz | ✅ | complete — full-hash requests |
 | farcaster.tv | ✅ short (prefix-match) | ❌ **silently dropped** | partial — quote-blind |
 
-**HTML path (700ms completeness box):** complete providers win anytime; a quote-blind farcaster.tv win is held until the box expires, then served as a **partial** page — the SWR tradeoff the OG meta is immune to: title/description/image never depend on quotes, so chat-bots' cached embed cards are always complete. The partiality only reaches live browsers, which self-heal: partial pages ship `QUOTE_FILL_SCRIPT`, which fetches `?embeds=quotes` (shim-resolved, quote-hydrated SSR fragment, `no-store`) and injects it — same silent-degradation contract as the live-stats script. **No server-side cache**: the last-used badge and signed suppression stay cache-key-free.
+**HTML path (700ms completeness box):** complete providers win anytime; a quote-blind farcaster.tv win is held until the box expires, then served as a **partial** page — the SWR tradeoff the OG meta is immune to: title/description/image never depend on quotes, so chat-bots' cached embed cards are always complete. The partiality only reaches live browsers, which self-heal: partial pages ship `QUOTE_FILL_SCRIPT`, which fetches `?embeds=quotes` (shim-resolved, quote-hydrated SSR fragment, `no-store`) and injects it — same silent-degradation contract as the live-stats script. **Shell caching:** cookie-free requests on cast pages may be served a cached found-complete shell (`worker/edge-cache.ts`, 12h `s-maxage`, salted query-free keys, hits rewritten `no-store`); link-only pages, 404s, 503s, partials and JSON variants never cache — the last-used badge and signed suppression stay cache-key-free by construction.
 
 **JSON path:** the complete-leg fleet roster (`jsonRoster` — shim + potatos, `boxMs: null`) — always complete, strict statuses (404 / 503 + Retry-After), the never-drop-quotes invariant holds unconditionally.
 
