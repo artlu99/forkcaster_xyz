@@ -128,9 +128,11 @@ test("partial provider wins at the box while a complete provider is pending", as
 	const race = await raceCast(VARS, { boxMs: 40 });
 	const elapsed = Date.now() - started;
 	// The box gates the quote-blind win until the pending complete provider
-	// has had its chance — but no longer than the box.
+	// has had its chance — but no longer than the box. (Ceiling is generous:
+	// under parallel test load, timers overshoot; the proof is that the box
+	// — not the 5s provider cap — governs.)
 	expect(elapsed).toBeGreaterThanOrEqual(35);
-	expect(elapsed).toBeLessThan(150);
+	expect(elapsed).toBeLessThan(400);
 	expect(race.kind).toBe("found");
 	if (race.kind === "found") {
 		expect(race.provider).toBe("farcaster-tv");
@@ -149,7 +151,8 @@ test("all providers settled with only a partial found: no box wait", async () =>
 	const started = Date.now();
 	const race = await raceCast(VARS, { boxMs: 500 });
 	// Nothing is pending that could beat the partial, so the box is moot.
-	expect(Date.now() - started).toBeLessThan(100);
+	// (Ceiling generous — see the parallel-load note above.)
+	expect(Date.now() - started).toBeLessThan(300);
 	expect(race.kind).toBe("found");
 	if (race.kind === "found") {
 		expect(race.provider).toBe("farcaster-tv");

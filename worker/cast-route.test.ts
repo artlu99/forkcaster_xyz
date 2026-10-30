@@ -496,19 +496,20 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	expect(body).not.toContain('class="pill-badge"');
 });
 
-test("GET /:username/:hash badges the cookie's last-used client", async () => {
-	const res = await app.request(`/zoo/${SHORT_HASH}`, {
+test("GET /:username/:hash badges nothing server-side — the badge is client-side", async () => {
+	// The shell is cookie-blind: the same bytes ship with or without the
+	// cookie, and SHELL_SCRIPT applies the badge from the local cookie
+	// after paint.
+	const bare = await app.request(`/zoo/${SHORT_HASH}`);
+	const bareBody = await bare.text();
+	expect(bareBody).not.toContain('class="pill-badge"');
+	expect(bareBody).toContain("id=\"auto-mount\"");
+	expect(bareBody).toContain("auto-on"); // the serialized state fn's parse
+
+	const personal = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { Cookie: "fc_client=firefly" },
 	});
-	expect(res.status).toBe(200);
-
-	const body = await res.text();
-	// Exactly one badged pill, and it is firefly's.
-	expect((body.match(/class="pill-badge"/g) ?? []).length).toBe(1);
-	const start = body.indexOf('data-client="firefly"');
-	const pill = body.slice(start, body.indexOf("</a>", start));
-	expect(pill).toContain('class="pill-badge"');
-	expect(pill).toContain("last used");
+	expect(await personal.text()).toBe(bareBody);
 });
 
 test("unknown fc_client cookie values render no badge", async () => {
@@ -523,9 +524,10 @@ test("unknown fc_client cookie values render no badge", async () => {
 	expect(body).toContain('data-client="farcaster"');
 });
 
-test("the badge follows suppression: no badge for a hidden client", async () => {
-	// decent-artlu hasn't signed: farcaster is suppressed, so a last-used
-	// cookie naming farcaster badges nothing. Firefly still renders.
+test("the badge follows suppression: suppressed client never renders", async () => {
+	// decent-artlu hasn't signed: farcaster is suppressed from the offered
+	// set, so a last-used cookie naming farcaster can never resolve — the
+	// client script's decision finds no pill and renders the idle chip.
 	const res = await app.request("/decent-artlu/0xbb54368f", {
 		headers: { Cookie: "fc_client=farcaster" },
 	});
@@ -796,109 +798,114 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(await castRes.text()).toContain("not found");
 });
 
-test("auto-open unset: countdown banner; ON: single-Pause arming; OFF: chip", async () => {
-	// unset (bare slug): countdown status link + Pause — ONE choice in the
-	// moment; settings appear only in the calm paused view.
+// Server markup vs script source: the auto-open box is built client-side
+// now, so the script TEXT contains fragments (builders, class names) that
+// would false-positive any naive body assertion. Strip scripts, assert
+// markup.
+function withoutScripts(html: string): string {
+	return html.replace(/<script>[\s\S]*?<\/script>/g, "");
+}
+
+test("auto-open states are client-side: the shell ships the mount + serialized decision", async () => {
+	// The server renders NO auto-open markup for any cookie state —
+	// SHELL_SCRIPT (cookie → shellAutoDecision → initial box) is the
+	// decision, and AUTO_SCRIPT (unchanged) drives it. The serialized
+	// state function's parse literals are visible in the script source.
 	const unset = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly" },
 	});
 	expect(unset.status).toBe(200);
 	const unsetBody = await unset.text();
-	expect(unsetBody).toContain('data-auto="unset"');
-	expect(unsetBody).toContain('in <span class="auto-secs">5</span>s');
+	const unsetMarkup = withoutScripts(unsetBody);
+	expect(unsetMarkup).toContain('id="auto-mount"');
+	// No server-rendered auto-open boxes for ANY cookie state.
+	expect(unsetMarkup).not.toContain('data-auto="unset"');
+	expect(unsetMarkup).not.toContain('data-auto="on"');
+	expect(unsetMarkup).not.toContain('class="auto-overlay"');
+	// The client machinery ships: decision fn (parse literals) + view
+	// builders + the AUTO_SCRIPT wiring.
+	expect(unsetBody).toContain('"auto-on"');
 	expect(unsetBody).toContain('data-auto-action="pause"');
-	// Exactly one "Auto-open:" occurrence — the script's chip builder — so
-	// the arming view itself carries no settings chrome.
-	expect((unsetBody.match(/Auto-open:/g) || []).length).toBe(1);
-	expect(unsetBody).not.toContain('data-auto="on"');
 
-	// ON: large arming overlay + redirect to the last-used client; the
-	// single control is Pause (settings appear after pause).
+	// ON and OFF cookies get the identical shell — the state differs
+	// client-side only.
 	const on = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|auto-on" },
 	});
-	expect(on.status).toBe(200);
-	const onBody = await on.text();
-	expect(onBody).toContain('data-auto="on"');
-	// The arming overlay carries ONE control (Pause) — no settings chrome.
-	const overlayStart = onBody.indexOf('<div class="auto-overlay"');
-	const overlayEnd = onBody.indexOf("</div>", overlayStart);
-	const overlay = onBody.slice(overlayStart, overlayEnd);
-	expect(overlay).toContain('data-auto-action="pause"');
-	expect(overlay).not.toContain("Turn off auto-open");
-	expect(overlay).toContain(
-		'data-auto-url="https://firefly.social/post/farcaster/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
-	);
-
-	// OFF: status + two-way toggle chip inside the persistent container.
+	expect(await on.text()).toBe(unsetBody);
 	const off = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|auto-off" },
 	});
-	expect(off.status).toBe(200);
-	const offBody = await off.text();
-	expect(offBody).toContain('data-auto="off"');
-	expect(offBody).toContain('aria-pressed="false"');
-	expect(offBody).toContain("Auto-open: Off");
-	// No arming overlay / redirect in the OFF state (script text may mention
-	// the labels; the markup must not).
-	expect(offBody).not.toContain('data-auto="on"');
-	expect(offBody).not.toContain('class="auto-overlay"');
+	expect(await off.text()).toBe(unsetBody);
 });
 
-test("auto-open for a scheme-only client carries native targets (quorum)", async () => {
+test("auto-open native targets ride the pills (server-rendered); the banner builds client-side", async () => {
 	// quorum's web href is a homepage stub — the redirect must attempt the
-	// app first. The banner carries the server-resolved native targets for
-	// AUTO_SCRIPT's timer-driven open, and the countdown's anchor carries
-	// data-scheme so DEEPLINK_SCRIPT handles manual taps too.
+	// app first. The pill carries the server-resolved native targets; the
+	// script reads them off the resolved pill (SHELL_PREP) and AUTO_SCRIPT
+	// wires the timer-driven open.
 	const res = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=quorum" },
 	});
 	expect(res.status).toBe(200);
 	const body = await res.text();
-	expect(body).toContain('data-auto="unset"');
 	expect(body).toContain(
-		'data-auto-scheme="quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo"',
+		'data-scheme="quorummobile://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo"',
 	);
 	expect(body).toContain(
-		'data-auto-intent="intent://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end"',
+		'data-intent="intent://feed?castHashPrefix=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c&amp;username=zoo#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end"',
 	);
-	// The countdown anchor is client-rendered (apply("countdown") builds
-	// the banner), so only AUTO_SCRIPT's wiring is visible in the raw HTML.
+	// The initial box is client-built (apply("countdown") builds the
+	// banner), so only the script wiring is visible in the raw HTML.
 	expect(body).toContain(`' data-scheme="' + schemeAttr + '"'`);
 	expect(body).toContain(`' data-intent="' + intentAttr + '"` + `'`);
 });
 
-test("no cookie: no auto-open markup at all (bots and first-timers)", async () => {
+test("no cookie: the shell ships the machinery, renders none of it", async () => {
 	const res = await app.request(`/zoo/${SHORT_HASH}`);
 	expect(res.status).toBe(200);
 	const body = await res.text();
-	expect(body).not.toContain("data-auto");
-	expect(body).not.toContain("Auto-open:");
+	// The decision no-ops without the cookie — no auto-open box markup.
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain('data-auto="unset"');
+	expect(markup).not.toContain('data-auto="on"');
+	expect(markup).not.toContain('class="auto-overlay"');
+	expect(markup).toContain('id="auto-mount"');
 });
 
-test("signed suppression gates auto-open: suppressed client never redirects, idle chip explains", async () => {
-	// decent-artlu is unsigned; farcaster requires signing → the ON cookie
-	// targeting farcaster must not arm any redirect — and the idle chip
-	// names Farcaster as the armed-but-unoffered client.
+test("signed suppression gates auto-open: the script resolves within the offered set", async () => {
+	// decent-artlu is unsigned; farcaster requires signing → farcaster is
+	// absent from the offered pills, so an ON cookie targeting farcaster
+	// resolves to nothing offered — the client script renders the generic
+	// idle chip (its copy is in the shipped script source, never in the
+	// server markup).
 	const res = await app.request("/decent-artlu/0xbb54368f", {
 		headers: { cookie: "fc_client=farcaster|auto-on" },
 	});
 	expect(res.status).toBe(200);
 	const body = await res.text();
-	expect(body).not.toContain('data-auto="on"');
-	expect(body).not.toContain("Turn off auto-open");
-	expect(body).toContain('data-auto="idle"');
-	expect(body).toContain("Auto-open: Farcaster isn&#39;t offered here");
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain('data-auto="on"');
+	expect(markup).not.toContain('data-client="farcaster"');
+	// The generic idle copy ships in the script source (Q3 decision — no
+	// named-client title map crosses to the client).
+	expect(body).toContain("offered here");
+	expect(body).not.toContain("Farcaster isn&#39;t offered here");
 });
 
-test("?noredirect=1 suppresses the redirect and shows the status chip", async () => {
+test("?noredirect=1 rides the shell; the script reads location.search", async () => {
 	const res = await app.request(`/zoo/${SHORT_HASH}?noredirect=1`, {
 		headers: { cookie: "fc_client=firefly|auto-on" },
 	});
 	expect(res.status).toBe(200);
 	const body = await res.text();
-	expect(body).not.toContain('data-auto="on"');
-	expect(body).toContain("Auto-open: On");
+	// Identical shell bytes (cache shares one key) — the chip state is
+	// client-side, driven by location.search.
+	const plain = await app.request(`/zoo/${SHORT_HASH}`, {
+		headers: { cookie: "fc_client=firefly|auto-on" },
+	});
+	expect(await plain.text()).toBe(body);
+	expect(body).toContain("noredirect=1");
 });
 
 test("POST /prefs merges the slug and sets the flag via Set-Cookie", async () => {
@@ -986,31 +993,26 @@ test("POST /prefs stores a 0–5s delay and keeps the other field", async () => 
 	expect(tooHigh.status).toBe(400);
 });
 
-test("auto-open delay is read from the cookie", async () => {
+test("auto-open delay parses client-side; the shell is delay-blind", async () => {
+	// The delay segment is parsed by the serialized decision fn
+	// (fixture-tested in shell-state.test.ts) — the server shell is
+	// byte-identical for every delay, so one cached shell serves all.
 	const two = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|auto-on|d2" },
 	});
-	expect(two.status).toBe(200);
-	const twoBody = await two.text();
-	expect(twoBody).toContain('data-auto-delay="2"');
-	expect(twoBody).toContain('in <span class="auto-secs">2</span>s');
-
 	const zero = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly|d0" },
 	});
-	expect(zero.status).toBe(200);
-	const zeroBody = await zero.text();
-	expect(zeroBody).toContain('data-auto="unset"');
-	expect(zeroBody).toContain('data-auto-delay="0"');
-	expect(zeroBody).toContain("Opening <strong>Firefly</strong> now");
-	expect(zeroBody).not.toContain('in <span class="auto-secs">0</span>s');
-
-	// No delay segment → default 5s.
 	const unset = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { cookie: "fc_client=firefly" },
 	});
-	expect(unset.status).toBe(200);
-	expect(await unset.text()).toContain('data-auto-delay="5"');
+	const twoBody = await two.text();
+	const zeroBody = await zero.text();
+	const unsetBody = await unset.text();
+	expect(twoBody).toBe(zeroBody);
+	expect(zeroBody).toBe(unsetBody);
+	// The builder the script uses to stamp the parsed delay:
+	expect(twoBody).toContain(`'" data-auto-delay="'`);
 });
 
 test("PRIMARY_ORIGIN emits canonical + og:url on cast pages; unset emits neither", async () => {
@@ -1223,14 +1225,18 @@ test("cast pages ship the track helper; auto-open banners carry the slug", async
 	expect(track).not.toContain("username");
 	expect(track).not.toContain("hash");
 
-	// Auto-open banners carry the real slug (data-auto-client is the
-	// display title — "Farcaster" ≠ "farcaster").
+	// Auto-open slugs/titles flow client-side now: the pill carries both
+	// (data-client is the slug; its text is the display title — "Farcaster"
+	// ≠ "farcaster"), and SHELL_PREP stamps them into the box via
+	// data-auto-slug / data-auto-client.
 	const autoRes = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { Cookie: "fc_client=farcaster|auto-on" },
 	});
 	const autoBody = await autoRes.text();
-	expect(autoBody).toContain('data-auto-slug="farcaster"');
-	expect(autoBody).toContain('data-auto-client="Farcaster"');
+	expect(autoBody).toContain(">Farcaster</a>");
+	expect(autoBody).toContain('data-client="farcaster"');
+	expect(autoBody).toContain(`'" data-auto-slug="'`);
+	expect(autoBody).toContain(`'" data-auto-client="'`);
 });
 
 // --- rank-ordered pill row ---

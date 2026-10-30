@@ -14,25 +14,12 @@ import {
 } from "./edge-cache.ts";
 
 describe("shellRequestEligible", () => {
-	test("a cookie-free HTML request is eligible", () => {
-		expect(
-			shellRequestEligible({ cookiePresent: false, noredirect: false, wantsJson: false }),
-		).toBe(true);
+	test("an HTML request is eligible — cookie-holders included (personalization is client-side)", () => {
+		expect(shellRequestEligible({ wantsJson: false })).toBe(true);
 	});
 
-	test("a cookie (fc_client) makes the render personal — never cached", () => {
-		expect(
-			shellRequestEligible({ cookiePresent: true, noredirect: false, wantsJson: false }),
-		).toBe(false);
-	});
-
-	test("noredirect and JSON asks pass through", () => {
-		expect(
-			shellRequestEligible({ cookiePresent: false, noredirect: true, wantsJson: false }),
-		).toBe(false);
-		expect(
-			shellRequestEligible({ cookiePresent: false, noredirect: false, wantsJson: true }),
-		).toBe(false);
+	test("JSON asks bypass entirely", () => {
+		expect(shellRequestEligible({ wantsJson: true })).toBe(false);
 	});
 });
 

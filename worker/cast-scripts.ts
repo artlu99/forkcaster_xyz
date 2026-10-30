@@ -4,6 +4,7 @@
 // in every browser that renders the page.
 
 import { LAST_CLIENT_COOKIE, LAST_CLIENT_MAX_AGE } from "./clients.ts";
+import { shellAutoDecision } from "./shell-state.ts";
 
 // Live engagement counts, fetched client-side so the SSR path stays
 // Shim-only and no fake numbers are ever shipped. farcaster.tv (unofficial
@@ -209,6 +210,98 @@ export const QUOTE_FILL_SCRIPT = `<script>
 })();
 </script>`;
 
+// Shell personalization prep (cast pages only — the page must carry
+// <div id="auto-mount">). Reads fc_client LOCALLY, decides via the
+// serialized shellAutoDecision (shell-state.ts — the fixture-tested piece),
+// renders the initial auto-open box with the exact data-* attributes
+// AUTO_SCRIPT branches on (url/scheme/intent read from the resolved pill's
+// own DOM attributes — server gates are already reflected in the pill
+// set), and badges the resolved pill. AUTO_SCRIPT is concatenated right
+// after and takes over unchanged — one state machine, zero drift. Without
+// the cookie the prep renders nothing; without the mount (profiles) it
+// never runs.
+export const SHELL_PREP = `<script>
+(function () {
+  var mount = document.getElementById("auto-mount");
+  if (!mount) return;
+  var decide = ${shellAutoDecision.toString()};
+  var nodes = document.querySelectorAll("a.client-pill[data-client]");
+  var pills = [];
+  for (var i = 0; i < nodes.length; i++) {
+    pills.push({
+      slug: nodes[i].getAttribute("data-client") || "",
+      url: nodes[i].getAttribute("href") || "",
+      scheme: nodes[i].getAttribute("data-scheme") || "",
+      intent: nodes[i].getAttribute("data-intent") || ""
+    });
+  }
+  var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
+  var raw = m ? m[1] : "";
+  try { raw = decodeURIComponent(raw); } catch (err) {}
+  var noredirect = /(?:^|[?&])noredirect=1(?:&|$)/.test(location.search);
+  var state = decide(raw || undefined, pills, noredirect);
+  if (!state) return;
+  var esc = function (v) {
+    return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  };
+  var title = "";
+  if (state.variant !== "idle") {
+    for (var j = 0; j < nodes.length; j++) {
+      if (nodes[j].getAttribute("data-client") === state.slug) {
+        var clone = nodes[j].cloneNode(true);
+        var badge = clone.querySelector(".pill-badge");
+        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+        title = (clone.textContent || "").replace(/\\s+/g, " ").trim();
+        break;
+      }
+    }
+  }
+  var meta = 'data-auto-url="' + esc(state.url) + '" data-auto-client="' + esc(title) +
+    '" data-auto-slug="' + esc(state.slug) + '" data-auto-delay="' + state.delay + '"' +
+    (state.scheme ? ' data-auto-scheme="' + esc(state.scheme) + '"' : "") +
+    (state.intent ? ' data-auto-intent="' + esc(state.intent) + '"' : "");
+  var opening = state.delay === 0
+    ? "Opening <strong>" + esc(title) + "</strong> now"
+    : "Opening <strong>" + esc(title) + '</strong> in <span class="auto-secs">' + state.delay + "</span>s";
+  var html;
+  if (state.variant === "overlay") {
+    html = '<div class="auto-overlay" role="alert" data-auto="on" ' + meta + ">" +
+      '<p class="auto-overlay-title">' + opening + "\\u2026</p>" +
+      '<p class="auto-overlay-actions"><button class="pill" data-auto-action="pause">Pause</button></p></div>';
+  } else if (state.variant === "banner") {
+    html = '<div class="auto-banner" aria-live="polite" data-auto="unset" ' + meta + ">" +
+      '<span class="auto-status">' + opening + " \\u2192</span>" +
+      '<button class="pill" data-auto-action="pause">Pause</button></div>';
+  } else if (state.variant === "chip") {
+    var status = state.mode === "noredirect"
+      ? (state.prefOn ? "Auto-open: On \\u2014 this page won't redirect" : "Auto-open: Off")
+      : "Auto-open is off";
+    html = '<div class="auto-banner" aria-live="polite" data-auto="' + state.mode + '" ' + meta + ">" +
+      '<span class="auto-status">' + status + "</span>" +
+      '<button class="pill auto-chip" data-auto-toggle aria-pressed="' + (state.prefOn ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
+      (state.prefOn ? "On" : "Off") + "</button>" +
+      '<a class="auto-settings" href="/">settings</a></div>';
+  } else {
+    html = '<div class="auto-banner" aria-live="polite" data-auto="idle">' +
+      '<span class="auto-status">Auto-open: your last client isn\\u2019t offered here \\u2014 pick below</span>' +
+      '<a class="auto-settings" href="/">settings</a></div>';
+  }
+  mount.innerHTML = html;
+  if (state.variant !== "idle") {
+    for (var k = 0; k < nodes.length; k++) {
+      if (nodes[k].getAttribute("data-client") === state.slug && !nodes[k].querySelector(".pill-badge")) {
+        var b = document.createElement("span");
+        b.className = "pill-badge";
+        b.textContent = "last used";
+        nodes[k].appendChild(b);
+        break;
+      }
+    }
+  }
+})();
+</script>`;
+
 // Auto-open flow: for a returning user with a last-used client.
 // - unset: pausable countdown (saved delay, default 5s; 0 redirects
 //   immediately) → redirect.
@@ -216,7 +309,11 @@ export const QUOTE_FILL_SCRIPT = `<script>
 //   location.replace().
 // - off: compact status chip that toggles the preference on.
 // Bots never send the cookie and see none of this. Timer cancels on
-// any pill pointerdown.
+// any pill pointerdown. On cast pages SHELL_PREP renders the initial
+// box from the local cookie in the script tag immediately before this
+// one; on profiles the box is server-rendered (autoOpenUi). Either way
+// the data-* attributes below are this script's only inputs — one
+// state machine, both surfaces, zero drift on the redirect logic.
 export const AUTO_SCRIPT = `<script>
 (function () {
   var box = document.querySelector("[data-auto]");
@@ -423,3 +520,9 @@ export const AUTO_SCRIPT = `<script>
   }
 })();
 </script>`;
+
+// SHELL_SCRIPT = the prep (cookie → decision → initial box, from the
+// local cookie) + AUTO_SCRIPT verbatim: the prep builds the box, the
+// unchanged state machine takes over. Cast pages only — the prep bails
+// without <div id="auto-mount"> (profiles render server-side).
+export const SHELL_SCRIPT = SHELL_PREP + AUTO_SCRIPT;

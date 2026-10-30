@@ -32,19 +32,11 @@ export const SHELL_TTL_SECONDS = 43_200;
  * once (there is no global purge for the Workers Cache API). */
 export const SHELL_SALT = "v1";
 
-export type ShellRequestFacts = {
-	/** fc_client cookie seen — a personal render; never cached. */
-	cookiePresent: boolean;
-	/** ?noredirect=1 — an explicit don't-redirect ask; pass through. */
-	noredirect: boolean;
-	/** The request negotiated JSON — strict variants bypass entirely. */
-	wantsJson: boolean;
-};
-
-/** Request-side gate: only personalization-free HTML requests may read or
- * fill the shell cache. Cookie-holders keep today's exact behavior. */
-export function shellRequestEligible(facts: ShellRequestFacts): boolean {
-	return !facts.cookiePresent && !facts.noredirect && !facts.wantsJson;
+/** Request-side gate: only HTML requests may read or fill the shell
+ * cache. JSON variants bypass entirely. (Personalization is client-side
+ * on cast pages, so cookies no longer affect eligibility.) */
+export function shellRequestEligible(facts: { wantsJson: boolean }): boolean {
+	return !facts.wantsJson;
 }
 
 export type ShellOutcome = {
@@ -70,8 +62,7 @@ export function shellWorthCaching(outcome: ShellOutcome): boolean {
  * ?format=json, …) never fork keys — a link shared through any parameter-
  * adding surface hits the one shell. The salt rides as a query so distinct
  * salt eras never collide.
- */
-export function shellCacheKey(url: URL): Request {
+ */export function shellCacheKey(url: URL): Request {
 	return new Request(`${url.origin}${url.pathname}?shell=${SHELL_SALT}`);
 }
 

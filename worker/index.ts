@@ -309,17 +309,16 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// a 700ms completeness box (cast-source.ts); JSON rides the complete-leg
 	// fleet roster (shim + potatos) with strict statuses.
 	const wantsJson = negotiatesJson(c);
-	// The shell gate (worker/edge-cache.ts): personalization-free requests
-	// may serve a cached found-complete shell — bots and first-time clicks
-	// get the edge; cookie-holders keep today's personalized render. Only
-	// found-complete shells ever enter the cache (the invariant), so a
-	// cached response is byte-identical to the cold render a previewer
-	// would immortalize.
-	const shellKey = shellRequestEligible({
-		cookiePresent: getCookie(c, LAST_CLIENT_COOKIE) !== undefined,
-		noredirect: c.req.query("noredirect") === "1",
-		wantsJson,
-	})
+	// The shell gate (worker/edge-cache.ts): every HTML request — cookie or
+	// not — may serve a cached found-complete shell. Personalization is
+	// CLIENT-side here (SHELL_SCRIPT reads fc_client locally and applies
+	// badge + auto-open into the mount), so the server is cookie-blind on
+	// this route: no cookie read, no per-visitor bytes, which is exactly
+	// what makes the page cacheable. Only found-complete shells ever enter
+	// the cache (the invariant), so a cached response is byte-identical to
+	// the cold render a previewer would immortalize. ?noredirect=1 is
+	// honored client-side and cache-eligible; JSON bypasses.
+	const shellKey = shellRequestEligible({ wantsJson })
 		? shellCacheKey(new URL(c.req.url))
 		: undefined;
 	if (shellKey) {
@@ -399,22 +398,12 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 			retryAfter ? { "retry-after": retryAfter } : undefined,
 		);
 	}
-	// The last-used client cookie badges the visitor's preferred pill.
-	// Last-used client + auto-open preference from the single cookie.
-	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
-	// Pill order rides the rank snapshot through a per-isolate TTL store;
-	// getRankSnapshotSoon caps a cold refresh at 400ms — still trivial next
-	// to the 700ms race box, while converting most cold-isolate misses into
-	// hits (a cold lmdis GET is usually one round trip once connected).
-	// Registry order on timeout.
 	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = await renderCastHtml(
 		resolved,
 		username,
 		hash,
-		prefs,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
-		c.req.query("noredirect") === "1",
 		rank,
 	);
 	const res = c.html(html, status);

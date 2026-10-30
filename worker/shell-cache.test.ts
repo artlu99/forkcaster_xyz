@@ -88,22 +88,29 @@ test("fill then hit: the second cookie-less render never touches upstream", asyn
 	expect(second.headers.get("cache-control")).toBe("no-store");
 });
 
-test("cookie-holders bypass the shell entirely", async () => {
-	await app.request(`/zoo/${HASH}`);
+test("cookie-holders are served the same shell (personalization is client-side)", async () => {
+	const plain = await app.request(`/zoo/${HASH}`);
+	const plainBody = await plain.text();
 	const callsAfterFill = upstreamCalls;
 	const personal = await app.request(`/zoo/${HASH}`, {
 		headers: { cookie: "fc_client=zoo" },
 	});
 	expect(personal.status).toBe(200);
-	expect(personal.headers.get("x-forkcaster-shell")).toBeNull();
-	expect(upstreamCalls).toBeGreaterThan(callsAfterFill);
+	expect(personal.headers.get("x-forkcaster-shell")).toBe("hit");
+	// No upstream reads, and byte-identical to the cookie-less shell — the
+	// badge/auto-open differences live entirely in the client script.
+	expect(upstreamCalls).toBe(callsAfterFill);
+	expect(await personal.text()).toBe(plainBody);
 });
 
-test("noredirect asks pass through uncached", async () => {
+test("noredirect joins the cache (the script reads location.search)", async () => {
+	await app.request(`/zoo/${HASH}`);
+	const callsAfterFill = upstreamCalls;
 	const res = await app.request(`/zoo/${HASH}?noredirect=1`);
 	expect(res.status).toBe(200);
-	expect(res.headers.get("x-forkcaster-shell")).toBeNull();
-	expect(store.size).toBe(0);
+	expect(res.headers.get("x-forkcaster-shell")).toBe("hit");
+	expect(upstreamCalls).toBe(callsAfterFill);
+	expect(store.size).toBe(1); // one shell, shared with the plain URL
 });
 
 test("misses never cache: a consensus 404 leaves the store empty", async () => {

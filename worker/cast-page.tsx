@@ -33,14 +33,15 @@ import {
 	toOgDescription,
 	urlEmbedsOf,
 } from "./cast-data.ts";
-import { autoOpenUi, clientActionsHtml } from "./cast-actions.tsx";
+import { clientActionsHtml } from "./cast-actions.tsx";
 import {
 	CLIENT_SCRIPT,
 	LIVE_STATS_SCRIPT,
 	QUOTE_FILL_SCRIPT,
+	SHELL_SCRIPT,
 	TRACK_SCRIPT,
 } from "./cast-scripts.ts";
-import type { ClientPrefs } from "./clients.ts";
+
 import type { TemplateVars } from "./client-registry.ts";
 import {
 	getCastByHash,
@@ -216,10 +217,8 @@ function castPage(
 		image?: string;
 		largeImage?: boolean;
 	},
-	prefs: ClientPrefs = {},
 	partial = false,
 	primaryOrigin?: string,
-	noredirect = false,
 	rank?: RankSnapshot | null,
 	externalLinks?: boolean,
 ): string {
@@ -231,13 +230,12 @@ function castPage(
 		signed === false
 			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
 			: "";
-	const actions = clientActionsHtml(
-		vars,
-		signed,
-		prefs.slug,
-		rank,
-		externalLinks,
-	);
+	// The stateful layer is CLIENT-side on cast pages: the shell renders
+	// every offered pill (gates already applied) and SHELL_SCRIPT — driven
+	// by the local fc_client cookie — applies the last-used badge and the
+	// auto-open state machine into the mount. No server cookie read, which
+	// is what makes the whole page edge-cacheable.
+	const actions = clientActionsHtml(vars, signed, undefined, rank, externalLinks);
 	// Dual-serve canonicalization: every host renders the same page, but
 	// points at the primary origin so link equity and unfurlers agree.
 	// The full hash additionally dedupes short/long variants of the same
@@ -248,12 +246,11 @@ function castPage(
 		// TemplateVars type.
 		? `${primaryOrigin}/${encodeURIComponent(vars.username ?? "")}/${vars.fullHash}`
 		: undefined;
-	const auto = autoOpenUi(prefs, signed, vars, noredirect, externalLinks);
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
-		`${auto.html}${cardHtml}${notice}${actions}`,
+		`<div id="auto-mount"></div>${cardHtml}${notice}${actions}`,
 		og,
-		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${auto.script ?? ""}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${SHELL_SCRIPT}`,
 		canonicalUrl,
 	);
 }
@@ -261,8 +258,6 @@ function castPage(
 function linkOnlyPage(
 	username: string,
 	hash: string,
-	slug?: string,
-	noredirect = false,
 	rank?: RankSnapshot | null,
 ): string {
 	// No provider resolved the cast: signed state is unknown, which fails
@@ -271,24 +266,18 @@ function linkOnlyPage(
 	// clients stay hidden here. The route hash is used as-is (it may be
 	// short-form); the {fullHash} slot degrades to it, and no fid is known,
 	// so any future fid-gated client would be skipped here. Auto-open
-	// fires here too (the cast lives in the client).
-	const prefs: ClientPrefs = { slug };
-	const auto = autoOpenUi(
-		prefs,
-		true,
-		{ username, hash, fullHash: hash },
-		noredirect,
-	);
+	// fires here too (the cast lives in the client) — client-side, like
+	// every cast page.
 	return shell(
 		`${username}/${hash} · forkcaster`,
-		`${auto.html}<p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
+		`<div id="auto-mount"></div><p class="notice">Cast data is temporarily unavailable.</p>${clientActionsHtml(
 			{ username, hash, fullHash: hash },
 			true,
-			slug,
+			undefined,
 			rank,
 		)}`,
 		undefined,
-		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${auto.script ?? ""}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${SHELL_SCRIPT}`,
 	);
 }
 
@@ -420,9 +409,7 @@ export async function renderCastHtml(
 	resolved: ResolvedCast,
 	username: string,
 	hash: string,
-	prefs: ClientPrefs = {},
 	primaryOrigin?: string,
-	noredirect = false,
 	rank?: RankSnapshot | null,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
@@ -431,7 +418,7 @@ export async function renderCastHtml(
 	if (resolved.kind === "unreachable") {
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, prefs.slug, noredirect, rank),
+			html: linkOnlyPage(username, hash, rank),
 		};
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
@@ -490,10 +477,8 @@ export async function renderCastHtml(
 				cardHtml,
 				signed !== false,
 				og,
-				prefs,
 				partial,
 				primaryOrigin,
-				noredirect,
 				rank,
 				hasExternalLinks(cast),
 			),
@@ -502,7 +487,7 @@ export async function renderCastHtml(
 		// Embed rendering failed — degrade to links instead of erroring.
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, prefs.slug, noredirect, rank),
+			html: linkOnlyPage(username, hash, rank),
 		};
 	}
 }
