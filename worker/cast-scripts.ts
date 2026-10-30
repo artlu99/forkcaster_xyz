@@ -239,7 +239,9 @@ export const SHELL_PREP = `<script>
   var raw = m ? m[1] : "";
   try { raw = decodeURIComponent(raw); } catch (err) {}
   var noredirect = /(?:^|[?&])noredirect=1(?:&|$)/.test(location.search);
-  var state = decide(raw || undefined, pills, noredirect);
+  var kind = mount.getAttribute("data-kind") || "cast";
+  var noun = mount.getAttribute("data-noun") || "";
+  var state = decide(raw || undefined, pills, noredirect, kind);
   if (!state) return;
   var esc = function (v) {
     return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -260,7 +262,8 @@ export const SHELL_PREP = `<script>
   var meta = 'data-auto-url="' + esc(state.url) + '" data-auto-client="' + esc(title) +
     '" data-auto-slug="' + esc(state.slug) + '" data-auto-delay="' + state.delay + '"' +
     (state.scheme ? ' data-auto-scheme="' + esc(state.scheme) + '"' : "") +
-    (state.intent ? ' data-auto-intent="' + esc(state.intent) + '"' : "");
+    (state.intent ? ' data-auto-intent="' + esc(state.intent) + '"' : "") +
+    (kind !== "cast" ? ' data-auto-noun="' + esc(noun) + '" data-auto-kind="' + esc(kind) + '"' : "");
   var opening = state.delay === 0
     ? "Opening <strong>" + esc(title) + "</strong> now"
     : "Opening <strong>" + esc(title) + '</strong> in <span class="auto-secs">' + state.delay + "</span>s";
@@ -288,6 +291,10 @@ export const SHELL_PREP = `<script>
       '<a class="auto-settings" href="/">settings</a></div>';
   }
   mount.innerHTML = html;
+  // Kind routes: stamp the row's data-resolved so CLIENT_SCRIPT's
+  // first/switch/repeat telemetry compares against THIS resolution.
+  var row = document.querySelector("p.actions[data-kind]");
+  if (state.variant !== "idle" && row) row.setAttribute("data-resolved", state.slug);
   if (state.variant !== "idle") {
     for (var k = 0; k < nodes.length; k++) {
       if (nodes[k].getAttribute("data-client") === state.slug && !nodes[k].querySelector(".pill-badge")) {

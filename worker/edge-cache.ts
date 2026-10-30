@@ -28,6 +28,11 @@
  * click tail of a share. The only knob, since casts are immutable. */
 export const SHELL_TTL_SECONDS = 43_200;
 
+/** Edge TTL for profile-family shells: 10 min — profiles are MUTABLE
+ * (bio/pfp/signed flip) and their owners check their own pages, so this
+ * is a freshness knob AND a hit-rate knob. */
+export const PROFILE_SHELL_TTL_SECONDS = 600;
+
 /** Cache-key salt — the invalidation tool. Bump to drop every shell at
  * once (there is no global purge for the Workers Cache API). */
 export const SHELL_SALT = "v1";
@@ -45,16 +50,16 @@ export type ShellOutcome = {
 	partial: boolean;
 };
 
-/** Response-side gate — THE INVARIANT: only a found, complete render is
- * worth immortalizing. Link-only (fail-open), consensus misses, outages
- * and partials never enter the cache, so a stale or empty preview can
- * never be served from it. */
+/** Response-side gate — THE INVARIANT: only a found render is worth
+ * immortalizing, complete or partial. Partials are safe to cache because
+ * their OG meta is complete (meta never depends on quotes) and their
+ * bodies self-heal per view (QUOTE_FILL_SCRIPT re-fetches the fresh
+ * no-store fragment on every page view) — nothing stale is ever shown.
+ * Link-only (fail-open), consensus misses, outages and JSON variants never
+ * enter the cache, so a stale or empty preview can never be served from
+ * it. */
 export function shellWorthCaching(outcome: ShellOutcome): boolean {
-	return (
-		outcome.status === 200 &&
-		outcome.kind === "found" &&
-		!outcome.partial
-	);
+	return outcome.status === 200 && outcome.kind === "found";
 }
 
 /**

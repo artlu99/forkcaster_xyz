@@ -2,11 +2,13 @@ import { Hono, type Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import {
 	getShell,
+	PROFILE_SHELL_TTL_SECONDS,
 	shellCacheKey,
 	shellRequestEligible,
 	shellWorthCaching,
 	putShell,
 } from "./edge-cache.ts";
+import { warmShimIndexForCast } from "./shim.ts";
 import {
 	renderChannelHtml,
 	renderChannelJson,
@@ -23,7 +25,6 @@ import {
 	LAST_CLIENT_COOKIE,
 	LAST_CLIENT_MAX_AGE,
 	mergeClientCookie,
-	parseClientCookie,
 } from "./clients.ts";
 import { getRankSnapshot, getRankSnapshotSoon } from "./client-rank-store.ts";
 import { mcpLandingHtml, mcpHandlerFor } from "./mcp.ts";
@@ -328,6 +329,26 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
+	// Cross-fleet warm (PLAN9): the winning host is warm by definition —
+	// refresh every OTHER shim-shaped host's index so the next visitor's
+	// read is warm there too. Fills only (hits never reach here);
+	// non-blocking, best-effort — same guard as the telemetry above.
+	try {
+		if (resolved.kind === "found") {
+			const fid = resolved.cast.fid ?? resolved.cast.user?.fid;
+			if (fid !== undefined) {
+				const warm = warmShimIndexForCast(
+					fid,
+					resolved.provider,
+					(c.env as Env | undefined)?.SHIM_POTATO_BASE,
+				);
+				if (c.executionCtx.waitUntil) c.executionCtx.waitUntil(warm);
+			}
+		}
+	} catch {
+		// No executionCtx (tests) — the warm skips; every leg swallows its
+		// own failures anyway.
+	}
 	// Non-blocking race telemetry: one Analytics Engine datapoint per
 	// resolve (index = winner/kind; doubles = total ms, box, partial flag;
 	// blob = per-provider outcomes). Guarded: tests and other callers
@@ -490,13 +511,23 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	// Resolve once, render twice — same negotiation as the cast route:
 	// ?format=json wins over Accept; only strict application/json Accept
 	// also negotiates JSON. The identity-card page skips the timeline call
-	// entirely; the JSON twin keeps serving recent casts.
+	// entirely; the JSON twin keeps serving recent casts. Personalization
+	// is CLIENT-side (SHELL_SCRIPT, kind-aware) — the server is
+	// cookie-blind, which makes the found shell edge-cacheable at 10 min
+	// (profile content is mutable; this TTL is a freshness knob too).
 	const wantsJson = negotiatesJson(c);
+	const shellKey = shellRequestEligible({ wantsJson })
+		? shellCacheKey(new URL(c.req.url))
+		: undefined;
+	if (shellKey) {
+		const hit = await getShell(shellKey);
+		if (hit) return hit;
+	}
 	const resolved = await resolveProfile(username, {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
 		signed: true,
-potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
@@ -510,25 +541,34 @@ potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 			retryAfter ? { "retry-after": retryAfter } : undefined,
 		);
 	}
-	// The last-used client cookie + the rank snapshot + ?noredirect feed
-	// the stateful layer: badge, banner, pill order.
-	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
+	// Pill order rides the rank snapshot through a per-isolate TTL store.
 	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = renderProfileHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
-		prefs,
 		rank,
-		c.req.query("noredirect") === "1",
 	);
 	// Retry-After rides the 503 in both variants (identity has no fail-open
 	// source — unlike casts, there is nothing to render without shim).
-	return c.html(
+	const res = c.html(
 		html,
 		status,
 		status === 503 ? { "retry-after": "60" } : undefined,
 	);
+	// The gate: found profiles only — 404/503 pass through uncached
+	// (negative caching would rebuild the SPOF in disguise). 10 min TTL:
+	// profile content is mutable, so this is a freshness knob too.
+	if (shellKey && shellWorthCaching({ status, kind: resolved.kind, partial: false })) {
+		res.headers.set("x-forkcaster-shell", "fill");
+		const put = putShell(shellKey, res.clone(), PROFILE_SHELL_TTL_SECONDS);
+		try {
+			c.executionCtx.waitUntil(put);
+		} catch {
+			await put;
+		}
+	}
+	return res;
 });
 
 // The casts page (/{username}/casts-and-replies): the ONE list surface —
@@ -541,6 +581,18 @@ app.get("/:username/casts-and-replies", async (c) => {
 	if (username === null) {
 		return c.body(null, 404);
 	}
+	// The heaviest render in the family (embed SSR + unfurl + quote
+	// hydration per card) — the biggest shell-cache win. Personalization
+	// is CLIENT-side (SHELL_SCRIPT, kind "feed"); the server is
+	// cookie-blind. 10 min TTL like profiles (this page shows mutable
+	// casts... and mutable authorship context).
+	const shellKey = shellRequestEligible({ wantsJson: false })
+		? shellCacheKey(new URL(c.req.url))
+		: undefined;
+	if (shellKey) {
+		const hit = await getShell(shellKey);
+		if (hit) return hit;
+	}
 	const resolved = await resolveProfile(username, {
 		timeline: true,
 		// Same ban-signal fork as the profile page: the head's way out
@@ -549,24 +601,29 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// Every shim read races the shim-potato fleet when it's configured.
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
-	// Stateful layer: prefs + rank + ?noredirect, same
-	// wiring as the cast and profile routes.
-	const prefs = parseClientCookie(getCookie(c, LAST_CLIENT_COOKIE));
 	const rank = await getRankSnapshotSoon(c.env, 400);
 	const { status, html } = await renderCastsHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		c.env,
-		prefs,
 		rank,
-		c.req.query("noredirect") === "1",
 	);
-	return c.html(
+	const res = c.html(
 		html,
 		status,
 		status === 503 ? { "retry-after": "60" } : undefined,
 	);
+	if (shellKey && shellWorthCaching({ status, kind: resolved.kind, partial: false })) {
+		res.headers.set("x-forkcaster-shell", "fill");
+		const put = putShell(shellKey, res.clone(), PROFILE_SHELL_TTL_SECONDS);
+		try {
+			c.executionCtx.waitUntil(put);
+		} catch {
+			await put;
+		}
+	}
+	return res;
 });
 
 // Warpcast legacy thread shape (/~/conversations/0x…): the purest waypoint —

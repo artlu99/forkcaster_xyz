@@ -28,12 +28,15 @@ describe("shellWorthCaching", () => {
 		expect(
 			shellWorthCaching({ status: 200, kind: "found", partial: false }),
 		).toBe(true);
+		expect(
+			// Partials self-heal client-side (QUOTE_FILL_SCRIPT re-fetches the
+			// fresh no-store fragment per view) and their meta is complete —
+			// cacheable (Oct 2026 gate extension).
+			shellWorthCaching({ status: 200, kind: "found", partial: true }),
+		).toBe(true);
 	});
 
-	test("partials, misses, outages and non-200s never enter", () => {
-		expect(
-			shellWorthCaching({ status: 200, kind: "found", partial: true }),
-		).toBe(false);
+	test("misses, outages and non-200s never enter", () => {
 		expect(
 			shellWorthCaching({ status: 404, kind: "not-found", partial: false }),
 		).toBe(false);

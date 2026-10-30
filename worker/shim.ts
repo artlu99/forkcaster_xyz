@@ -222,11 +222,40 @@ export async function getCastByHash(
 }
 
 /**
+ * Cross-fleet warm (PLAN9): after a cast wins via one host, refresh every
+ * OTHER shim-shaped host's index so the next visitor's read is warm there
+ * too. The winner is warm by definition and is skipped. Fire-and-forget by
+ * contract — every leg swallows its own failures; never rejects.
+ */
+export function warmShimIndexForCast(
+	fid: number,
+	winnerProvider: string,
+	potatoBases?: string | null,
+): Promise<unknown> {
+	const warm = (base: string) =>
+		fetch(`${base}/refresh`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ fids: [fid] }),
+			signal: AbortSignal.timeout(15_000),
+		}).catch(() => undefined);
+	const fleet = fleetBases(potatoBases);
+	const legs: Promise<unknown>[] = [];
+	if (winnerProvider !== "shim") legs.push(warm(SHIM_CLOUD_BASE));
+	fleet.forEach((base, i) => {
+		const id = i === 0 ? "shim-potato" : `shim-potato-${i + 1}`;
+		if (id !== winnerProvider) legs.push(warm(base));
+	});
+	return Promise.all(legs);
+}
+
+/**
  * GET /wc/{username}/{hash} — a miss is `{"success":false}` or an empty
  * body, both HTTP 200; a non-2xx or a thrown request is an error carrying
  * the same message text the provider race has always produced. Raced
- * against the potato when `potatoBases` is set — a found either way wins;
- * the terminal is always cloud's own lookup (misses stay authoritative).
+ * against the potato fleet when `potatoBases` is set — a found either way
+ * wins; the terminal is always cloud's own lookup (misses stay consensus
+ * votes).
  */
 export async function getCastByUsernameHash(
 	username: string,

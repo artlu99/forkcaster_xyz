@@ -41,16 +41,12 @@ import {
 import { fetchQuote, renderEmbedCard, unfurl } from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
+	SHELL_SCRIPT,
 	TRACK_SCRIPT,
 	CLIENT_SCRIPT,
 } from "./cast-scripts.ts";
-import { clientActionsHtml, autoOpenUi } from "./cast-actions.tsx";
-import {
-	clientsForRoute,
-	resolveLastUsed,
-	type TemplateVars,
-} from "./client-registry.ts";
-import type { ClientPrefs } from "./clients.ts";
+import { clientActionsHtml } from "./cast-actions.tsx";
+import type { TemplateVars } from "./client-registry.ts";
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	getCastsAndReplies,
@@ -386,9 +382,7 @@ export function renderProfileHtml(
 	profile: ResolvedProfile,
 	username: string,
 	primaryOrigin?: string,
-	prefs: ClientPrefs = {},
 	rank?: RankSnapshot | null,
-	noredirect = false,
 ): { status: 200 | 404 | 503; html: string } {
 	if (profile.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username) };
@@ -412,29 +406,16 @@ export function renderProfileHtml(
 	const facts: string[] = [`<li>fid ${fid}</li>`];
 	if (user.primaryAddress) facts.push(addressFacts(user.primaryAddress));
 
-	// The stateful layer: the menu IS the way out —
-	// offered = profile-capable clients (farcaster suppressed for
-	// known-unsigned via requiresSigned, fail-open; unknown fails open and
-	// offers it). The badge and the banner follow the flat resolution:
-	// the kind's own slug, else the cast slug, else nothing (badgeless
-	// menu, no banner). Registry order without a rank snapshot.
+	// The stateful layer is CLIENT-side (SHELL_SCRIPT): the menu renders
+	// every profile-capable pill (gates applied) and the script — driven by
+	// the local fc_client cookie, kind-aware (p: segment, then the cast
+	// slug) — applies the badge, stamps data-resolved for the click
+	// telemetry, and runs the auto-open machine into the mount. The server
+	// is cookie-blind here, which is what makes the profile shell
+	// edge-cacheable (10 min — profile content is mutable).
 	const vars: TemplateVars = { username: primary, fid };
-	const resolved = resolveLastUsed(
-		prefs,
-		"profile",
-		clientsForRoute("profile", vars, profile.signed),
-	);
-	const menu = clientActionsHtml(
-		vars,
-		profile.signed,
-		resolved?.id,
-		rank,
-		undefined,
-		{ kind: "profile", resolvedId: resolved?.id },
-	);
-	const auto = autoOpenUi(prefs, profile.signed, vars, noredirect, undefined, {
+	const menu = clientActionsHtml(vars, profile.signed, undefined, rank, undefined, {
 		kind: "profile",
-		noun: "profiles",
 	});
 	const notice =
 		profile.signed === false
@@ -446,7 +427,7 @@ export function renderProfileHtml(
 	// pill echoes the validated input (echo-the-valid-input, see header).
 	const body = `
 ${PROFILE_STYLE}
-${auto.html}
+<div id="auto-mount" data-kind="profile" data-noun="profiles"></div>
 <div class="profile-card">
 ${avatar}
 <div class="profile-head">
@@ -475,9 +456,10 @@ ${notice}
 			body,
 			og,
 			// Copy helper + the stateful layer's scripts (telemetry __fk, the
-			// cookie writer, auto-open when a banner rendered). DEEPLINK_SCRIPT
-			// rides inside the menu row when any pill has a native target.
-			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${auto.script ?? ""}`,
+			// cookie writer, the cookie-driven personalization into the
+			// mount). DEEPLINK_SCRIPT rides inside the menu row when any pill
+			// has a native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
 		),
@@ -566,9 +548,7 @@ export async function renderCastsHtml(
 	username: string,
 	primaryOrigin?: string,
 	env?: { UNFURL?: Fetcher; SHIM_POTATO_BASE?: string },
-	prefs: ClientPrefs = {},
 	rank?: RankSnapshot | null,
-	noredirect = false,
 ): Promise<{ status: 200 | 404 | 503; html: string }> {
 	const key = `${username}/casts-and-replies`;
 	if (profile.kind === "not-found") {
@@ -651,23 +631,14 @@ export async function renderCastsHtml(
 						: "Recent casts are unavailable right now."
 				}</p>`;
 
-	// The stateful layer: the feed row + banner resolve over the feed
-	// kind — farcaster + quorum are the seeded feed targets (quorum
-	// coarse-only/scheme-only; unsigned suppresses farcaster entirely
-	// and the notice explains). Flat inheritance from the cast slug.
+	// The stateful layer is CLIENT-side (SHELL_SCRIPT, kind "feed"): the
+	// menu renders every feed-capable pill (gates applied) and the script —
+	// driven by the local fc_client cookie, kind-aware (f: segment, then
+	// the cast slug) — applies badge, data-resolved, and the auto-open
+	// machine into the mount. The server is cookie-blind here too.
 	const vars: TemplateVars = { username: primary, fid };
-	const resolved = resolveLastUsed(
-		prefs,
-		"feed",
-		clientsForRoute("feed", vars, signed),
-	);
-	const menu = clientActionsHtml(vars, signed, resolved?.id, rank, undefined, {
+	const menu = clientActionsHtml(vars, signed, undefined, rank, undefined, {
 		kind: "feed",
-		resolvedId: resolved?.id,
-	});
-	const auto = autoOpenUi(prefs, signed, vars, noredirect, undefined, {
-		kind: "feed",
-		noun: "feeds",
 	});
 	const notice =
 		signed === false
@@ -678,7 +649,7 @@ export async function renderCastsHtml(
 	// the visible @handle below carries the primary (identity law).
 	const body = `
 ${PROFILE_STYLE}
-${auto.html}
+<div id="auto-mount" data-kind="feed" data-noun="feeds"></div>
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${primary}`)}</h1>
 <p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a></p>
@@ -705,10 +676,10 @@ ${listHtml}`;
 			body,
 			og,
 			// Live-stats fills one slot per card; the stateful layer adds the
-			// telemetry helper + cookie writer; auto-open rides the banner.
-			// DEEPLINK_SCRIPT ships inside the feed row when its pill has a
-			// native target.
-			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${auto.script ?? ""}`,
+			// telemetry helper + cookie writer + the cookie-driven
+			// personalization into the mount. DEEPLINK_SCRIPT ships inside
+			// the feed row when its pill has a native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.

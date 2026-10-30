@@ -48,17 +48,20 @@ export interface ShellAutoDecision {
 }
 
 /**
- * Decide the cast page's auto-open state from the raw fc_client cookie
- * value and the page's offered pills (server-gated: signed/link gates are
- * already reflected in the pill set — the decision only ever resolves
- * within it). Cast pages resolve FLAT: the cookie's head slug, never a
- * kind segment. Null ⇒ render nothing (no cookie, stale/unknown slug with
- * no arming, or off/unresolved — the old server renderer's silence).
+ * Decide a page's auto-open state from the raw fc_client cookie value and
+ * the page's offered pills (server-gated: signed/link gates are already
+ * reflected in the pill set — the decision only ever resolves within it).
+ * `kind` picks the resolution: "cast" resolves FLAT (the head slug);
+ * "profile"/"feed" prefer their own kind segment (`p:`/`f:`) and inherit
+ * the head slug when absent — flat, never another kind's choice. Null ⇒
+ * render nothing (no cookie, stale/unknown slug with no arming, or
+ * off/unresolved — the old server renderer's silence).
  */
 export function shellAutoDecision(
 	cookieRaw: string | undefined,
 	pills: ShellPill[],
 	noredirect: boolean,
+	kind: "cast" | "profile" | "feed",
 ): ShellAutoDecision | null {
 	if (!cookieRaw) return null;
 	// hono's setCookie encodes "|" as %7C; accept both forms. The head is
@@ -68,6 +71,7 @@ export function shellAutoDecision(
 	var slug = sep === -1 ? value : value.slice(0, sep);
 	var auto;
 	var delay = 5;
+	var kindSlug = "";
 	if (sep !== -1) {
 		var parts = value.slice(sep + 1).split("|");
 		for (var i = 0; i < parts.length; i++) {
@@ -75,14 +79,16 @@ export function shellAutoDecision(
 			if (part === "auto-on") auto = "on";
 			else if (part === "auto-off") auto = "off";
 			else if (/^d[0-5]$/.test(part)) delay = Number(part.charAt(1));
-			// p:/f: kind segments and garbage are ignored here — cast pages
-			// resolve flat (the segments belong to the profile/feed menus).
+			else if (kind !== "cast" && part.charAt(0) === kind.charAt(0) && part.charAt(1) === ":") {
+				kindSlug = part.slice(2);
+			}
 		}
 	}
 	if (!slug) return null;
+	var candidate = kind === "cast" ? slug : kindSlug || slug;
 	var pill = null;
 	for (var j = 0; j < pills.length; j++) {
-		if (pills[j] && pills[j].slug === slug) {
+		if (pills[j] && pills[j].slug === candidate) {
 			pill = pills[j];
 			break;
 		}
@@ -95,7 +101,7 @@ export function shellAutoDecision(
 			return {
 				variant: "idle",
 				mode: "on",
-				slug: slug,
+				slug: candidate,
 				url: "",
 				scheme: "",
 				intent: "",
@@ -117,7 +123,7 @@ export function shellAutoDecision(
 	return {
 		variant: variant,
 		mode: mode,
-		slug: slug,
+		slug: candidate,
 		url: pill.url || "",
 		scheme: pill.scheme || "",
 		intent: pill.intent || "",

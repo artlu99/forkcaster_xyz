@@ -95,6 +95,13 @@ afterEach(() => {
 
 // --- HTML: the identity card is the whole hydrated entity --------------------
 
+// Server markup vs script source: the auto-open box is built client-side
+// (SHELL_SCRIPT), so the script TEXT contains data-auto fragments that
+// would false-positive naive body assertions. Strip scripts, assert markup.
+function withoutScripts(html: string): string {
+	return html.replace(/<script>[\s\S]*?<\/script>/g, "");
+}
+
 test("profile page renders the full hydrated entity as the identity card", async () => {
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -153,12 +160,13 @@ test("profile page renders the full hydrated entity as the identity card", async
 		'<link rel="alternate" type="application/json" href="?format=json" />',
 	);
 	// Waypoint law: the identity card is the page. The stateful layer
-	// ships the menu + scripts; still no auto-open for a
-	// cookieless visitor, no feed reading, no engagement surface.
+	// ships the menu + scripts; still no auto-open MARKUP for a
+	// cookieless visitor (SHELL_SCRIPT renders it client-side), no feed
+	// reading, no engagement surface.
 	expect(body).toContain("data-copy");
 	expect(body).toContain("window.__fk");
 	expect(body).toContain('data-client="farcaster" data-kind="profile"');
-	expect(body).not.toContain("data-auto");
+	expect(withoutScripts(body)).not.toContain("data-auto");
 	expect(body).not.toContain("farcaster.tv");
 });
 
@@ -741,11 +749,11 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 	// The unhydrated quote (no /h mock) is dropped, not rendered broken.
 	expect(body).not.toContain("quote-embeds");
 	// No identity card, no advertised twin. The feed row is stateful now:
-	// pills + telemetry ship; no cookie ⇒ no banner.
+	// pills + telemetry ship; no cookie ⇒ the script renders no box.
 	expect(body).not.toContain('class="profile-card"');
 	expect(body).toContain("data-client");
 	expect(body).toContain("window.__fk");
-	expect(body).not.toContain("data-auto");
+	expect(withoutScripts(body)).not.toContain("data-auto");
 	expect(body).not.toContain('rel="alternate"');
 });
 
@@ -1292,67 +1300,76 @@ const signedTrueMock = () =>
 		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: true },
 	});
 
-test("profile menu: the badge marks the resolved client (kind slug outranks cast slug)", async () => {
+test("profile menu: cookie-blind shell — resolution is client-side", async () => {
 	globalThis.fetch = signedTrueMock();
-	const res = await app.request(`/${USERNAME}`, {
+	const bare = await app.request(`/${USERNAME}`);
+	const bareBody = await bare.text();
+	// Offered pills render server-side (gates applied); the badge and
+	// data-resolved are applied by SHELL_SCRIPT from the local cookie —
+	// the same bytes ship with or without it.
+	expect(bareBody).not.toContain('class="pill-badge"');
+	expect(bareBody).not.toContain("data-resolved=");
+	const personal = await app.request(`/${USERNAME}`, {
 		headers: { Cookie: "fc_client=farcaster|p:quilcast" },
 	});
-	const body = await res.text();
-	// Resolution = the kind's own slug; the row publishes it for the
-	// client script's first/switch/repeat and the badge.
-	expect(body).toContain('data-resolved="quilcast"');
-	const quilcast = body.indexOf('data-client="quilcast"');
-	const farcaster = body.indexOf('data-client="farcaster"');
-	expect(body.slice(quilcast, quilcast + 400)).toContain("pill-badge");
-	expect(body.slice(farcaster, farcaster + 400)).not.toContain("pill-badge");
+	expect(await personal.text()).toBe(bareBody);
+	const quilcast = bareBody.indexOf('data-client="quilcast"');
+	const farcaster = bareBody.indexOf('data-client="farcaster"');
+	expect(quilcast).toBeGreaterThan(-1);
+	expect(farcaster).toBeGreaterThan(-1);
 });
 
-test("profile auto-open: flat cast inheritance arms the overlay", async () => {
+test("profile auto-open: client-side — the shell ships the kind-aware mount + machinery", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}`, {
 		headers: { Cookie: "fc_client=farcaster|auto-on" },
 	});
 	const body = await res.text();
-	expect(body).toContain('data-auto="on"');
-	expect(body).toContain('data-auto-noun="profiles"');
-	expect(body).toContain('data-auto-kind="profile"');
-	expect(body).toContain(`data-auto-url="https://farcaster.xyz/${USERNAME}"`);
-	expect(body).toContain('data-auto-slug="farcaster"');
+	// The mount carries the kind + noun; the box is built client-side.
+	expect(body).toContain('id="auto-mount" data-kind="profile" data-noun="profiles"');
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain('data-auto="on"');
+	expect(markup).not.toContain("data-auto-noun");
+	// The machinery ships: kind-aware decision (the mount's kind drives the
+	// serialized fn), the profile target URLs as pill attributes for the
+	// script to read, and AUTO_SCRIPT's noun-driven copy.
+	expect(body).toContain(`decide(raw || undefined, pills, noredirect, kind)`);
+	expect(body).toContain(`data-scheme="quorummobile://feed?profileFid=`);
+	expect(body).toContain('"profiles"');
 });
 
-test("profile auto-open: an incapable cast slug resolves nothing to open — the idle chip names why, badgeless menu", async () => {
+test("profile auto-open: an incapable cast slug goes idle client-side — generic copy", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}`, {
 		headers: { Cookie: "fc_client=linkcast|auto-on" },
 	});
 	const body = await res.text();
-	// linkcast has no profile target: flat inheritance finds nothing ⇒ no
-	// redirect fires — and the non-redirect is EXPLAINED (the idle
-	// chip): the armed client is named, the menu below is the way out.
-	// No redirect targets, no arming overlay, and the menu renders
-	// without a badge. (The attribute form: the bare string also appears
-	// inside CLIENT_SCRIPT.)
-	expect(body).not.toContain("data-auto-url");
-	expect(body).not.toContain('data-resolved="');
-	expect(body).not.toContain('data-auto="on"');
-	expect(body).toContain('data-auto="idle"');
-	expect(body).toContain(
-		"Auto-open: Linkcast isn&#39;t offered here — pick below",
-	);
+	// linkcast has no profile target: flat inheritance finds nothing ⇒ the
+	// client script renders the generic idle chip into the mount; the
+	// server markup stays silent (no redirect targets, no box, no badge).
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain("data-auto-url");
+	expect(markup).not.toContain('data-resolved="');
+	expect(markup).not.toContain('data-auto="on"');
+	// The generic idle copy ships in the script source (Q3: no title map).
+	expect(body).toContain("offered here");
+	expect(body).not.toContain("Linkcast isn&#39;t offered here");
 	expect(body).toContain('data-client="farcaster" data-kind="profile"');
 });
 
-test("profile auto-open: ?noredirect=1 renders the chip, never the overlay", async () => {
+test("profile auto-open: ?noredirect=1 rides the shell; the script reads location.search", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}?noredirect=1`, {
 		headers: { Cookie: "fc_client=farcaster|auto-on" },
 	});
 	const body = await res.text();
-	expect(body).toContain('data-auto="noredirect"');
-	expect(body).not.toContain('data-auto="on"');
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain('data-auto="on"');
+	expect(markup).not.toContain('data-auto="noredirect"');
+	expect(body).toContain("noredirect=1");
 });
 
-test("unsigned profile: capable kind slugs still auto-open", async () => {
+test("unsigned profile: capable kind slugs still offered (the script resolves them)", async () => {
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
@@ -1363,7 +1380,10 @@ test("unsigned profile: capable kind slugs still auto-open", async () => {
 	});
 	const body = await res.text();
 	// quilcast's profile target is unsigned-friendly; the incapable cast
-	// slug (linkcast) never fires — flat, own kind first.
-	expect(body).toContain(`data-auto-url="https://quilcast.com/u/${USERNAME}"`);
-	expect(body).toContain('data-auto-slug="quilcast"');
+	// slug (linkcast) is irrelevant — the kind-aware client decision
+	// resolves p:quilcast against the offered pills, which are
+	// server-gated (farcaster suppressed, quilcast offered).
+	expect(body).not.toContain('data-client="farcaster"');
+	expect(body).toContain(`href="https://quilcast.com/u/${USERNAME}"`);
+	expect(body).toContain('data-client="quilcast" data-kind="profile"');
 });
