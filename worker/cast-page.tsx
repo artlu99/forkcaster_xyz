@@ -14,6 +14,7 @@ import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
 	type ProviderId,
 	type ProviderTiming,
+	jsonRoster,
 	raceCast,
 	raceRoster,
 	shimProvider,
@@ -189,15 +190,15 @@ export async function unfurl(
 // Exported for the casts skeleton page (same enrichment pipeline).
 export async function fetchQuote(
 	target: QuoteTarget,
-	potatoBase?: string | null,
+	potatoBases?: string | null,
 ): Promise<ShimCast | undefined> {
 	const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-	const direct = await getCastByHash(target.hash, signal, potatoBase);
+	const direct = await getCastByHash(target.hash, signal, potatoBases);
 	if (direct || target.fid === undefined) return direct;
 	try {
-		const username = await getUsernameByFid(target.fid, signal, potatoBase);
+		const username = await getUsernameByFid(target.fid, signal, potatoBases);
 		if (!username) return undefined;
-		const lookup = await getCastByUsernameHash(username, target.hash, signal, potatoBase);
+		const lookup = await getCastByUsernameHash(username, target.hash, signal, potatoBases);
 		return lookup.status === "found" ? lookup.cast : undefined;
 	} catch {
 		// /u network failure (it propagates rejections) — drop the quote.
@@ -305,7 +306,7 @@ function notFoundPage(username: string, hash: string): string {
 // authoritative miss from a complete provider; unreachable = everyone
 // failed. opts.boxMs: HTML passes a box (a quote-blind farcaster.tv win
 // is allowed once it expires — the page self-heals quote cards); JSON
-// passes null (shim-only, always complete).
+// passes null (always complete — shim + the potato fleet, strict).
 export type ResolvedCast =
 	| {
 			kind: "found";
@@ -337,12 +338,14 @@ export async function resolveCast(
 ): Promise<ResolvedCast> {
 	// The race is capped at 5s per provider (cast-source.ts): a cold sharded
 	// lookup can otherwise hang for 15s+ (measured on a missing cast).
-	// JSON: strict shim-only. HTML: the default roster plus the shim-potato
-	// canary leg when SHIM_POTATO_BASE is set (raceRoster).
+	// Both variants race the full fleet: HTML gets the default roster plus
+	// the potatos (and the 700ms completeness box); JSON gets shim + the
+	// potatos — complete legs only, no box, strict statuses. Misses are
+	// collective parity either way (no single host's gap 404s a live cast).
 	const race = await raceCast(
 		{ username, hash },
 		opts.boxMs === null
-			? { providers: [shimProvider] }
+			? { providers: jsonRoster(env?.SHIM_POTATO_BASE) }
 			: { providers: raceRoster(env?.SHIM_POTATO_BASE), boxMs: opts.boxMs },
 	);
 	if (race.kind !== "found") return race;

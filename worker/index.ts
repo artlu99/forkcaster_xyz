@@ -299,7 +299,8 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// ?format=json is the explicit agent switch and wins over Accept; only a
 	// strict application/json Accept also negotiates JSON — browsers and
 	// curl send */*, which stays HTML. HTML races the provider roster with
-	// a 700ms completeness box (cast-source.ts); JSON stays shim-only.
+	// a 700ms completeness box (cast-source.ts); JSON rides the complete-leg
+	// fleet roster (shim + potatos) with strict statuses.
 	const wantsJson = negotiatesJson(c);
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
@@ -460,8 +461,7 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
 		signed: true,
-		// Every shim read races the shim-potato canary when it's configured.
-		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
@@ -511,8 +511,8 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// Same ban-signal fork as the profile page: the head's way out
 		// follows the signed state.
 		signed: true,
-		// Every shim read races the shim-potato canary when it's configured.
-		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+		// Every shim read races the shim-potato fleet when it's configured.
+		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	// Stateful layer: prefs + rank + ?noredirect, same
 	// wiring as the cast and profile routes.
@@ -554,9 +554,9 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
 				// No executionCtx — best-effort.
 			}
 		},
-		// The /h lookup races the shim-potato canary when it's configured;
-		// the warm then covers both indexes.
-		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+		// The /h lookup races the shim-potato fleet when it's configured;
+		// the warm then covers every index.
+		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	if (resolved.kind === "unreachable") {
 		return c.body(null, 503, { "retry-after": "60" });

@@ -1,9 +1,14 @@
 /**
- * PLAN8 shim-potato canary — the measurement leg's contract:
- *  - roster assembly: shim-potato only when the host is configured;
- *  - shim-potato's FOUND wins like any complete provider (head-to-head metric);
- *  - shim-potato's MISS is telemetry only — it can never 404 the race;
- *  - shim's fast authoritative miss is untouched (regression guard).
+ * Shim-potato FLEET — the regional legs' contract (SPOF softened Oct 2026,
+ * successor to the PLAN8 canary guards):
+ *  - roster assembly: one provider per comma-separated base, ids
+ *    shim-potato / shim-potato-2 / …;
+ *  - a fleet member's FOUND wins like any complete provider;
+ *  - a fleet member's MISS is a parity VOTE: not-found needs consensus
+ *    (every miss-authoritative leg consulted and missed) — no single host
+ *    decides, so a pending leg can always rescue a landed miss;
+ *  - shim's miss is no longer fast-terminal (regression guard, flipped
+ *    deliberately: cloud retires into the fleet).
  * No mock.module dance: cast-source.ts pulls in shim.ts + radash only.
  * Stubs settle via real (short) timers; raceCast's 5s caps never fire.
  */
@@ -63,7 +68,7 @@ describe("raceRoster", () => {
 		expect(raceRoster("")).toBeUndefined();
 	});
 
-	test("host → default four plus a shim-potato tail", () => {
+	test("one host → default four plus a shim-potato tail", () => {
 		const roster = raceRoster("https://shim-potato.test");
 		expect(roster?.map((p) => p.id)).toEqual([
 			"shim",
@@ -72,15 +77,32 @@ describe("raceRoster", () => {
 			"farcaster-tv",
 			"shim-potato",
 		]);
+		// Full fleet membership: the leg's misses are parity votes.
 		const shimPotato = roster?.at(-1);
-		expect(shimPotato?.missAuthoritative).toBe(false);
-		// The canonical shim keeps its verdicts — and its fast 404.
+		expect(shimPotato?.missAuthoritative).toBe(true);
 		expect(shimProvider.missAuthoritative).toBe(true);
+	});
+
+	test("comma-separated fleet → one numbered leg per base", () => {
+		const roster = raceRoster(
+			"https://shim-potato.test, https://shim-potato-2.test ,https://shim-potato.test",
+		);
+		expect(roster?.map((p) => p.id)).toEqual([
+			"shim",
+			"haatz",
+			"snap",
+			"farcaster-tv",
+			"shim-potato",
+			"shim-potato-2",
+		]);
+		// The duplicate base was dropped, not mapped twice.
+		expect(roster?.at(-1)?.canServe).toBeDefined();
+		expect(raceRoster("https://shim.artlu.xyz")).toBeUndefined();
 	});
 });
 
-describe("shim-potato race semantics", () => {
-	test("shim-potato's found wins head-to-head against a slower shim", async () => {
+describe("fleet race semantics", () => {
+	test("a fleet member's found wins head-to-head against a slower shim", async () => {
 		const race = await raceCast(
 			{ username: "zoo", hash: "0xabcdef01" },
 			{
@@ -98,46 +120,75 @@ describe("shim-potato race semantics", () => {
 		}
 	});
 
-	test("shim-potato's miss NEVER 404s — everyone else errors ⇒ unreachable", async () => {
-		const race = await raceCast(
-			{ username: "zoo", hash: "0xabcdef01" },
-			{
-				boxMs: 700,
-				providers: [
-					stub(
-						"shim-potato",
-						[{ ms: 1, result: { kind: "miss", provider: "shim-potato" } }],
-						false,
-					),
-					stub("shim", [{ ms: 20, result: { kind: "error", provider: "shim", message: "HTTP 500" } }]),
-					stub("haatz", [{ ms: 25, result: { kind: "error", provider: "haatz", message: "HTTP 500" } }]),
-					stub("snap", [{ ms: 30, result: { kind: "error", provider: "snap", message: "HTTP 500" } }]),
-					stub("farcaster-tv", [
-						{ ms: 35, result: { kind: "error", provider: "farcaster-tv", message: "HTTP 500" } },
-					]),
-				],
-			},
-		);
-		expect(race.kind).toBe("unreachable");
-		// …but the miss stays visible in telemetry.
-		const shimPotatoRow = race.timings.find((t) => t.provider === "shim-potato");
-		expect(shimPotatoRow?.kind).toBe("miss");
-	});
-
-	test("shim's fast authoritative miss is untouched", async () => {
+	test("a pending found rescues a landed miss (shim's miss is a vote, not a verdict)", async () => {
 		const race = await raceCast(
 			{ username: "zoo", hash: "0xabcdef01" },
 			{
 				boxMs: 700,
 				providers: [
 					stub("shim", [{ ms: 1, result: { kind: "miss", provider: "shim" } }]),
-					// Would have found, but shim's verdict lands first —
-					// the canary cannot rescue shim's miss (known limit).
 					stub("shim-potato", [{ ms: 50, result: found("shim-potato") }]),
 				],
 			},
 		);
+		expect(race.kind).toBe("found");
+		if (race.kind === "found") expect(race.provider).toBe("shim-potato");
+	});
+
+	test("consensus: every miss-authoritative leg missed ⇒ not-found", async () => {
+		const race = await raceCast(
+			{ username: "zoo", hash: "0xabcdef01" },
+			{
+				boxMs: 700,
+				providers: [
+					stub("shim", [{ ms: 1, result: { kind: "miss", provider: "shim" } }]),
+					stub("shim-potato", [
+						{ ms: 5, result: { kind: "miss", provider: "shim-potato" } },
+					]),
+					stub("haatz", [{ ms: 20, result: { kind: "miss", provider: "haatz" } }]),
+					stub("snap", [{ ms: 25, result: { kind: "miss", provider: "snap" } }]),
+				],
+			},
+		);
 		expect(race.kind).toBe("not-found");
+	});
+
+	test("a consulted miss beats errors: fleet miss + everyone errors ⇒ not-found", async () => {
+		const race = await raceCast(
+			{ username: "zoo", hash: "0xabcdef01" },
+			{
+				boxMs: 700,
+				providers: [
+					stub("shim", [{ ms: 20, result: { kind: "error", provider: "shim", message: "HTTP 500" } }]),
+					stub("shim-potato", [
+						{ ms: 1, result: { kind: "miss", provider: "shim-potato" } },
+					]),
+					stub("haatz", [{ ms: 25, result: { kind: "error", provider: "haatz", message: "HTTP 500" } }]),
+					stub("snap", [{ ms: 30, result: { kind: "error", provider: "snap", message: "HTTP 500" } }]),
+				],
+			},
+		);
+		// The network was asked (by the fleet member) — a 404 verdict,
+		// not a 503. The miss stays visible in telemetry either way.
+		expect(race.kind).toBe("not-found");
+		const shimPotatoRow = race.timings.find((t) => t.provider === "shim-potato");
+		expect(shimPotatoRow?.kind).toBe("miss");
+	});
+
+	test("all legs error ⇒ unreachable", async () => {
+		const race = await raceCast(
+			{ username: "zoo", hash: "0xabcdef01" },
+			{
+				boxMs: 700,
+				providers: [
+					stub("shim", [{ ms: 20, result: { kind: "error", provider: "shim", message: "HTTP 500" } }]),
+					stub("shim-potato", [
+						{ ms: 1, result: { kind: "error", provider: "shim-potato", message: "HTTP 500" } },
+					]),
+				],
+			},
+		);
+		expect(race.kind).toBe("unreachable");
 	});
 });
 
@@ -196,8 +247,8 @@ describe("shimPotatoProvider factory", () => {
 	});
 });
 
-// The default roster is untouched by the canary: four providers, and the
-// module-level shim provider still carries its authoritative verdicts.
+// The default roster is untouched by the fleet: four providers, and the
+// module-level shim provider still carries miss authority (as one vote).
 describe("default roster", () => {
 	test("PROVIDERS stays the static four until activation", () => {
 		expect(PROVIDERS.map((p) => p.id)).toEqual([

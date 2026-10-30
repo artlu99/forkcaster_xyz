@@ -11,7 +11,7 @@ import {
 	type CastRefOutput,
 } from "./cast-ref.ts";
 
-export function createMcpServer(potatoBase?: string | null): McpServer {
+export function createMcpServer(potatoBases?: string | null): McpServer {
 	const server = new McpServer({ name: "forkcaster", version: "1.0.0" });
 	server.registerTool("get_cast_link", {
 		title: "Get cast link",
@@ -21,13 +21,14 @@ export function createMcpServer(potatoBase?: string | null): McpServer {
 		outputSchema: castRefOutput,
 	}, async (input) => {
 		// Overall budget for a resolution chain (up to three shim hops).
-		// Each hop races the shim-potato canary when `potatoBase` is set —
-		// a cloud verdict (found or consulted miss) stays terminal; the
-		// potato only rescues latency and outages.
+		// Each hop races the shim-potato fleet when `potatoBases` is set —
+		// misses are consensus votes; the potato only adds answers, and a
+		// cloud verdict (found or consulted miss) needs the whole fleet to
+		// confirm.
 		const outcome = await runGetCastLink(
 			input,
 			AbortSignal.timeout(8000),
-			potatoBase,
+			potatoBases,
 		);
 		if (outcome.ok) {
 			const result: CastRefOutput = outcome.result;
@@ -46,11 +47,11 @@ export function createMcpServer(potatoBase?: string | null): McpServer {
 
 /**
  * Per-request handler: the factory already ran per request by design
- * (stateless, no DO) — this just threads the env-var canary base in.
+ * (stateless, no DO) — this just threads the env-var fleet list in.
  * `mcpHandler` below stays the potato-less instance tests drive.
  */
-export function mcpHandlerFor(potatoBase?: string | null) {
-	return createMcpHandler(() => createMcpServer(potatoBase));
+export function mcpHandlerFor(potatoBases?: string | null) {
+	return createMcpHandler(() => createMcpServer(potatoBases));
 }
 
 export const mcpHandler = createMcpHandler(() => createMcpServer());

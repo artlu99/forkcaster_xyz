@@ -1,12 +1,13 @@
 /**
- * Shim race unit tests — cloud vs shim-potato on the raced wrappers.
+ * Shim fleet race unit tests — cloud vs the shim-potato fleet on the raced
+ * wrappers.
  *
- * Contract under test (raceShimProbe): the first affirmative answer wins
- * outright; a cloud MISS (HTTP 200, index consulted) is terminal the
- * moment it lands — the potato can never overturn or delay a verdict; a
- * cloud ERROR (non-2xx/throw) defers to a still-pending potato leg before
- * surfacing; potato misses/errors are never authoritative. Without a
- * potatoBase every wrapper is a pass-through (exactly one fetch).
+ * Contract under test (raceShimProbe): no single host is the source of
+ * truth — the FIRST affirmative answer wins outright; a consulted miss
+ * (HTTP 200, index asked) is a vote, with not-found settling only when
+ * every leg has missed; errors surface (cloud's, for legacy message
+ * stability) only when every leg errored. Without a potatoBases value
+ * every wrapper is a pass-through (exactly one fetch).
  *
  * Mock discipline per profile-route.test.ts: globalThis.fetch routed by
  * exact URL — unexpected URLs throw. Slow legs are deferred promises, so
@@ -141,42 +142,66 @@ describe("potato rescues latency and outages", () => {
 	});
 });
 
-describe("cloud verdicts stay terminal", () => {
-	test("cloud miss (HTTP 200, no fid) 404s despite a pending potato found", async () => {
+describe("collective miss parity — no single host decides", () => {
+	test("a pending potato found rescues an already-missed cloud leg", async () => {
 		const pendingPotato = deferred<Response>();
 		shimMock({
 			[fUrl(CLOUD)]: json({ success: false }),
 			[fUrl(POTATO)]: pendingPotato.promise,
 		});
-		// Resolves immediately — it must NOT wait on the potato leg.
+		const raced = getFidByUsername("ellis", new AbortController().signal, POTATO);
+		// Not settled yet — the cloud miss is a vote, not the verdict.
+		let settled = false;
+		void raced.then(() => {
+			settled = true;
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		// The potato's found lands and wins.
+		pendingPotato.resolve(json({ success: true, fid: 42 }));
+		expect(await raced).toBe(42);
+	});
+
+	test("consensus: every leg consulted-and-missed ⇒ miss (the 404)", async () => {
+		shimMock({
+			[fUrl(CLOUD)]: json({ success: false }),
+			[fUrl(POTATO)]: json({ success: false }),
+		});
 		expect(
 			await getFidByUsername("ellis", new AbortController().signal, POTATO),
 		).toBeUndefined();
-		pendingPotato.resolve(json({ success: true, fid: 42 }));
 	});
 
-	test("cloud miss beats a pending potato entity (sparse never wins)", async () => {
-		const pendingPotato = deferred<Response>();
+	test("a potato found rescues a sparse cloud entity (cloud's gap is not a verdict)", async () => {
 		const sparse = { fid: 8911, username: null, displayName: null };
 		shimMock({
 			[userUrl(CLOUD)]: json({ success: true, user: sparse }),
-			[userUrl(POTATO)]: pendingPotato.promise,
+			[userUrl(POTATO)]: json({
+				success: true,
+				user: { fid: 8911, username: "ellis", displayName: "Ellis" },
+			}),
 		});
-		const user = await getUserByFid(8911, new AbortController().signal, POTATO);
-		// The cloud sparse shape is replayed verbatim — resolveProfile's
-		// `username == null` verdict (404) is untouched by the race.
-		expect(user).toEqual(sparse);
-		pendingPotato.resolve(
-			json({ success: true, user: { fid: 8911, username: "ellis" } }),
-		);
+		expect(
+			await getUserByFid(8911, new AbortController().signal, POTATO),
+		).toEqual({ fid: 8911, username: "ellis", displayName: "Ellis" });
 	});
 
-	test("cloud /wc miss stays authoritative against a potato found", async () => {
-		const pendingPotato = deferred<Response>();
+	test("all-sparse consensus replays cloud's sparse shape verbatim (404 upstream)", async () => {
+		const sparse = { fid: 8911, username: null, displayName: null };
+		shimMock({
+			[userUrl(CLOUD)]: json({ success: true, user: sparse }),
+			[userUrl(POTATO)]: json({ success: true, user: { ...sparse } }),
+		});
+		const user = await getUserByFid(8911, new AbortController().signal, POTATO);
+		expect(user).toEqual(sparse);
+	});
+
+	test("cloud /wc miss + potato found ⇒ the fleet resolves", async () => {
 		const url = (base: string) => `${base}/wc/ellis/0xabc`;
 		shimMock({
 			[url(CLOUD)]: json({ success: false }),
-			[url(POTATO)]: pendingPotato.promise,
+			[url(POTATO)]: json({ success: true, cast: { fid: 8911, hash: "0xabc" } }),
 		});
 		const lookup = await getCastByUsernameHash(
 			"ellis",
@@ -184,15 +209,37 @@ describe("cloud verdicts stay terminal", () => {
 			new AbortController().signal,
 			POTATO,
 		);
-		expect(lookup.status).toBe("miss");
-		pendingPotato.resolve(
-			json({ success: true, cast: { fid: 8911, hash: "0xabc" } }),
-		);
+		expect(lookup.status).toBe("found");
 	});
 });
 
-describe("outage surfacing", () => {
-	test("cloud 500 + potato 500 ⇒ the cloud error propagates", async () => {
+describe("fleet surfacing", () => {
+	test("cloud throws + potato misses ⇒ consulted miss wins over errors (404)", async () => {
+		shimMock({
+			[fUrl(CLOUD)]: new Error("network down"),
+			[fUrl(POTATO)]: json({ success: false }),
+		});
+		// The network was asked (by the potato) — a 404 verdict, not a 503.
+		expect(
+			await getFidByUsername("ellis", new AbortController().signal, POTATO),
+		).toBeUndefined();
+	});
+
+	test("three-leg fleet: first found wins, a hung leg can't block", async () => {
+		const hang = deferred<Response>();
+		const P2 = "https://shim-potato-2.test";
+		shimMock({
+			[fUrl(CLOUD)]: hang.promise,
+			[fUrl(POTATO)]: json({ success: false }),
+			[`${P2}/f/ellis`]: json({ success: true, fid: 7 }),
+		});
+		expect(
+			await getFidByUsername("ellis", new AbortController().signal, `${POTATO}, ${P2}`),
+		).toBe(7);
+		hang.resolve(json({ success: true, fid: 8911 }));
+	});
+
+	test("all legs error ⇒ the cloud error propagates", async () => {
 		shimMock({
 			[fUrl(CLOUD)]: new Response("boom", { status: 500 }),
 			[fUrl(POTATO)]: new Response("boom", { status: 500 }),
@@ -210,16 +257,6 @@ describe("outage surfacing", () => {
 		await expect(
 			getFidByUsername("ellis", new AbortController().signal, POTATO),
 		).rejects.toThrow("shim /f HTTP 500");
-	});
-
-	test("cloud throws + potato misses ⇒ the throw still propagates", async () => {
-		shimMock({
-			[fUrl(CLOUD)]: new Error("network down"),
-			[fUrl(POTATO)]: json({ success: false }),
-		});
-		await expect(
-			getFidByUsername("ellis", new AbortController().signal, POTATO),
-		).rejects.toThrow("network down");
 	});
 });
 

@@ -175,23 +175,23 @@ export async function resolveProfile(
 	opts: {
 		timeline?: boolean;
 		signed?: boolean;
-		/** The shim-potato canary base — raced on every shim read when set. */
-		potatoBase?: string | null;
+		/** The shim-potato fleet — comma-separated bases raced on every shim read. */
+		potatoBases?: string | null;
 	} = {},
 ): Promise<ResolvedProfile> {
-	const potatoBase = opts.potatoBase;
+	const potatoBases = opts.potatoBases;
 	const castsPromise = opts.timeline
 		? getCastsAndReplies(
 				username,
 				TIMELINE_LIMIT,
 				AbortSignal.timeout(PROFILE_TIMEOUT_MS),
-				potatoBase,
+				potatoBases,
 			)
 		: null;
 	let fid: number | undefined;
 	try {
 		fid = await withOneRetry((signal) =>
-			getFidByUsername(username, signal, potatoBase),
+			getFidByUsername(username, signal, potatoBases),
 		);
 	} catch {
 		return { kind: "unreachable" };
@@ -201,11 +201,11 @@ export async function resolveProfile(
 	// together. The entity retries (undefined = visible degradation); the
 	// signed check fails open single-shot. Both race the potato.
 	const entityPromise = withOneRetry(
-		(signal) => getUserByFid(fid, signal, potatoBase),
+		(signal) => getUserByFid(fid, signal, potatoBases),
 		(resolved) => resolved === undefined,
 	);
 	const signedPromise = opts.signed
-		? getSignedStatus(fid, AbortSignal.timeout(PROFILE_TIMEOUT_MS), potatoBase)
+		? getSignedStatus(fid, AbortSignal.timeout(PROFILE_TIMEOUT_MS), potatoBases)
 		: null;
 	let user: ShimUser | undefined;
 	try {
@@ -230,7 +230,7 @@ export async function resolveProfile(
 			username,
 			TIMELINE_LIMIT,
 			AbortSignal.timeout(PROFILE_TIMEOUT_MS),
-			potatoBase,
+			potatoBases,
 		).catch(() => timeline);
 	}
 	return {
@@ -735,8 +735,8 @@ export async function resolveConversationAlias(
 	hash: string,
 	opts?: {
 		waitUntil?: (p: Promise<unknown>) => void;
-		/** The shim-potato canary base — raced on the /h lookup when set. */
-		potatoBase?: string | null;
+		/** The shim-potato fleet — raced on the /h lookup when set. */
+		potatoBases?: string | null;
 	},
 ): Promise<ResolvedConversationAlias> {
 	// /h answers misses at HTTP 200 ({"success":false}) — non-ok or a thrown
@@ -766,7 +766,7 @@ export async function resolveConversationAlias(
 			return { kind: "error", error, fallback: undefined };
 		}
 	};
-	const probed = await raceShimProbe(probe, opts?.potatoBase);
+	const probed = await raceShimProbe(probe, opts?.potatoBases);
 	if (probed.kind === "error") return { kind: "unreachable" };
 	const cast: ShimCast | undefined =
 		probed.kind === "found" ? probed.value : undefined;
@@ -786,7 +786,7 @@ export async function resolveConversationAlias(
 		const rescued = await rescueHashViaFarcasterTv(hash);
 		if (rescued.kind === "error") return { kind: "unreachable" };
 		if (rescued.kind === "miss") return { kind: "not-found" };
-		opts?.waitUntil?.(warmShimHashIndex(rescued.fid, opts?.potatoBase));
+		opts?.waitUntil?.(warmShimHashIndex(rescued.fid, opts?.potatoBases));
 		found = {
 			fid: rescued.fid,
 			hash: rescued.fullHash,
@@ -822,7 +822,7 @@ export async function resolveConversationAlias(
 				(await getUsernameByFid(
 					found.fid,
 					AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-					opts?.potatoBase,
+					opts?.potatoBases,
 				)) ?? undefined;
 		} catch {
 			return { kind: "unreachable" };
@@ -848,7 +848,7 @@ export type ResolvedProfileFidAlias =
 
 export async function resolveProfileFidAlias(
 	fid: number,
-	potatoBase?: string | null,
+	potatoBases?: string | null,
 ): Promise<ResolvedProfileFidAlias> {
 	// Profile-family discipline for a load-bearing identity call: the 8s
 	// window, one retry on transport failure or non-ok (getFidByUsername
@@ -885,7 +885,7 @@ export async function resolveProfileFidAlias(
 				return { kind: "error", error, fallback: undefined };
 			}
 		};
-		return raceShimProbe(probe, potatoBase);
+		return raceShimProbe(probe, potatoBases);
 	};
 	const probed = await withOneRetry(probeOnce, (r) => r.kind === "error");
 	if (probed.kind === "error") return { kind: "unreachable" };

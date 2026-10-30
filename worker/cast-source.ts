@@ -13,17 +13,17 @@
 //                its wins are marked partial and only allowed after the box
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
 //
-// The shim-potato CANARY (PLAN8): a second shim-shaped host stacked as a fifth
-// complete leg whenever SHIM_POTATO_BASE is set (see raceRoster). Purpose is
-// measurement, not redundancy — identical eligibility to shim, so wins,
-// p50/p95 and error rates are directly comparable head-to-head (the same
-// structure that makes haatz-vs-snap legible). Two dials keep it safe:
-// - shim-potato's FOUND can win like any complete provider (central hash
-//   validation still guards every win);
-// - shim-potato's MISS is NOT authoritative (missAuthoritative: false) — a cold
-//   or diverging shim-potato index can never 404 a cast the race would otherwise
-//   resolve. Only shim keeps the fast authoritative miss.
-// The JSON twin stays shim-only either way (strict canonical source).
+// The shim-potato FLEET (PLAN8 canary graduated, Oct 2026): shim-shaped
+// complete legs stacked onto the race whenever SHIM_POTATO_BASE is set —
+// one base or a comma-separated regional list (see raceRoster). Originally
+// a measurement canary; now the redundancy layer cloud retires into. Two
+// properties carried over from the canary era:
+// - a fleet member's FOUND can win like any complete provider (central
+//   hash validation still guards every win);
+// - misses are COLLECTIVE parity — no single host's consulted miss is the
+//   verdict. Not-found settles only when every miss-authoritative leg has
+//   consulted and missed; a pending leg can always rescue a landed miss.
+// The JSON twin rides the same fleet (jsonRoster — complete legs only).
 //
 // The signed (ban) check is not part of this race: it stays a
 // shim dependency, orthogonal to cast content (see resolveCast).
@@ -34,6 +34,7 @@
 import { sort } from "radash";
 import {
 	SHIM_CLOUD_BASE,
+	fleetBases,
 	getCastByUsernameHashFrom,
 	getFidByUsername,
 	resolvesHash,
@@ -45,10 +46,11 @@ export type { ShimCast, ShimEmbed };
 
 export type ProviderId =
 	| "shim"
-	| "shim-potato"
 	| "haatz"
 	| "snap"
-	| "farcaster-tv";
+	| "farcaster-tv"
+	/** The potato fleet: shim-potato, shim-potato-2, -3, … (comma-separated var). */
+	| `shim-potato${string}`;
 
 /**
  * How resolveFid's two-source identity race settled on a raw-node leg —
@@ -82,10 +84,10 @@ export interface CastProvider {
 	id: ProviderId;
 	complete: boolean;
 	/**
-	 * Whether this provider's `miss` is an authoritative not-found verdict.
-	 * Defaults to true for complete providers (the parity rule); a canary
-	 * leg like shim-potato opts out so its verdicts stay telemetry-only. Partial
-	 * providers never have miss authority either way.
+	 * Whether this provider's `miss` is a parity vote toward the collective
+	 * not-found. True for complete providers (the fleet rule — every leg
+	 * counts, none decides alone); false for partial providers, whose
+	 * misses never count.
 	 */
 	missAuthoritative?: boolean;
 	/** Whether this provider can key off (username, hash) alone. */
@@ -158,17 +160,18 @@ async function getJsonWithStatus(
 	return { status: res.status, data };
 }
 
-// --- shim + shim-potato (complete, canonical shape, any hash form) — identity
-// --- calls live in shim.ts; this factory maps them onto race semantics.
-// --- shim-potato is the same adapter pointed at the canary host (PLAN8).
+// --- shim + the potato fleet (complete, canonical shape, any hash form) —
+// --- identity calls live in shim.ts; this factory maps them onto race
+// --- semantics. Every fleet member is the same adapter at its own host.
 
-export function shimProviderFor(id: "shim" | "shim-potato", base: string): CastProvider {
+export function shimProviderFor(id: ProviderId, base: string): CastProvider {
 	return {
 		id,
 		complete: true,
-		// Only the canonical shim's miss 404s the race (plus the fast-404
-		// special case below); shim-potato's misses are telemetry only.
-		missAuthoritative: id === "shim",
+		// Full fleet membership (SPOF softened, Oct 2026): every shim-shaped
+		// leg's consulted miss is a parity vote — consensus, not a single
+		// host, decides not-found.
+		missAuthoritative: true,
 		canServe: () => true,
 		async fetchCast(vars, signal) {
 			const lookup = await getCastByUsernameHashFrom(
@@ -189,20 +192,49 @@ export function shimProviderFor(id: "shim" | "shim-potato", base: string): CastP
 export const shimProvider = shimProviderFor("shim", SHIM_CLOUD_BASE);
 
 /**
- * The shim-potato canary leg — same contract, different host. Wins are real
- * (head-to-head measurement); misses never 404 the race.
+ * The shim-potato fleet leg — same contract, different host. Wins are real
+ * (head-to-head measurement); misses are parity votes toward consensus.
  */
 export const shimPotatoProvider = (base: string): CastProvider =>
 	shimProviderFor("shim-potato", base);
 
 /**
- * The HTML race roster: the static four, plus shim-potato when the canary is
- * switched on (SHIM_POTATO_BASE set). Undefined = raceCast's default roster.
- * The JSON twin deliberately stays shim-only — resolveCast passes
- * [shimProvider] there regardless.
+ * Fleet member id: shim-potato, then shim-potato-2, -3, … — one row per
+ * regional potato once it joins the var. (The stats lib's static ROSTER
+ * gains matching rows at cutover; unknown ids tally to zero until then.)
  */
-export function raceRoster(potatoBase: string | undefined): CastProvider[] | undefined {
-	return potatoBase ? [...PROVIDERS, shimPotatoProvider(potatoBase)] : undefined;
+function potatoId(index: number): ProviderId {
+	return index === 0 ? "shim-potato" : `shim-potato-${index + 1}`;
+}
+
+/**
+ * The HTML race roster: the static four, plus the potato fleet when the
+ * canary is switched on (SHIM_POTATO_BASE — one base or a comma-separated
+ * list). Undefined = raceCast's default roster.
+ */
+export function raceRoster(potatoBases: string | undefined): CastProvider[] | undefined {
+	const bases = fleetBases(potatoBases);
+	if (bases.length === 0) return undefined;
+	return [
+		...PROVIDERS,
+		...bases.map((base, index) => shimProviderFor(potatoId(index), base)),
+	];
+}
+
+/**
+ * The strict JSON twin's roster: canonical shim plus the full potato
+ * fleet — complete legs only (farcaster.tv's quote-blindness has no seat
+ * here), so the twin stays complete. Misses are collective parity, the
+ * same softened-SPOF semantics as every other surface (Oct 2026: the
+ * twin's shim-only exception ended when cloud stopped being the verdict).
+ */
+export function jsonRoster(potatoBases: string | undefined): CastProvider[] {
+	return [
+		shimProvider,
+		...fleetBases(potatoBases).map((base, index) =>
+			shimProviderFor(potatoId(index), base),
+		),
+	];
 }
 
 // --- farcaster.tv (quote-blind partial, any hash form via prefix match) ---
@@ -582,16 +614,17 @@ type RaceEvent =
 	| { deadline?: false; provider: ProviderId; result: ProviderResult };
 
 /**
- * Race the eligible providers. Semantics:
+ * Race the eligible providers. Semantics (SPOF-softened, Oct 2026 — no
+ * single host's miss is the verdict):
  * - A complete provider's validated `found` wins immediately.
  * - A partial (quote-blind) `found` may only win once the box expires —
  *   boxMs 0 disables the wait (partial wins as soon as it lands).
- * - A miss from a COMPLETE provider with miss authority is authoritative
- *   ⇒ not-found, even if a partial found landed first (parity with the
- *   old shim-miss ⇒ 404). Shim's miss additionally resolves the race
- *   immediately (fast 404s). The shim-potato canary opts out of miss authority
- *   (missAuthoritative: false) — its misses count in telemetry but never
- *   404 a cast the race could still resolve.
+ * - Misses are COLLECTIVE parity: a miss from a COMPLETE provider with
+ *   miss authority marks not-found, but the race keeps draining — any
+ *   pending leg (any potato in the fleet) can still win. Shim no longer
+ *   short-circuits; not-found settles the moment every miss-authoritative
+ *   leg has consulted and missed (consensus), trading the old fast-404
+ *   for "no single index gap can 404 a live cast".
  * - Anything else after all providers settle ⇒ unreachable.
  * Losers are aborted when the race resolves.
  */
@@ -608,7 +641,8 @@ export async function raceCast(
 	});
 	if (eligible.length === 0)
 		return { kind: "unreachable", timings: [], elapsedMs: 0 };
-	// Miss authority: complete providers by default, canary legs opt out.
+	// Miss authority: complete providers by default; partial providers
+	// never count toward the consensus.
 	const missVerdict = new Map(
 		eligible.map((p) => [p.id, p.complete && p.missAuthoritative !== false]),
 	);
@@ -624,6 +658,10 @@ export async function raceCast(
 	};
 
 	const pending = new Map<ProviderId, Promise<RaceEvent>>();
+	// Collective miss parity: not-found needs a consensus — every
+	// miss-authoritative leg consulted and missed.
+	const authoritativeTotal = eligible.filter((p) => missVerdict.get(p.id)).length;
+	let authoritativeMisses = 0;
 	for (const provider of eligible) {
 		const controller = new AbortController();
 		controllers.set(provider.id, controller);
@@ -732,13 +770,13 @@ export async function raceCast(
 				break;
 			}
 		} else if (result.kind === "miss") {
-			if (event.provider === "shim") {
-				// Shim's miss verdict is the system's original authoritative
-				// not-found — resolve immediately, no box wait (fast 404s).
+			if (missVerdict.get(event.provider)) {
+				// A vote, not a verdict: mark it and keep draining — a
+				// pending leg (any potato) can still rescue the race.
 				completeMiss = true;
-				break;
+				authoritativeMisses += 1;
+				if (authoritativeMisses === authoritativeTotal) break;
 			}
-			if (missVerdict.get(event.provider)) completeMiss = true;
 		}
 	}
 	if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
