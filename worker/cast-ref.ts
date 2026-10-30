@@ -181,8 +181,9 @@ async function resolveByUsernameHash(
 	username: string,
 	hash: string,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<Identity | null> {
-	const lookup = await getCastByUsernameHash(username, hash, signal);
+	const lookup = await getCastByUsernameHash(username, hash, signal, potatoBase);
 	if (lookup.status === "error") throw new ShimUnavailableError(lookup.message);
 	if (lookup.status === "miss") return null;
 	if (!resolvesHash(lookup.cast.hash, hash)) return null;
@@ -197,8 +198,9 @@ async function resolveByUsernameHash(
 async function resolveByLonghash(
 	longhash: string,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<Identity | null> {
-	const cast = await getCastByHash(longhash, signal);
+	const cast = await getCastByHash(longhash, signal, potatoBase);
 	if (cast === undefined || !resolvesHash(cast.hash, longhash)) return null;
 	const identity = identityFromCast(
 		cast as ShimCast & { hash: string },
@@ -207,7 +209,7 @@ async function resolveByLonghash(
 	if (identity.username !== "") return identity;
 	// Sparse author data: fall back to /u/{fid}.
 	if (identity.fid === null) return null;
-	const username = await getUsernameByFid(identity.fid, signal);
+	const username = await getUsernameByFid(identity.fid, signal, potatoBase);
 	if (username === null) return null;
 	return { ...identity, username };
 }
@@ -218,10 +220,11 @@ async function resolveByFid(
 	fid: number,
 	hash: string,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<Identity | null> {
-	const username = await getUsernameByFid(fid, signal);
+	const username = await getUsernameByFid(fid, signal, potatoBase);
 	if (username === null) return null;
-	return resolveByUsernameHash(username, hash, signal);
+	return resolveByUsernameHash(username, hash, signal, potatoBase);
 }
 
 // --- URLs ---
@@ -253,6 +256,7 @@ function buildAll(identity: Identity): Record<string, string> {
 export async function runGetCastLink(
 	input: CastRefInput,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<ToolOutcome> {
 	const target = input.client;
 	const targetClient =
@@ -278,18 +282,24 @@ export async function runGetCastLink(
 	let identity: Identity | null;
 	try {
 		if (input.longhash !== undefined) {
-			identity = await resolveByLonghash(with0x(input.longhash), signal);
+			identity = await resolveByLonghash(
+				with0x(input.longhash),
+				signal,
+				potatoBase,
+			);
 		} else if (input.fid !== undefined) {
 			identity = await resolveByFid(
 				input.fid,
 				with0x(input.shorthash ?? ""),
 				signal,
+				potatoBase,
 			);
 		} else {
 			identity = await resolveByUsernameHash(
 				input.username ?? "",
 				with0x(input.shorthash ?? ""),
 				signal,
+				potatoBase,
 			);
 		}
 	} catch (error) {
@@ -313,7 +323,7 @@ export async function runGetCastLink(
 		`https://farcaster.xyz/${encodeURIComponent(identity.username)}/${encodeURIComponent(identity.fullHash)}`;
 	const signed =
 		identity.fid !== null
-			? await getSignedStatus(identity.fid, signal)
+			? await getSignedStatus(identity.fid, signal, potatoBase)
 			: null;
 
 	if (target === "all") {

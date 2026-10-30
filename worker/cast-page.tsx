@@ -189,14 +189,15 @@ export async function unfurl(
 // Exported for the casts skeleton page (same enrichment pipeline).
 export async function fetchQuote(
 	target: QuoteTarget,
+	potatoBase?: string | null,
 ): Promise<ShimCast | undefined> {
 	const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-	const direct = await getCastByHash(target.hash, signal);
+	const direct = await getCastByHash(target.hash, signal, potatoBase);
 	if (direct || target.fid === undefined) return direct;
 	try {
-		const username = await getUsernameByFid(target.fid, signal);
+		const username = await getUsernameByFid(target.fid, signal, potatoBase);
 		if (!username) return undefined;
-		const lookup = await getCastByUsernameHash(username, target.hash, signal);
+		const lookup = await getCastByUsernameHash(username, target.hash, signal, potatoBase);
 		return lookup.status === "found" ? lookup.cast : undefined;
 	} catch {
 		// /u network failure (it propagates rejections) — drop the quote.
@@ -355,17 +356,22 @@ export async function resolveCast(
 	const quoteTargets = quoteTargetsOf(foundCast);
 	const unfurls = Promise.allSettled(urlEmbeds.map((u) => unfurl(u, env)));
 	const quoteFetches = Promise.allSettled(
-		quoteTargets.map((t) => fetchQuote(t)),
+		quoteTargets.map((t) => fetchQuote(t, env?.SHIM_POTATO_BASE)),
 	);
 
 	// Has the author signed the social smart contract? Unknown (null)
 	// fails open: the farcaster.xyz link is shown unless Shim says no.
 	// The check is time-boxed to the HTML box so a slow shim can't stall a
-	// fast partial win; JSON waits fully (strict path).
+	// fast partial win; JSON waits fully (strict path). Raced against the
+	// potato like every other shim read.
 	let signed: boolean | null = null;
 	const fid = foundCast.fid ?? foundCast.user?.fid;
 	if (fid !== undefined) {
-		const signedPromise = getSignedStatus(fid, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS));
+		const signedPromise = getSignedStatus(
+			fid,
+			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+			env?.SHIM_POTATO_BASE,
+		);
 		if (opts.boxMs === null) {
 			signed = await signedPromise;
 		} else {

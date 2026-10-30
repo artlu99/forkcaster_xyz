@@ -19,7 +19,7 @@ import {
 	parseClientCookie,
 } from "./clients.ts";
 import { getRankSnapshot, getRankSnapshotSoon } from "./client-rank-store.ts";
-import { mcpLandingHtml, mcpHandler } from "./mcp.ts";
+import { mcpLandingHtml, mcpHandlerFor } from "./mcp.ts";
 import {
 	renderCastsHtml,
 	renderProfileHtml,
@@ -111,7 +111,10 @@ app.post("/t", async (c) => {
 // parametric cast route; cast URLs are always two-segment, so a Farcaster
 // user literally named "transparency" is unaffected (/transparency/0x…
 // still routes to the cast handler).
-app.post("/mcp", (c) => mcpHandler.fetch(c.req.raw));
+app.post("/mcp", (c) =>
+	mcpHandlerFor((c.env as Env | undefined)?.SHIM_POTATO_BASE).fetch(
+		c.req.raw,
+	));
 app.get("/mcp", (c) => {
 	// MCP clients probe GET for a server-initiated SSE stream (explicit
 	// text/event-stream accept) — answer with protocol semantics. Browsers
@@ -457,6 +460,8 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
 		signed: true,
+		// Every shim read races the shim-potato canary when it's configured.
+		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
@@ -506,6 +511,8 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// Same ban-signal fork as the profile page: the head's way out
 		// follows the signed state.
 		signed: true,
+		// Every shim read races the shim-potato canary when it's configured.
+		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	// Stateful layer: prefs + rank + ?noredirect, same
 	// wiring as the cast and profile routes.
@@ -547,6 +554,9 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
 				// No executionCtx — best-effort.
 			}
 		},
+		// The /h lookup races the shim-potato canary when it's configured;
+		// the warm then covers both indexes.
+		potatoBase: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	if (resolved.kind === "unreachable") {
 		return c.body(null, 503, { "retry-after": "60" });
@@ -577,7 +587,10 @@ app.get("/~/profiles/:id{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		// Past Number.MAX_SAFE_INTEGER the digits are a lie — 404 without
 		// querying (real fids are nowhere near the precision cliff).
 		if (!Number.isSafeInteger(fid)) return c.body(null, 404);
-		const resolved = await resolveProfileFidAlias(fid);
+		const resolved = await resolveProfileFidAlias(
+			fid,
+			(c.env as Env | undefined)?.SHIM_POTATO_BASE,
+		);
 		if (resolved.kind === "unreachable") {
 			return c.body(null, 503, { "retry-after": "60" });
 		}

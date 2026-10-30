@@ -57,11 +57,11 @@ import {
 	getFidByUsername,
 	getSignedStatus,
 	getUserByFid,
-	hUrl,
 	getUsernameByFid,
-	uUrl,
+	raceShimProbe,
 	warmShimHashIndex,
 	type ShimCast,
+	type ShimProbe,
 	type ShimUser,
 } from "./shim.ts";
 import { collapseText, escapeHtml, shell } from "./shell.tsx";
@@ -172,19 +172,26 @@ function handleLine(user: ShimUser, primary: string): string {
  */
 export async function resolveProfile(
 	username: string,
-	opts: { timeline?: boolean; signed?: boolean } = {},
+	opts: {
+		timeline?: boolean;
+		signed?: boolean;
+		/** The shim-potato canary base — raced on every shim read when set. */
+		potatoBase?: string | null;
+	} = {},
 ): Promise<ResolvedProfile> {
+	const potatoBase = opts.potatoBase;
 	const castsPromise = opts.timeline
 		? getCastsAndReplies(
 				username,
 				TIMELINE_LIMIT,
 				AbortSignal.timeout(PROFILE_TIMEOUT_MS),
+				potatoBase,
 			)
 		: null;
 	let fid: number | undefined;
 	try {
 		fid = await withOneRetry((signal) =>
-			getFidByUsername(username, signal),
+			getFidByUsername(username, signal, potatoBase),
 		);
 	} catch {
 		return { kind: "unreachable" };
@@ -192,13 +199,13 @@ export async function resolveProfile(
 	if (fid === undefined) return { kind: "not-found" };
 	// Entity and ban signal are independent once the fid is known — fire
 	// together. The entity retries (undefined = visible degradation); the
-	// signed check fails open single-shot.
+	// signed check fails open single-shot. Both race the potato.
 	const entityPromise = withOneRetry(
-		(signal) => getUserByFid(fid, signal),
+		(signal) => getUserByFid(fid, signal, potatoBase),
 		(resolved) => resolved === undefined,
 	);
 	const signedPromise = opts.signed
-		? getSignedStatus(fid, AbortSignal.timeout(PROFILE_TIMEOUT_MS))
+		? getSignedStatus(fid, AbortSignal.timeout(PROFILE_TIMEOUT_MS), potatoBase)
 		: null;
 	let user: ShimUser | undefined;
 	try {
@@ -223,6 +230,7 @@ export async function resolveProfile(
 			username,
 			TIMELINE_LIMIT,
 			AbortSignal.timeout(PROFILE_TIMEOUT_MS),
+			potatoBase,
 		).catch(() => timeline);
 	}
 	return {
@@ -557,7 +565,7 @@ export async function renderCastsHtml(
 	profile: ResolvedProfile,
 	username: string,
 	primaryOrigin?: string,
-	env?: { UNFURL?: Fetcher },
+	env?: { UNFURL?: Fetcher; SHIM_POTATO_BASE?: string },
 	prefs: ClientPrefs = {},
 	rank?: RankSnapshot | null,
 	noredirect = false,
@@ -592,7 +600,7 @@ export async function renderCastsHtml(
 		urlEmbedsOf(cast).map((u) => unfurl(u, env)),
 	);
 	const quoteJobs = casts.flatMap((cast) =>
-		quoteTargetsOf(cast).map((t) => fetchQuote(t)),
+		quoteTargetsOf(cast).map((t) => fetchQuote(t, env?.SHIM_POTATO_BASE)),
 	);
 	const unfurlResults = await Promise.allSettled(unfurlJobs);
 	const quoteResults = await Promise.allSettled(quoteJobs);
@@ -725,23 +733,43 @@ export type ResolvedConversationAlias =
 
 export async function resolveConversationAlias(
 	hash: string,
-	opts?: { waitUntil?: (p: Promise<unknown>) => void },
+	opts?: {
+		waitUntil?: (p: Promise<unknown>) => void;
+		/** The shim-potato canary base — raced on the /h lookup when set. */
+		potatoBase?: string | null;
+	},
 ): Promise<ResolvedConversationAlias> {
 	// /h answers misses at HTTP 200 ({"success":false}) — non-ok or a thrown
-	// request means the service, not the cast, is the problem.
-	let cast: ShimCast | undefined;
-	try {
-		const res = await fetch(hUrl(hash), {
-			signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-		});
-		if (!res.ok) return { kind: "unreachable" };
-		const data = (await res.json().catch(() => undefined)) as
-			| { success?: boolean; cast?: ShimCast | null }
-			| undefined;
-		cast = data?.cast ?? undefined;
-	} catch {
-		return { kind: "unreachable" };
-	}
+	// request means the service, not the cast, is the problem. Raced against
+	// the potato: a potato found rescues a slow or erroring cloud index,
+	// while a cloud miss stays the immediate verdict (the rescue path below).
+	const probe = async (base: string): Promise<ShimProbe<ShimCast>> => {
+		try {
+			const res = await fetch(`${base}/h/${hash}`, {
+				signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+			});
+			if (!res.ok) {
+				return {
+					kind: "error",
+					error: new Error(`shim /h HTTP ${res.status}`),
+					fallback: undefined,
+				};
+			}
+			const data = (await res.json().catch(() => undefined)) as
+				| { success?: boolean; cast?: ShimCast | null }
+				| undefined;
+			const cast = data?.cast ?? undefined;
+			return cast
+				? { kind: "found", value: cast }
+				: { kind: "miss", fallback: undefined };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
+		}
+	};
+	const probed = await raceShimProbe(probe, opts?.potatoBase);
+	if (probed.kind === "error") return { kind: "unreachable" };
+	const cast: ShimCast | undefined =
+		probed.kind === "found" ? probed.value : undefined;
 	// The tail's invariant, typed the ShimLookup-found way: both paths
 	// below deliver a cast whose hash is present — shim's via the guard,
 	// the rescue's by construction (rescued.fullHash: string). ShimCast
@@ -758,7 +786,7 @@ export async function resolveConversationAlias(
 		const rescued = await rescueHashViaFarcasterTv(hash);
 		if (rescued.kind === "error") return { kind: "unreachable" };
 		if (rescued.kind === "miss") return { kind: "not-found" };
-		opts?.waitUntil?.(warmShimHashIndex(rescued.fid));
+		opts?.waitUntil?.(warmShimHashIndex(rescued.fid, opts?.potatoBase));
 		found = {
 			fid: rescued.fid,
 			hash: rescued.fullHash,
@@ -794,6 +822,7 @@ export async function resolveConversationAlias(
 				(await getUsernameByFid(
 					found.fid,
 					AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+					opts?.potatoBase,
 				)) ?? undefined;
 		} catch {
 			return { kind: "unreachable" };
@@ -819,33 +848,47 @@ export type ResolvedProfileFidAlias =
 
 export async function resolveProfileFidAlias(
 	fid: number,
+	potatoBase?: string | null,
 ): Promise<ResolvedProfileFidAlias> {
 	// Profile-family discipline for a load-bearing identity call: the 8s
 	// window, one retry on transport failure or non-ok (getFidByUsername
 	// set the precedent — a shim non-2xx is an outage signal, NOT a miss).
-	// The parse below can't throw (res.json is .catch-guarded), so the try
-	// carries exactly the fetch: a throw after the retry is the only road
-	// to "unreachable" here.
-	try {
-		const res = await withOneRetry(
-			(signal) => fetch(uUrl(fid), { signal }),
-			(r) => !r.ok,
-		);
-		if (!res.ok) return { kind: "unreachable" };
-		const data = (await res.json().catch(() => undefined)) as
-			| { success?: boolean; username?: string }
-			| undefined;
-		// shim /u is fname-first: the username field IS the primary handle
-		// (identity law) — exactly what the redirect target must carry.
-		const username =
-			typeof data?.username === "string" && data.username !== ""
-				? data.username
-				: null;
-		// An HTTP-200 miss is the verdict: the index was consulted and has
-		// no username for this fid.
-		if (!username) return { kind: "not-found" };
-		return { kind: "found", username };
-	} catch {
-		return { kind: "unreachable" };
-	}
+	// The parse below can't throw (res.json is .catch-guarded), so the
+	// probe carries exactly the fetch. Both legs race the potato; the
+	// retry re-runs the race on a terminal error.
+	const probeOnce = (signal: AbortSignal): Promise<ShimProbe<string>> => {
+		const probe = async (base: string): Promise<ShimProbe<string>> => {
+			try {
+				const res = await fetch(`${base}/u/${fid}`, { signal });
+				if (!res.ok) {
+					return {
+						kind: "error",
+						error: new Error(`shim /u HTTP ${res.status}`),
+						fallback: undefined,
+					};
+				}
+				const data = (await res.json().catch(() => undefined)) as
+					| { success?: boolean; username?: string }
+					| undefined;
+				// shim /u is fname-first: the username field IS the primary
+				// handle (identity law) — exactly what the redirect target
+				// must carry. An HTTP-200 miss is the verdict: the index was
+				// consulted and has no username for this fid.
+				const username =
+					typeof data?.username === "string" && data.username !== ""
+						? data.username
+						: null;
+				return username
+					? { kind: "found", value: username }
+					: { kind: "miss", fallback: undefined };
+			} catch (error) {
+				return { kind: "error", error, fallback: undefined };
+			}
+		};
+		return raceShimProbe(probe, potatoBase);
+	};
+	const probed = await withOneRetry(probeOnce, (r) => r.kind === "error");
+	if (probed.kind === "error") return { kind: "unreachable" };
+	if (probed.kind === "miss") return { kind: "not-found" };
+	return { kind: "found", username: probed.value };
 }

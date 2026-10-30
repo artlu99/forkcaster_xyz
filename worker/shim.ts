@@ -10,6 +10,79 @@
 /** Base URL of the owner-run Snapchain reader. */
 export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
 
+/**
+ * One shim leg's terminal state — the raced wrappers below speak in these.
+ * `found` is an affirmative answer any source may produce; `miss` carries
+ * `fallback`, the CLOUD-shaped answer for that exact response, so the
+ * wrapper replays today's per-endpoint verdict byte-for-byte when cloud is
+ * the terminal leg (sparse users, ok:false timelines, null handles…);
+ * `error` carries the thrown value cloud's contract propagates (outage
+ * signals) plus the never-throw fallback for fail-soft endpoints.
+ */
+export type ShimProbe<T> =
+	| { kind: "found"; value: T }
+	| { kind: "miss"; fallback: T | undefined }
+	| { kind: "error"; error: unknown; fallback: T | undefined };
+
+/**
+ * Race cloud against the shim-potato canary (`potatoBase`, when set) under
+ * the caller's AbortSignal. The contract mirrors the cast race's canary
+ * rules, generalized to every shim read:
+ *
+ * - the FIRST affirmative (found) answer wins outright — a fast potato
+ *   rescues a slow cloud and vice versa;
+ * - a cloud MISS (HTTP 200, index consulted, no data) is terminal the
+ *   moment it lands — the potato can never overturn or delay a verdict,
+ *   so true misses 404 exactly as fast as before;
+ * - a cloud ERROR (non-2xx/timeout — an outage signal) defers to a still
+ *   pending potato leg and only surfaces if the potato yields nothing;
+ * - potato misses/errors are never authoritative.
+ *
+ * Without `potatoBase` this is a pass-through — identical fetches, zero
+ * overhead (which is what keeps every test and caller honest).
+ */
+export async function raceShimProbe<T>(
+	probe: (base: string) => Promise<ShimProbe<T>>,
+	potatoBase?: string | null,
+): Promise<ShimProbe<T>> {
+	const cloud = probe(SHIM_CLOUD_BASE);
+	if (!potatoBase || potatoBase === SHIM_CLOUD_BASE) return cloud;
+	// Potato leg reduced to its founds only — misses/errors never resolve
+	// the race and are always handled (no unhandled rejections).
+	const potatoFound = probe(potatoBase).then(
+		(r) => (r.kind === "found" ? r : Promise.reject(r)),
+		() => Promise.reject(raceShimProbeRejected),
+	);
+	return new Promise<ShimProbe<T>>((resolve) => {
+		let settled = false;
+		const done = (r: ShimProbe<T>) => {
+			if (!settled) {
+				settled = true;
+				resolve(r);
+			}
+		};
+		// Potato found wins whenever cloud hasn't already settled.
+		potatoFound.then((r) => done(r), () => {});
+		cloud.then((r) => {
+			if (r.kind !== "error") {
+				// Cloud verdict: found beats a pending potato; a consulted
+				// miss stays terminal (fast 404s preserved).
+				done(r);
+				return;
+			}
+			// Cloud outage: give the potato its chance, then surface the
+			// error (both legs bounded by the caller's shared signal).
+			potatoFound.then(
+				(found) => done(found),
+				() => done(r),
+			);
+		});
+	});
+}
+
+/** Sentinel so a potato transport rejection can never leak to callers. */
+const raceShimProbeRejected = Symbol("shim-potato-leg-rejected");
+
 export const wcUrl = (username: string, hash: string): string =>
 	`${SHIM_CLOUD_BASE}/wc/${username}/${hash}`;
 export const hUrl = (hash: string): string => `${SHIM_CLOUD_BASE}/h/${hash}`;
@@ -87,19 +160,6 @@ export type ShimLookup =
 	| { status: "error"; message: string };
 
 /**
- * GET /wc/{username}/{hash} — a miss is `{"success":false}` or an empty
- * body, both HTTP 200; a non-2xx or a thrown request is an error carrying
- * the same message text the provider race has always produced.
- */
-export async function getCastByUsernameHash(
-	username: string,
-	hash: string,
-	signal: AbortSignal,
-): Promise<ShimLookup> {
-	return getCastByUsernameHashFrom(SHIM_CLOUD_BASE, username, hash, signal);
-}
-
-/**
  * The same lookup against an arbitrary shim-shaped host — the shim-potato
  * canary leg races this (cast-source.ts). The response contract is the
  * canonical shim's, byte for byte: HTTP 200 `{"success":false}`/empty
@@ -132,99 +192,204 @@ export async function getCastByUsernameHashFrom(
 /**
  * GET /h/{hash} — cast by hash alone. Undefined on any failure (not-found,
  * non-2xx, parse, thrown): callers treat undefined as "drop it".
+ * Raced against the potato when `potatoBase` is set (the quote hydrator's
+ * primary hop — a potato hit rescues a slow cloud index).
  */
 export async function getCastByHash(
 	hash: string,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<ShimCast | undefined> {
-	try {
-		const res = await fetch(hUrl(hash), { signal });
-		if (!res.ok) return undefined;
-		const data = (await res.json().catch(() => undefined)) as {
-			cast?: ShimCast;
-		};
-		return data?.cast ?? undefined;
-	} catch {
-		return undefined;
-	}
+	const probe = async (base: string): Promise<ShimProbe<ShimCast>> => {
+		try {
+			const res = await fetch(`${base}/h/${hash}`, { signal });
+			if (!res.ok) {
+				// Non-2xx is an outage signal — potato-rescuable, never a verdict.
+				return {
+					kind: "error",
+					error: new Error(`shim /h HTTP ${res.status}`),
+					fallback: undefined,
+				};
+			}
+			const data = (await res.json().catch(() => undefined)) as {
+				cast?: ShimCast;
+			};
+			const cast = data?.cast ?? undefined;
+			return cast
+				? { kind: "found", value: cast }
+				: { kind: "miss", fallback: undefined };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
+		}
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	return result.kind === "found" ? result.value : result.fallback;
+}
+
+/**
+ * GET /wc/{username}/{hash} — a miss is `{"success":false}` or an empty
+ * body, both HTTP 200; a non-2xx or a thrown request is an error carrying
+ * the same message text the provider race has always produced. Raced
+ * against the potato when `potatoBase` is set — a found either way wins;
+ * the terminal is always cloud's own lookup (misses stay authoritative).
+ */
+export async function getCastByUsernameHash(
+	username: string,
+	hash: string,
+	signal: AbortSignal,
+	potatoBase?: string | null,
+): Promise<ShimLookup> {
+	const probe = async (base: string): Promise<ShimProbe<ShimLookup>> => {
+		// getCastByUsernameHashFrom never throws — its own contract.
+		const lookup = await getCastByUsernameHashFrom(base, username, hash, signal);
+		if (lookup.status === "found") return { kind: "found", value: lookup };
+		return lookup.status === "miss"
+			? { kind: "miss", fallback: lookup }
+			: { kind: "error", error: new Error(lookup.message), fallback: lookup };
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	// The fallback is always the cloud leg's own lookup (never undefined in
+	// practice); the default keeps the ShimLookup contract total.
+	return result.kind === "found"
+		? result.value
+		: (result.fallback ?? { status: "miss" });
 }
 
 /**
  * POST /refresh {fids:[fid]} — pull that fid's recent casts into shim's
  * Postgres index, so a hash /h missed (cold — the index only holds
- * kept-warm fids) hits next time. Fire-and-forget by contract: callers
- * run it under waitUntil and never await it on the response path; the
- * generous cap only bounds the background lifetime. Never throws.
+ * kept-warm fids) hits next time. Both indexes warm when `potatoBase` is
+ * set (the potato's /h can only win if its index knows the fid too).
+ * Fire-and-forget by contract: callers run it under waitUntil and never
+ * await it on the response path; the generous cap only bounds the
+ * background lifetime. Never throws.
  */
-export function warmShimHashIndex(fid: number): Promise<unknown> {
-	return fetch(refreshUrl(), {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ fids: [fid] }),
-		signal: AbortSignal.timeout(15_000),
-	}).catch(() => undefined);
+export function warmShimHashIndex(
+	fid: number,
+	potatoBase?: string | null,
+): Promise<unknown> {
+	const warm = (base: string) =>
+		fetch(`${base}/refresh`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ fids: [fid] }),
+			signal: AbortSignal.timeout(15_000),
+		}).catch(() => undefined);
+	const legs: Promise<unknown>[] = [warm(SHIM_CLOUD_BASE)];
+	if (potatoBase && potatoBase !== SHIM_CLOUD_BASE) legs.push(warm(potatoBase));
+	return Promise.all(legs);
 }
 
 /**
  * GET /f/{username} — username → fid. Undefined when missing or malformed.
- * Network rejections propagate to the caller (same as before extraction).
+ * Cloud non-2xx/network rejections propagate (an outage, NOT a miss —
+ * retriable upstream); raced against the potato when `potatoBase` is set
+ * (a potato fid rescues a slow or erroring cloud; a cloud miss still 404s).
  */
 export async function getFidByUsername(
 	username: string,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<number | undefined> {
-	const res = await fetch(fUrl(username), { signal });
-	// A shim non-2xx is an outage signal, NOT a miss — it propagates so
-	// callers can distinguish "no such username" (undefined) from "shim is
-	// wrong right now" (throw ⇒ retriable/unreachable). Network rejections
-	// already propagate.
-	if (!res.ok) {
-		throw new Error(`shim /f HTTP ${res.status}`);
-	}
-	const data = (await res.json().catch(() => undefined)) as
-		| { success?: boolean; fid?: number }
-		| undefined;
-	const fid = data?.fid;
-	return typeof fid === "number" ? fid : undefined;
+	const probe = async (base: string): Promise<ShimProbe<number>> => {
+		try {
+			const res = await fetch(`${base}/f/${username}`, { signal });
+			// A shim non-2xx is an outage signal, NOT a miss — it propagates so
+			// callers can distinguish "no such username" (undefined) from "shim is
+			// wrong right now" (throw ⇒ retriable/unreachable). Network rejections
+			// already propagate.
+			if (!res.ok) {
+				return {
+					kind: "error",
+					error: new Error(`shim /f HTTP ${res.status}`),
+					fallback: undefined,
+				};
+			}
+			const data = (await res.json().catch(() => undefined)) as
+				| { success?: boolean; fid?: number }
+				| undefined;
+			const fid = data?.fid;
+			return typeof fid === "number"
+				? { kind: "found", value: fid }
+				: { kind: "miss", fallback: undefined };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
+		}
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	if (result.kind === "error") throw result.error;
+	return result.kind === "found" ? result.value : result.fallback;
 }
 
 /**
  * GET /u/{fid} — fid → username. null when shim doesn't know the fid or
- * the answer is malformed. Network rejections propagate to the caller.
+ * the answer is malformed. Cloud network rejections propagate to the
+ * caller (the alias tails turn them into 503s); raced against the potato.
  */
 export async function getUsernameByFid(
 	fid: number,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<string | null> {
-	const res = await fetch(uUrl(fid), { signal });
-	if (!res.ok) return null;
-	const data = (await res.json().catch(() => undefined)) as
-		| { success?: boolean; username?: string }
-		| undefined;
-	const username = data?.username;
-	return typeof username === "string" && username !== "" ? username : null;
+	const probe = async (base: string): Promise<ShimProbe<string>> => {
+		try {
+			const res = await fetch(`${base}/u/${fid}`, { signal });
+			if (!res.ok) return { kind: "miss", fallback: undefined };
+			const data = (await res.json().catch(() => undefined)) as
+				| { success?: boolean; username?: string }
+				| undefined;
+			const username = data?.username;
+			return typeof username === "string" && username !== ""
+				? { kind: "found", value: username }
+				: { kind: "miss", fallback: undefined };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
+		}
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	if (result.kind === "error") throw result.error;
+	return result.kind === "found" ? result.value : (result.fallback ?? null);
 }
 
 /**
- * GET /user/{fid} — the hydrated user entity. undefined on any failure
- * (non-2xx, parse, thrown): callers treat undefined as "decoration
- * unavailable" and fail soft. A sparse shape (all nulls) is a real answer,
- * not an error — callers check `username == null` for the miss verdict.
+ * GET /user/{fid} — the hydrated user entity. undefined on any cloud
+ * failure (non-2xx, parse, thrown): callers treat undefined as
+ * "decoration unavailable" and fail soft. A sparse shape (all nulls) is a
+ * real answer, not an error — callers check `username == null` for the
+ * miss verdict. Only a NON-sparse entity is a raceable found: a potato
+ * sparse shape must never 404 a profile the cloud leg would resolve.
+ * Raced against the potato when `potatoBase` is set.
  */
 export async function getUserByFid(
 	fid: number,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<ShimUser | undefined> {
-	try {
-		const res = await fetch(userUrl(fid), { signal });
-		if (!res.ok) return undefined;
-		const data = (await res.json().catch(() => undefined)) as
-			| { success?: boolean; user?: ShimUser | null }
-			| undefined;
-		return data?.user ?? undefined;
-	} catch {
-		return undefined;
-	}
+	const probe = async (base: string): Promise<ShimProbe<ShimUser>> => {
+		try {
+			const res = await fetch(`${base}/user/${fid}`, { signal });
+			if (!res.ok) {
+				// Non-2xx is an outage signal — potato-rescuable, never a verdict.
+				return {
+					kind: "error",
+					error: new Error(`shim /user HTTP ${res.status}`),
+					fallback: undefined,
+				};
+			}
+			const data = (await res.json().catch(() => undefined)) as
+				| { success?: boolean; user?: ShimUser | null }
+				| undefined;
+			const user = data?.user ?? undefined;
+			if (user?.username != null) return { kind: "found", value: user };
+			// Sparse (or absent) — replayed verbatim only from the cloud leg.
+			return { kind: "miss", fallback: user };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
+		}
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	// Never throws — a cloud outage degrades to undefined, as always.
+	return result.kind === "found" ? result.value : result.fallback;
 }
 
 /**
@@ -233,47 +398,78 @@ export async function getUserByFid(
  * inline `user` — the author is the requested profile). `success:false`
  * (shim's "User not found") and any transport failure both resolve to
  * `ok:false`: the timeline is content that fails soft, never load-bearing
- * for identity. The distinction is kept so renderers can say "no casts yet"
- * (ok, empty) apart from "unavailable right now" (!ok).
+ * for identity. Raced against the potato — its ok timeline rescues a
+ * slow/erroring cloud leg.
  */
 export async function getCastsAndReplies(
 	username: string,
 	limit: number,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<{ casts: ShimCast[]; ok: boolean }> {
-	try {
-		const res = await fetch(castsAndRepliesUrl(username, limit), { signal });
-		if (!res.ok) return { casts: [], ok: false };
-		const data = (await res.json().catch(() => undefined)) as
-			| { success?: boolean; casts?: ShimCast[] }
-			| undefined;
-		if (!data || data.success === false || !Array.isArray(data.casts)) {
-			return { casts: [], ok: false };
+	const empty = { casts: [] as ShimCast[], ok: false };
+	const probe = async (
+		base: string,
+	): Promise<ShimProbe<{ casts: ShimCast[]; ok: boolean }>> => {
+		try {
+			const res = await fetch(`${base}/${username}/casts-and-replies?limit=${limit}`, { signal });
+			if (!res.ok) {
+				// Non-2xx is an outage signal — potato-rescuable, never a verdict.
+				return {
+					kind: "error",
+					error: new Error(`shim timeline HTTP ${res.status}`),
+					fallback: empty,
+				};
+			}
+			const data = (await res.json().catch(() => undefined)) as
+				| { success?: boolean; casts?: ShimCast[] }
+				| undefined;
+			if (!data || data.success === false || !Array.isArray(data.casts)) {
+				return { kind: "miss", fallback: empty };
+			}
+			return { kind: "found", value: { casts: data.casts, ok: true } };
+		} catch (error) {
+			// The timeline never throws — a transport failure is ok:false.
+			return { kind: "error", error, fallback: empty };
 		}
-		return { casts: data.casts, ok: true };
-	} catch {
-		return { casts: [], ok: false };
-	}
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	return result.kind === "found" ? result.value : (result.fallback ?? empty);
 }
 
 /**
  * GET /signed/{fid} — has the fid signed the social smart contract?
  * null = unknown (non-2xx, malformed, thrown): callers fail open.
+ * Raced against the potato — first boolean answer wins, unknown fails
+ * open exactly as before.
  */
 export async function getSignedStatus(
 	fid: number,
 	signal: AbortSignal,
+	potatoBase?: string | null,
 ): Promise<boolean | null> {
-	try {
-		const res = await fetch(signedUrl(fid), { signal });
-		if (res.ok) {
+	const probe = async (base: string): Promise<ShimProbe<boolean>> => {
+		try {
+			const res = await fetch(`${base}/signed/${fid}`, { signal });
+			if (!res.ok) {
+				// Non-2xx is an outage signal — potato-rescuable; unknown (null)
+				// still fails open if the potato yields nothing either.
+				return {
+					kind: "error",
+					error: new Error(`shim /signed HTTP ${res.status}`),
+					fallback: undefined,
+				};
+			}
 			const data = (await res.json().catch(() => ({}))) as {
 				signed?: boolean;
 			};
-			if (typeof data.signed === "boolean") return data.signed;
+			if (typeof data.signed === "boolean")
+				return { kind: "found", value: data.signed };
+			return { kind: "miss", fallback: undefined };
+		} catch (error) {
+			return { kind: "error", error, fallback: undefined };
 		}
-	} catch {
-		// Signed-check unavailable — fail open.
-	}
-	return null;
+	};
+	const result = await raceShimProbe(probe, potatoBase);
+	return result.kind === "found" ? result.value : (result.fallback ?? null);
 }

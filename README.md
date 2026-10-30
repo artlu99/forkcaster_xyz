@@ -160,6 +160,8 @@ mcp-publisher publish                                        # submits server.js
 
 Cast lookups race four providers (`worker/cast-source.ts`, rpc-racer pattern: fan out with per-provider abort + 5s cap, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error). A fifth complete leg — **shim-potato** (`shim-potato.artlu.xyz`, self-hosted) — joins the race when the `SHIM_POTATO_BASE` var is set: same canonical shape, but its misses are **not** authoritative (it can never 404 a cast the race would otherwise resolve), and the JSON twin stays shim-only either way.
 
+**Shim-potato races every shim read** (`worker/shim.ts`, `raceShimProbe`): the profile family (`/f`, `/user`, `/signed`, timeline), the quote hydrator's `/h`→`/u`→`/wc` chain, both aliases, the signed check on cast pages, and the MCP tool each race cloud against the canary when the var is set. The contract is the canary's, generalized: the **first affirmative answer wins outright** (a fast leg rescues a slow one); a cloud **consulted miss** (HTTP 200, no data) is terminal the moment it lands — the potato can never overturn or delay a verdict, so true misses 404 exactly as fast as before; a cloud **error** (non-2xx/timeout) defers to a still-pending potato leg before surfacing; potato misses/errors are never authoritative. Without the var every wrapper is a pass-through (exactly one fetch, byte-identical behavior). The `/refresh` index warm covers both hosts.
+
 **Sufficiency matrix** (measured Oct 2026) against the internal `ShimCast` contract (text, hash, unix-seconds ts, raw `{url}`/`{castId}` embeds, inline user data):
 
 | Provider | Resolves (username, hash)? | Quotes ({castId}) | Verdict |
