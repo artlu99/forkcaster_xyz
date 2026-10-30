@@ -32,6 +32,7 @@
 // badge and signed suppression trivially correct.
 
 import { sort } from "radash";
+import { staggerDelays } from "./race.ts";
 import {
 	SHIM_CLOUD_BASE,
 	fleetBases,
@@ -649,11 +650,24 @@ export async function raceCast(
 
 	const controllers = new Map<ProviderId, AbortController>();
 	const timings: ProviderTiming[] = [];
+	// Fleet stagger (race.ts): shim leads at 0ms and each potato leg starts
+	// one tiny random step further out; haatz/snap/farcaster-tv are distinct
+	// sources, not replicas, so they race immediately. A fast winner clears
+	// the timers of starts that never fired — the straggler reads are saved.
+	const staggerTimers: ReturnType<typeof setTimeout>[] = [];
+	const fleetDelays = staggerDelays(eligible.length);
+	const delayFor = (id: ProviderId): number => {
+		if (id === "shim") return 0;
+		const fleetMatch = /^shim-potato(?:-(\d+))?$/.exec(id);
+		if (!fleetMatch) return 0;
+		return fleetDelays[Number(fleetMatch[1] ?? 1)] ?? 0;
+	};
 	// Set once the race has resolved: aborts from here on are the race
 	// cutting off losers, not provider failures (see settled()).
 	let raceOver = false;
 	const abortAll = () => {
 		raceOver = true;
+		for (const t of staggerTimers) clearTimeout(t);
 		for (const controller of controllers.values()) controller.abort();
 	};
 
@@ -662,33 +676,49 @@ export async function raceCast(
 	// miss-authoritative leg consulted and missed.
 	const authoritativeTotal = eligible.filter((p) => missVerdict.get(p.id)).length;
 	let authoritativeMisses = 0;
+	// A leg whose stagger never fires (race resolved first) never settles —
+	// the post-loop drain bounds how long such entries can linger.
+	const neverSettles = new Promise<RaceEvent>(() => {});
 	for (const provider of eligible) {
 		const controller = new AbortController();
 		controllers.set(provider.id, controller);
-		const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-		const providerStartedAt = Date.now();
-		const settled = (kind: ProviderTiming["kind"], fid?: FidRace): void => {
-			timings.push({
-				provider: provider.id,
-				// Aborted losers are race bookkeeping, not provider errors —
-				// record them as `abort` so public errorRate stays honest.
-				// (The 5s hard-timeout abort fires while the race is still
-				// pending, so raceOver is false there and it stays an `error`.
-				// A real error landing in the post-resolution grace window is
-				// likewise relabeled `abort` — accepted telemetry fuzz.)
-				kind:
-					kind === "error" && raceOver && controller.signal.aborted
-						? "abort"
-						: kind,
-				ms: Date.now() - providerStartedAt,
-				fid,
-			});
-		};
+		const startGate = new Promise<void>((resolve) => {
+			const delay = delayFor(provider.id);
+			if (delay <= 0) {
+				resolve();
+				return;
+			}
+			const t = setTimeout(resolve, delay);
+			staggerTimers.push(t);
+		});
 		pending.set(
 			provider.id,
-			provider
-				.fetchCast(vars, controller.signal)
-				.then((result): RaceEvent => {
+			startGate.then(async (): Promise<RaceEvent> => {
+				// Resolved before this leg's stagger fired — never consult.
+				if (raceOver) return neverSettles;
+				// The 5s hard cap arms at ACTUAL start, so a staggered leg
+				// still gets its full window; timings stay honest per leg.
+				const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+				const providerStartedAt = Date.now();
+				const settled = (kind: ProviderTiming["kind"], fid?: FidRace): void => {
+					timings.push({
+						provider: provider.id,
+						// Aborted losers are race bookkeeping, not provider errors —
+						// record them as `abort` so public errorRate stays honest.
+						// (The 5s hard-timeout abort fires while the race is still
+						// pending, so raceOver is false there and it stays an `error`.
+						// A real error landing in the post-resolution grace window is
+						// likewise relabeled `abort` — accepted telemetry fuzz.)
+						kind:
+							kind === "error" && raceOver && controller.signal.aborted
+								? "abort"
+								: kind,
+						ms: Date.now() - providerStartedAt,
+						fid,
+					});
+				};
+				try {
+					const result = await provider.fetchCast(vars, controller.signal);
 					clearTimeout(timer);
 					// Central validation: downgrade mismatches to errors so an
 					// off-target response can never win. The fid race still
@@ -712,8 +742,7 @@ export async function raceCast(
 						result.kind === "found" ? result.fidRace : undefined,
 					);
 					return { provider: provider.id, result };
-				})
-				.catch((error): RaceEvent => {
+				} catch (error) {
 					clearTimeout(timer);
 					settled("error");
 					return {
@@ -724,7 +753,8 @@ export async function raceCast(
 							message: String(error),
 						},
 					};
-				}),
+				}
+			}),
 		);
 	}
 

@@ -10,6 +10,8 @@
 /** Base URL of the owner-run Snapchain reader. */
 export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
 
+import { collectiveRace, type RaceLeg } from "./race.ts";
+
 /**
  * One shim leg's terminal state — the raced wrappers below speak in these.
  * `found` is an affirmative answer any source may produce; `miss` carries
@@ -18,16 +20,17 @@ export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
  * the terminal leg (sparse users, ok:false timelines, null handles…);
  * `error` carries the thrown value cloud's contract propagates (outage
  * signals) plus the never-throw fallback for fail-soft endpoints.
+ * (The general shape lives in race.ts — this alias keeps the shim-flavored
+ * name every wrapper and call site already speaks.)
  */
-export type ShimProbe<T> =
-	| { kind: "found"; value: T }
-	| { kind: "miss"; fallback: T | undefined }
-	| { kind: "error"; error: unknown; fallback: T | undefined };
+export type ShimProbe<T> = RaceLeg<T>;
 
 /**
- * Race cloud against the shim-potato fleet (`potatoBasess` — the raw var
+ * Race cloud against the shim-potato fleet (`potatoBases` — the raw var
  * value, one or more comma-separated base URLs) under the caller's
- * AbortSignal. Fleet semantics — no single host is the source of truth:
+ * AbortSignal: the shared collective-race machinery (race.ts) with cloud
+ * as the primary leg and every potato staggering in behind it. Fleet
+ * semantics — no single host is the source of truth:
  *
  * - the FIRST affirmative (found) answer wins outright;
  * - a consulted miss (HTTP 200, index asked, no data) is a VOTE, not a
@@ -39,63 +42,21 @@ export type ShimProbe<T> =
  * - latency of a true miss = the slowest leg's miss (bounded by the
  *   caller's signal) — the deliberate price of softening the SPOF.
  *
- * Without `potatoBasess` this is a pass-through — identical fetches, zero
+ * Without `potatoBases` this is a pass-through — identical fetches, zero
  * overhead (which is what keeps every test and caller honest).
  */
 export async function raceShimProbe<T>(
 	probe: (base: string) => Promise<ShimProbe<T>>,
-	potatoBasess?: string | null,
+	potatoBases?: string | null,
 ): Promise<ShimProbe<T>> {
-	const bases = fleetBases(potatoBasess);
+	const bases = fleetBases(potatoBases);
 	if (bases.length === 0) return probe(SHIM_CLOUD_BASE);
-	return new Promise<ShimProbe<T>>((resolve) => {
-		let unsettled = bases.length + 1;
-		let done = false;
-		let cloudTerminal: ShimProbe<T> | undefined;
-		let firstMissFallback: T | undefined;
-		let sawMiss = false;
-		const settle = (r: ShimProbe<T>) => {
-			if (!done) {
-				done = true;
-				resolve(r);
-			}
-		};
-		const onTerminal = (index: number, r: ShimProbe<T>) => {
-			if (done) return;
-			if (r.kind === "found") return settle(r);
-			if (index === 0) cloudTerminal = r;
-			if (r.kind === "miss") {
-				sawMiss = true;
-				if (firstMissFallback === undefined) firstMissFallback = r.fallback;
-			}
-			unsettled -= 1;
-			if (unsettled === 0) {
-				// Collective verdict — the fleet decided, not one host.
-				if (sawMiss) {
-					// A consulted miss beats errors: the network was asked.
-					// Cloud's fallback replays when cloud is the missing leg
-					// (byte-compat with the pre-fleet all-miss answers).
-					const fallback =
-						cloudTerminal?.kind === "miss"
-							? cloudTerminal.fallback
-							: firstMissFallback;
-					settle({ kind: "miss", fallback });
-				} else if (cloudTerminal !== undefined) {
-					settle(cloudTerminal);
-				} else {
-					settle({ kind: "miss", fallback: undefined });
-				}
-			}
-		};
-		[SHIM_CLOUD_BASE, ...bases].forEach((base, index) => {
-			// Probes catch their own transport failures, so the rejection
-			// arm is purely defensive — an errored leg is still a terminal.
-			probe(base).then(
-				(r) => onTerminal(index, r),
-				(error) =>
-					onTerminal(index, { kind: "error", error, fallback: undefined }),
-			);
-		});
+	// Cloud leads at 0ms; each potato leg starts one tiny random step
+	// further out — a fast answer cancels the stragglers before they
+	// fire (the hedge). Probes catch their own transport failures, so
+	// the race's defensive rejection arm never fires in practice.
+	return collectiveRace({
+		legs: [SHIM_CLOUD_BASE, ...bases].map((base) => () => probe(base)),
 	});
 }
 
