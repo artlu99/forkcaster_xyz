@@ -650,17 +650,22 @@ export async function raceCast(
 
 	const controllers = new Map<ProviderId, AbortController>();
 	const timings: ProviderTiming[] = [];
-	// Fleet stagger (race.ts): shim leads at 0ms and each potato leg starts
-	// one tiny random step further out; haatz/snap/farcaster-tv are distinct
-	// sources, not replicas, so they race immediately. A fast winner clears
-	// the timers of starts that never fired — the straggler reads are saved.
+	// Fleet LEADS ("lean on shim-potato"): the potato fleet starts
+	// immediately (tiny random steps between members) and shim trails the
+	// whole fleet by a step — the fleet is primary, cloud the fallback.
+	// haatz/snap/farcaster-tv are distinct sources, not replicas, so they
+	// race immediately. A fast winner clears the timers of starts that
+	// never fired — the straggler reads are saved.
 	const staggerTimers: ReturnType<typeof setTimeout>[] = [];
-	const fleetDelays = staggerDelays(eligible.length);
+	const fleetCount = eligible.filter((p) => /^shim-potato/.test(p.id)).length;
+	const fleetDelays = staggerDelays(fleetCount + 1);
 	const delayFor = (id: ProviderId): number => {
-		if (id === "shim") return 0;
+		// First potato leads at 0ms; later members one step apart; shim
+		// trails the whole fleet by a step.
 		const fleetMatch = /^shim-potato(?:-(\d+))?$/.exec(id);
-		if (!fleetMatch) return 0;
-		return fleetDelays[Number(fleetMatch[1] ?? 1)] ?? 0;
+		if (fleetMatch) return fleetDelays[Number(fleetMatch[1] ?? 1) - 1] ?? 0;
+		if (id === "shim") return fleetDelays[fleetCount] ?? 0;
+		return 0;
 	};
 	// Set once the race has resolved: aborts from here on are the race
 	// cutting off losers, not provider failures (see settled()).

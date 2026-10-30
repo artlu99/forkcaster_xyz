@@ -10,7 +10,7 @@
 /** Base URL of the owner-run Snapchain reader. */
 export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
 
-import { collectiveRace, type RaceLeg } from "./race.ts";
+import { collectiveRace, staggerDelays, type RaceLeg } from "./race.ts";
 
 /**
  * One shim leg's terminal state — the raced wrappers below speak in these.
@@ -51,12 +51,14 @@ export async function raceShimProbe<T>(
 ): Promise<ShimProbe<T>> {
 	const bases = fleetBases(potatoBases);
 	if (bases.length === 0) return probe(SHIM_CLOUD_BASE);
-	// Cloud leads at 0ms; each potato leg starts one tiny random step
-	// further out — a fast answer cancels the stragglers before they
-	// fire (the hedge). Probes catch their own transport failures, so
-	// the race's defensive rejection arm never fires in practice.
+	// The fleet LEADS: potatoes start immediately (tiny random steps between
+	// members), cloud trails one step — the fleet is primary, cloud the
+	// fallback (matching the cast race and the cloud-retirement direction).
+	// The primary index stays 0 (cloud) for fallback/error preference.
+	const fleetSteps = staggerDelays(bases.length + 1);
 	return collectiveRace({
 		legs: [SHIM_CLOUD_BASE, ...bases].map((base) => () => probe(base)),
+		delays: [...fleetSteps.slice(0, bases.length), fleetSteps[bases.length]],
 	});
 }
 

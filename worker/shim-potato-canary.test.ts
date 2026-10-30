@@ -191,9 +191,9 @@ describe("fleet race semantics", () => {
 		expect(race.kind).toBe("unreachable");
 	});
 
-	test("a staggered fleet leg still wins head-to-head", async () => {
-		// Fleet legs start 1–2 random steps (≤180ms) behind shim but answer
-		// in 5ms — they beat shim's 300ms even staggered.
+	test("the fleet LEADS: a potato wins head-to-head against a slower shim", async () => {
+		// Fleet legs start at 0ms (shim trails a step) and answer in 5ms —
+		// they beat shim's 300ms response outright.
 		const race = await raceCast(
 			{ username: "zoo", hash: "0xabcdef01" },
 			{
@@ -212,7 +212,7 @@ describe("fleet race semantics", () => {
 		}
 	});
 
-	test("a fast winner cancels staggered fleet starts (stragglers never consulted)", async () => {
+	test("a fast fleet win cancels the trailing shim start", async () => {
 		const race = await raceCast(
 			{ username: "zoo", hash: "0xabcdef01" },
 			{
@@ -224,10 +224,10 @@ describe("fleet race semantics", () => {
 				],
 			},
 		);
-		// Shim won at ~1ms — both fleet legs' staggers (≥25ms) were cleared
-		// before firing, so only the winner ever appears in telemetry.
+		// The fleet won at ~5ms — shim's stagger (≥25ms) was cleared before
+		// firing, so only the winner ever appears in telemetry.
 		expect(race.kind).toBe("found");
-		expect(race.timings.map((t) => t.provider)).toEqual(["shim"]);
+		expect(race.timings.map((t) => t.provider)).toEqual(["shim-potato"]);
 	});
 });
 
