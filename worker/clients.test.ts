@@ -193,6 +193,7 @@ describe("clientsForPage", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"fatline",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -206,6 +207,7 @@ describe("clientsForPage", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"fatline",
 		]);
 	});
 
@@ -230,6 +232,7 @@ describe("clientsForPage", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"fatline",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -469,6 +472,26 @@ test("homiehouse's cast route is the full-hash /cast/ URL the server resolves", 
 	expect(html).not.toContain("data-intent");
 });
 
+test("fatline's cast route is the /c/ page the SPA router matches", () => {
+	const fatline = findClient("fatline");
+	expect(fatline).toBeDefined();
+	// Verified against the open-source site (apps/site/404.html router +
+	// indexer/src/cast-page.mjs) and live (Oct 2026, JS-rendering reader):
+	// /c/<username or FID>/<0x+8-40 hex> renders the cast read from the
+	// operator's own node — the house cast renders at both hash lengths,
+	// hence {fullHash} (the route-form hash may be shorter than the 8-hex
+	// minimum). Web-only: the "fatline" scheme is the iOS sign-in callback
+	// only, no per-cast routing, no Android app — no native attributes ship.
+	const html = clientPill(fatline as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://fatline.ink/c/zoo/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="fatline"');
+	expect(html).toContain('src="/logos/fatline.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -609,6 +632,7 @@ describe("external-link gate", () => {
 			"opencaster.org",
 			"homiehouse.app",
 			"testflight.apple.com",
+			"fatline.ink",
 		]);
 	});
 });

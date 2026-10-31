@@ -571,6 +571,42 @@ export const CLIENTS: ClientDefinition[] = [
 			pointer: "coarse",
 		},
 	},
+	// Fatline is an open-source (MIT, github.com/jpfraneto/fatline) Farcaster
+	// client that reads Snapchain or Hypersnap through a visible node the
+	// operator runs — "no hosted api in between" (@fatline's announcement
+	// cast, Oct 2026: "fatline.ink/c/ + the end of a farcaster.xyz link, and
+	// it opens here"). fatline.ink is GitHub Pages; its SPA router
+	// (apps/site/404.html) matches /c/<username or FID>/<0x+8-40 hex> onto
+	// the cast page — "The hash can be the short one from a farcaster.xyz
+	// link" — and indexer/src/cast-page.mjs resolves it against the
+	// operator's own node (full hash = a direct /v1/castById lookup; short =
+	// a bounded search over the author's latest 1,000 casts). {fullHash}, not
+	// {hash}: the route-form hash may be shorter than the 8-hex minimum, and
+	// the full form live-resolves. LIVE CHECK (Oct 2026, JS-rendering
+	// reader): fatline.ink/c/zoo/0x895ecc74 renders the house cast — byline
+	// "zoo · @zoo", text "omg so relevant!", both image embeds, and the
+	// "Read just now from … not from a hosted API" footer; the short-hash
+	// form renders the same card via the same endpoint. No signed rule: no
+	// signed check exists anywhere in their code — the client renders
+	// whatever its node holds (note: the known-unsigned canonical no longer
+	// resolves on ANY raw node — crackle (Farcaster's public Snapchain) and
+	// haatz (Quilibrium's public Hypersnap) both answer "cast not found"
+	// for it, as do Fatline's own two nodes, while the account itself still
+	// answers castsByFid — a network-data fact, not a client rule; omitted
+	// ⇒ fail-open). Not links-only: a general client
+	// (text, images, video, quotes). WEB-ONLY: the iOS Info.plist registers
+	// CFBundleURLSchemes "fatline", but FatlineApp.swift's onOpenURL is the
+	// sign-in callback only (fatline://signed-in → pollSigner) — no
+	// per-cast routing — and there is no Android app. Profile/feed: none —
+	// fatline.ink/<fid> is the node/egg page (identity + node health + "run
+	// yours", no casts, no bio), not a profile surface, and no
+	// username-keyed route exists.
+	{
+		id: "fatline",
+		title: "Fatline",
+		logoUrl: "/logos/fatline.svg",
+		web: "https://fatline.ink/c/{username}/{fullHash}",
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>
