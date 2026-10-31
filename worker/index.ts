@@ -428,17 +428,20 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		rank,
 	);
 	const res = c.html(html, status);
-	// The invariant gate: only found-complete shells enter the cache —
-	// link-only (fail-open) pages, consensus 404s, outages and partials
+	// The invariant gate: only found shells with canonical body text enter
+	// the cache — link-only (fail-open) pages, consensus 404s, outages and
+	// text-blind wins (mention-stripped raw text; nothing heals a body)
 	// pass through fresh, so a stale or empty preview can never be served
-	// from it. The fill is non-blocking (tests without an executionCtx
-	// fill inline).
+	// from it. Quote-blind partials still cache (OG complete, QUOTE_FILL
+	// self-heals per view). The fill is non-blocking (tests without an
+	// executionCtx fill inline).
 	if (
 		shellKey &&
 		shellWorthCaching({
 			status,
 			kind: resolved.kind,
 			partial: resolved.kind === "found" && resolved.partial,
+			textCanonical: resolved.kind === "found" ? resolved.textCanonical : true,
 		})
 	) {
 		res.headers.set("x-forkcaster-shell", "fill");

@@ -221,6 +221,10 @@ function castPage(
 	primaryOrigin?: string,
 	rank?: RankSnapshot | null,
 	externalLinks?: boolean,
+	// Quote-blind partials heal their missing quote cards client-side;
+	// text-blind wins already carry their quotes inline, so the fill would
+	// just duplicate them — withheld there.
+	textCanonical = true,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -250,7 +254,7 @@ function castPage(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`<div id="auto-mount"></div>${cardHtml}${notice}${actions}`,
 		og,
-		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial ? QUOTE_FILL_SCRIPT : ""}${SHELL_SCRIPT}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial && textCanonical ? QUOTE_FILL_SCRIPT : ""}${SHELL_SCRIPT}`,
 		canonicalUrl,
 	);
 }
@@ -305,6 +309,12 @@ export type ResolvedCast =
 			signed: boolean | null;
 			provider: ProviderId;
 			partial: boolean;
+			/**
+			 * False only for text-blind wins (mention-stripped raw-node
+			 * text): the page is never edge-cached and ships no QUOTE_FILL
+			 * (its quotes are already inline).
+			 */
+			textCanonical: boolean;
 			timings: ProviderTiming[];
 			elapsedMs: number;
 	  }
@@ -396,6 +406,7 @@ export async function resolveCast(
 		signed,
 		provider: race.provider,
 		partial: race.partial,
+		textCanonical: race.textCanonical,
 		timings: race.timings,
 		elapsedMs: race.elapsedMs,
 	};
@@ -481,6 +492,7 @@ export async function renderCastHtml(
 				primaryOrigin,
 				rank,
 				hasExternalLinks(cast),
+				resolved.textCanonical,
 			),
 		};
 	} catch {

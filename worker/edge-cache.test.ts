@@ -1,8 +1,8 @@
 /**
  * edge-cache unit tests — the shell gate's pure predicates and the key.
- * The invariant under test: only a found, complete render is worth
- * caching; only personalization-free requests participate; the key is
- * salted and query-free.
+ * The invariant under test: only a found render with canonical body text
+ * is worth caching; only personalization-free requests participate; the
+ * key is salted and query-free.
  */
 import { describe, expect, test } from "bun:test";
 
@@ -33,6 +33,32 @@ describe("shellWorthCaching", () => {
 			// fresh no-store fragment per view) and their meta is complete —
 			// cacheable (Oct 2026 gate extension).
 			shellWorthCaching({ status: 200, kind: "found", partial: true }),
+		).toBe(true);
+	});
+
+	test("a text-blind found never enters — a body can't self-heal", () => {
+		// Mention-stripped raw-node wins: lossy body text, QUOTE_FILL
+		// withheld (their quotes are already inline). Fresh every time.
+		expect(
+			shellWorthCaching({
+				status: 200,
+				kind: "found",
+				partial: true,
+				textCanonical: false,
+			}),
+		).toBe(false);
+		// Canonical text stays cacheable regardless of the partial flag.
+		expect(
+			shellWorthCaching({
+				status: 200,
+				kind: "found",
+				partial: true,
+				textCanonical: true,
+			}),
+		).toBe(true);
+		// The profile family (shim-only) omits the flag — canonical.
+		expect(
+			shellWorthCaching({ status: 200, kind: "found", partial: false }),
 		).toBe(true);
 	});
 

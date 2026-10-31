@@ -3,9 +3,10 @@
 //
 // THE INVARIANT (decided Oct 2026, before rollout): a cached shell must be
 // byte-indistinguishable from the cold server render a link-preview bot
-// would immortalize. Concretely, only a FOUND, COMPLETE render may enter
-// the cache — link-only (fail-open) pages, 404 consensus misses, 503s and
-// partial (quote-blind) shells pass through fresh, every time. Negative
+// would immortalize. Concretely, only a FOUND render with canonical body
+// text may enter the cache — link-only (fail-open) pages, 404 consensus
+// misses, 503s, text-blind wins (mention-stripped raw text; a body can't
+// self-heal) and JSON variants pass through fresh, every time. Negative
 // caching would rebuild the SPOF in disguise: under collective parity a
 // miss is exactly what a pending fleet leg might rescue. And since OG meta
 // derives only from the found cast, every cached shell is preview-identical
@@ -34,8 +35,11 @@ export const SHELL_TTL_SECONDS = 43_200;
 export const PROFILE_SHELL_TTL_SECONDS = 600;
 
 /** Cache-key salt — the invalidation tool. Bump to drop every shell at
- * once (there is no global purge for the Workers Cache API). */
-export const SHELL_SALT = "v1";
+ * once (there is no global purge for the Workers Cache API). v2: purges
+ * shells cached from text-blind raw-node wins, whose body text was missing
+ * mention names (the race now holds those wins until canonical text is
+ * available — and never caches them). */
+export const SHELL_SALT = "v2";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side
@@ -48,18 +52,30 @@ export type ShellOutcome = {
 	status: number;
 	kind: "found" | "not-found" | "unreachable";
 	partial: boolean;
+	/**
+	 * False marks a text-blind win (body text possibly missing mention
+	 * names). Absent/true ⇒ canonical. The cast race sets it; the profile
+	 * family (shim-only) is canonical by construction and omits it.
+	 */
+	textCanonical?: boolean;
 };
 
-/** Response-side gate — THE INVARIANT: only a found render is worth
- * immortalizing, complete or partial. Partials are safe to cache because
- * their OG meta is complete (meta never depends on quotes) and their
- * bodies self-heal per view (QUOTE_FILL_SCRIPT re-fetches the fresh
- * no-store fragment on every page view) — nothing stale is ever shown.
- * Link-only (fail-open), consensus misses, outages and JSON variants never
- * enter the cache, so a stale or empty preview can never be served from
- * it. */
+/** Response-side gate — THE INVARIANT: only a found render whose body text
+ * is canonical is worth immortalizing. Quote-blind partials are safe to
+ * cache because their OG meta is complete (meta never depends on quotes)
+ * and their bodies self-heal per view (QUOTE_FILL_SCRIPT re-fetches the
+ * fresh no-store fragment on every page view) — nothing stale is ever
+ * shown. Text-blind wins are NOT: their body text may be missing mention
+ * names and nothing can heal a body, so they pass through fresh every
+ * time. Link-only (fail-open), consensus misses, outages and JSON variants
+ * never enter the cache, so a stale or empty preview can never be served
+ * from it. */
 export function shellWorthCaching(outcome: ShellOutcome): boolean {
-	return outcome.status === 200 && outcome.kind === "found";
+	return (
+		outcome.status === 200 &&
+		outcome.kind === "found" &&
+		outcome.textCanonical !== false
+	);
 }
 
 /**

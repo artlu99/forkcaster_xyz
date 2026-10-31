@@ -4,14 +4,20 @@
 //
 // Providers are tiered by completeness (measured Oct 2026, see README):
 // - shim       — complete. Canonical shape, short/full hashes, quotes inline.
-// - haatz/snap — complete raw Snapchain messages, but castById needs an fid
-//                and a FULL hash (short hashes 400). The fid is raced between
-//                shim /f/{username} and the node's own
+// - haatz/snap — embed-complete raw Snapchain messages, but castById needs
+//                an fid and a FULL hash (short hashes 400). The fid is raced
+//                between shim /f/{username} and the node's own
 //                /v1/userNameProofByName — neither source is a single point
 //                of failure, so a shim outage can't blind both providers.
+//                TEXT-BLIND: the gateway strips the mention placeholder
+//                characters from text (shim substitutes @usernames in their
+//                place), so a mention-bearing raw win must never ship while
+//                a leg that carries canonical text can still answer — see
+//                `textCanonical` below.
 // - farcaster.tv — quote-blind: it silently DROPS {castId} quote embeds, so
 //                its wins are marked partial and only allowed after the box
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
+//                Its text IS canonical (Warpcast-processed).
 //
 // The shim-potato FLEET (PLAN8 canary graduated, Oct 2026): shim-shaped
 // complete legs stacked onto the race whenever SHIM_POTATO_BASE is set —
@@ -74,6 +80,17 @@ export type ProviderResult =
 			provider: ProviderId;
 			/** Complete providers preserve raw {castId} embeds; partial don't. */
 			complete: boolean;
+			/**
+			 * False marks the body TEXT as lossy: Snapchain strips the mention
+			 * placeholder characters from text (the @usernames live in the
+			 * separate `mentions` array, which shim substitutes in). A
+			 * text-blind found may only win once no provider that carries
+			 * canonical text is still pending — and its page is never
+			 * edge-cached (a body can't self-heal). Mention-free raw casts are
+			 * byte-identical to canonical text and set true. Absent (every
+			 * non-raw provider) ⇒ canonical.
+			 */
+			textCanonical?: boolean;
 			cast: ShimCast & { hash: string };
 			/** Raw-node legs: how the fid race settled. */
 			fidRace?: FidRace;
@@ -84,6 +101,13 @@ export type ProviderResult =
 export interface CastProvider {
 	id: ProviderId;
 	complete: boolean;
+	/**
+	 * Whether this provider's wins can carry canonical body text at all.
+	 * Raw nodes: false — their mention text is gateway-stripped, so a
+	 * pending raw leg can never rescue a parked text-blind found (its own
+	 * per-result flag decides whether IT is text-blind). Absent ⇒ true.
+	 */
+	textCanonical?: boolean;
 	/**
 	 * Whether this provider's `miss` is a parity vote toward the collective
 	 * not-found. True for complete providers (the fleet rule — every leg
@@ -118,8 +142,15 @@ export type RaceResult =
 			kind: "found";
 			cast: ShimCast & { hash: string };
 			provider: ProviderId;
-			/** True when the winner was quote-blind (farcaster.tv). */
+			/** True when the winner was quote-blind (farcaster.tv) or
+			 *  text-blind (mention-stripped raw node). */
 			partial: boolean;
+			/**
+			 * False only for text-blind wins: the body text may be missing
+			 * mention names. Such pages are never edge-cached (a body can't
+			 * self-heal) and ship no QUOTE_FILL (their quotes are inline).
+			 */
+			textCanonical: boolean;
 			timings: ProviderTiming[];
 			elapsedMs: number;
 	  }
@@ -420,6 +451,9 @@ type RawMessage = {
 		castAddBody?: {
 			text?: string;
 			embeds?: ShimEmbed[];
+			/** Mention fids in mentionsPositions order — the names the
+			 * gateway stripped from text. Presence ⇒ text is lossy. */
+			mentions?: unknown[];
 		};
 		userDataBody?: { type?: string; value?: string };
 	};
@@ -536,6 +570,12 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 	return {
 		id,
 		complete: true,
+		// Text-blind at the provider level: a pending raw leg can never
+		// rescue a parked text-blind found — the gateway strips mention
+		// placeholder characters, so raw text is never BETTER canonical
+		// text. (A found result's own flag decides whether it is text-blind;
+		// mention-free casts are byte-identical to canonical and win.)
+		textCanonical: false,
 		canServe: (vars) => isFullHash(vars.hash),
 		async fetchCast(vars, signal) {
 			try {
@@ -583,6 +623,13 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 					kind: "found",
 					provider: id,
 					complete: true,
+					// Snapchain strips the mention placeholder characters from
+					// text; shim substitutes @usernames in their place. A cast
+					// with no mentions is byte-identical to canonical text and
+					// may win outright; a mention-bearing one is text-blind
+					// and must wait for a canonical-text leg (see raceCast).
+					textCanonical:
+						(message.data?.castAddBody?.mentions?.length ?? 0) === 0,
 					cast: mapRawCast(message, vars, userMessages),
 					fidRace: race,
 				};
@@ -620,6 +667,14 @@ type RaceEvent =
  * - A complete provider's validated `found` wins immediately.
  * - A partial (quote-blind) `found` may only win once the box expires —
  *   boxMs 0 disables the wait (partial wins as soon as it lands).
+ * - A text-blind `found` (mention-bearing raw-node win — Snapchain strips
+ *   the mention placeholders shim substitutes) NEVER wins while a leg that
+ *   carries canonical text is pending, box or not: lossy text is worse than
+ *   waiting, and a body can't self-heal the way quote cards do. It ships
+ *   only once every such leg has settled (miss or error — canonical text
+ *   proven unavailable), fails open with the raw text, and is marked
+ *   partial + textCanonical:false. A parked quote-blind partial (canonical
+ *   text, quotes heal client-side) outranks it.
  * - Misses are COLLECTIVE parity: a miss from a COMPLETE provider with
  *   miss authority marks not-found, but the race keeps draining — any
  *   pending leg (any potato in the fleet) can still win. Shim no longer
@@ -765,9 +820,28 @@ export async function raceCast(
 
 	const deadline = Date.now() + (opts.boxMs ?? 700);
 	let partial: Extract<ProviderResult, { kind: "found" }> | null = null;
+	let textBlind: Extract<ProviderResult, { kind: "found" }> | null = null;
 	let completeMiss = false;
+	let allMissed = false;
 	let winner: Extract<ProviderResult, { kind: "found" }> | null = null;
+	// The winner's content flags, tracked at every assignment site — the
+	// result must not re-derive them (the deadline branch wins with a
+	// parked partial whose flags differ from a text-blind win's).
+	let winnerPartial = false;
+	let winnerTextCanonical = true;
 	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+	// Legs whose wins carry canonical text — the only legs that can beat a
+	// parked text-blind found (raw legs can't: their text is never BETTER
+	// than the parked one's; farcaster.tv is complete:false and box-gated
+	// anyway, so it doesn't hold a text-blind win back).
+	const rosterById = new Map(eligible.map((p) => [p.id, p] as const));
+	const couldStillRescueText = (): boolean => {
+		for (const id of pending.keys()) {
+			const p = rosterById.get(id);
+			if (p?.complete && p.textCanonical !== false) return true;
+		}
+		return false;
+	};
 
 	while (pending.size > 0) {
 		const events: Promise<RaceEvent>[] = [...pending.values()];
@@ -790,19 +864,28 @@ export async function raceCast(
 		if (event.deadline) {
 			// Box expired: the quote-blind copy is better than more waiting.
 			winner = partial;
+			winnerPartial = true;
 			break;
 		}
 		pending.delete(event.provider);
 		const result = event.result;
 		if (result.kind === "found") {
-			if (result.complete) {
+			if (result.complete && result.textCanonical !== false) {
 				winner = result;
 				break;
 			}
-			partial ??= result;
-			if (Date.now() >= deadline && !completeMiss) {
-				winner = result;
-				break;
+			if (result.textCanonical === false) {
+				// Text-blind (mention-bearing raw win): park it. Shipping is
+				// decided below, after every event — it must wait until no
+				// canonical-text leg can still answer, deadline or not.
+				textBlind ??= result;
+			} else {
+				partial ??= result;
+				if (Date.now() >= deadline && !completeMiss) {
+					winner = result;
+					winnerPartial = true;
+					break;
+				}
 			}
 		} else if (result.kind === "miss") {
 			if (missVerdict.get(event.provider)) {
@@ -810,9 +893,28 @@ export async function raceCast(
 				// pending leg (any potato) can still rescue the race.
 				completeMiss = true;
 				authoritativeMisses += 1;
-				if (authoritativeMisses === authoritativeTotal) break;
+				if (authoritativeMisses === authoritativeTotal) allMissed = true;
 			}
 		}
+		// End-of-iteration verdicts, in priority order:
+		// 1. A parked text-blind found ships the moment no leg that could
+		//    still produce canonical text remains pending — shim settled
+		//    (miss or error) proves canonical text is unavailable for this
+		//    request; fail open with the raw text. The box must never wake
+		//    it earlier: lossy text is worse than waiting. A parked
+		//    quote-blind partial (canonical text, quotes heal client-side)
+		//    outranks the raw copy.
+		// 2. Full miss consensus ⇒ not-found (post-loop). Unreachable with
+		//    a parked text-blind found: raw legs are miss-authoritative, so
+		//    their found prevents consensus — and if one ever parked, the
+		//    escape above already ran.
+		if (textBlind !== null && !couldStillRescueText()) {
+			winner = partial ?? textBlind;
+			winnerPartial = true;
+			winnerTextCanonical = winner !== textBlind;
+			break;
+		}
+		if (allMissed) break;
 	}
 	if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
 	abortAll();
@@ -831,7 +933,8 @@ export async function raceCast(
 			kind: "found",
 			cast: winner.cast,
 			provider: winner.provider,
-			partial: !winner.complete,
+			partial: winnerPartial,
+			textCanonical: winnerTextCanonical,
 			...finish(),
 		};
 	}
@@ -842,6 +945,9 @@ export async function raceCast(
 			cast: partial.cast,
 			provider: partial.provider,
 			partial: true,
+			// Post-loop partials are quote-blind wins only (farcaster.tv) —
+			// their text is canonical.
+			textCanonical: true,
 			...finish(),
 		};
 	}

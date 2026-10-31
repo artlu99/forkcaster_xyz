@@ -22,8 +22,8 @@ const PROVIDER_HOSTS: Record<ProviderId, string> = {
 	// SHIM_POTATO_BASE is set, and its misses never 404 (cast-source.ts).
 	"shim-potato": "shim-potato.artlu.xyz (canary)",
 	"farcaster-tv": "farcaster.tv (partial)",
-	haatz: "haatz.quilibrium.com",
-	snap: "snap.farcaster.xyz:3381",
+	haatz: "haatz.quilibrium.com (text-blind)",
+	snap: "snap.farcaster.xyz:3381 (text-blind)",
 };
 const PROVIDERS = Object.entries(PROVIDER_HOSTS).map(([id, host]) => ({
 	id: id as ProviderId,

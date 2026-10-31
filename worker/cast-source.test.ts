@@ -191,6 +191,180 @@ test("shim error + partial found still serves the partial", async () => {
 	if (race.kind === "found") expect(race.partial).toBe(true);
 });
 
+// --- text-blind raw-node wins (mention-stripped text) -----------------------
+//
+// Snapchain gateways strip the mention placeholder characters from text
+// (shim substitutes @usernames), so a mention-bearing raw win is parked
+// until no canonical-text leg can still answer. FULL_HASH vars make the
+// raw legs eligible; haatz's leg needs its three endpoints mocked (name
+// proof for the fid race, castById, userData).
+
+const FULL_VARS: CastVars = { username: "zoo", hash: FULL_HASH };
+
+// The gateway text for "@linkcast invite @tunecaster " — placeholders gone.
+const RAW_FOUND = {
+	hash: FULL_HASH,
+	data: {
+		type: "MESSAGE_TYPE_CAST_ADD",
+		fid: 10215,
+		timestamp: 183_950_000,
+		castAddBody: {
+			text: " invite ",
+			embeds: [],
+			mentions: [3356783, 871963],
+		},
+	},
+};
+const RAW_FOUND_CLEAN = {
+	...RAW_FOUND,
+	data: {
+		...RAW_FOUND.data,
+		castAddBody: { text: "omg so relevant!", embeds: [], mentions: [] },
+	},
+};
+
+// haatz's three endpoints for a found; the shim /f half of the fid race
+// rejects (unmocked) and the node's own name proof wins it. `other` lets a
+// test answer extra URLs (the shim /wc leg); anything unanswered throws —
+// the suite's "unexpected URL ⇒ provider error" convention.
+const mockHaatzFound = (
+	castByIdBody: typeof RAW_FOUND,
+	other?: (url: string) => Promise<Response> | undefined,
+): void => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://haatz.quilibrium.com/v1/userNameProofByName?name=zoo`) {
+			return respond(url, { fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, castByIdBody);
+		}
+		if (url === `https://haatz.quilibrium.com/v1/userDataByFid?fid=10215`) {
+			return respond(url, { messages: [] });
+		}
+		const handled = await other?.(url);
+		if (handled !== undefined) return handled;
+		return respond(url, "throw");
+	});
+};
+
+test("a text-blind raw found never beats a pending shim", async () => {
+	// Shim answers 50ms late with the canonical text; the raw win parked
+	// instantly must wait for it.
+	mockHaatzFound(RAW_FOUND, (url) =>
+		url === `https://shim.artlu.xyz/wc/zoo/${FULL_HASH}`
+			? respond(url, SHIM_FOUND, 50)
+			: undefined,
+	);
+	const started = Date.now();
+	const race = await raceCast(FULL_VARS, { boxMs: 500 });
+	expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+	expect(race.kind).toBe("found");
+	if (race.kind === "found") {
+		expect(race.provider).toBe("shim");
+		expect(race.partial).toBe(false);
+		expect(race.textCanonical).toBe(true);
+	}
+});
+
+test("a text-blind raw found ships when shim errored (fail-open)", async () => {
+	// No shim /wc mock — it throws, proving canonical text unavailable; the
+	// raw copy fails open.
+	mockHaatzFound(RAW_FOUND);
+	const started = Date.now();
+	const race = await raceCast(FULL_VARS, { boxMs: 500 });
+	expect(Date.now() - started).toBeLessThan(500);
+	expect(race.kind).toBe("found");
+	if (race.kind === "found") {
+		expect(race.provider).toBe("haatz");
+		expect(race.partial).toBe(true);
+		expect(race.textCanonical).toBe(false);
+	}
+});
+
+test("a text-blind raw found ships when shim consulted-and-missed", async () => {
+	mockHaatzFound(RAW_FOUND, (url) =>
+		url === `https://shim.artlu.xyz/wc/zoo/${FULL_HASH}`
+			? respond(url, { success: false }, 10)
+			: undefined,
+	);
+	const race = await raceCast(FULL_VARS, { boxMs: 500 });
+	// The raw found is existence evidence: it outranks the miss consensus.
+	expect(race.kind).toBe("found");
+	if (race.kind === "found") {
+		expect(race.provider).toBe("haatz");
+		expect(race.partial).toBe(true);
+		expect(race.textCanonical).toBe(false);
+	}
+});
+
+test("a mention-free raw found wins immediately — its text is canonical", async () => {
+	mockHaatzFound(RAW_FOUND_CLEAN, (url) =>
+		url === `https://shim.artlu.xyz/wc/zoo/${FULL_HASH}`
+			? respond(url, SHIM_FOUND, 400)
+			: undefined,
+	);
+	const started = Date.now();
+	const race = await raceCast(FULL_VARS, { boxMs: 500 });
+	// Canonical answer exists but is slow — the clean raw text is
+	// byte-identical, so waiting buys nothing.
+	expect(Date.now() - started).toBeLessThan(300);
+	expect(race.kind).toBe("found");
+	if (race.kind === "found") {
+		expect(race.provider).toBe("haatz");
+		expect(race.partial).toBe(false);
+		expect(race.textCanonical).toBe(true);
+	}
+});
+
+test("box expiry ships the quote-blind partial over a parked text-blind found", async () => {
+	// fctv's text is canonical (only quotes are missing, and those heal
+	// client-side) — it outranks the raw copy at the box, even with shim
+	// still pending.
+	globalThis.fetch = mock(
+		(input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+			const url = String(input);
+			if (url === `https://farcaster.tv/zoo/${FULL_HASH}`) {
+				return Promise.resolve(Response.json(FCTV_FOUND));
+			}
+			if (url === `https://haatz.quilibrium.com/v1/userNameProofByName?name=zoo`) {
+				return Promise.resolve(Response.json({ fid: 10215 }));
+			}
+			if (
+				url ===
+				`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+			) {
+				return Promise.resolve(Response.json(RAW_FOUND));
+			}
+			if (url === `https://haatz.quilibrium.com/v1/userDataByFid?fid=10215`) {
+				return Promise.resolve(Response.json({ messages: [] }));
+			}
+			if (url === `https://shim.artlu.xyz/wc/zoo/${FULL_HASH}`) {
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () =>
+						reject(new Error("aborted")),
+					);
+				});
+			}
+			return Promise.reject(new Error(`unexpected fetch ${url}`));
+		},
+	);
+	const started = Date.now();
+	const race = await raceCast(FULL_VARS, { boxMs: 30 });
+	const elapsed = Date.now() - started;
+	expect(elapsed).toBeGreaterThanOrEqual(25);
+	expect(elapsed).toBeLessThan(400);
+	expect(race.kind).toBe("found");
+	if (race.kind === "found") {
+		expect(race.provider).toBe("farcaster-tv");
+		expect(race.partial).toBe(true);
+		expect(race.textCanonical).toBe(true);
+	}
+});
+
 test("everything failing is unreachable", async () => {
 	globalThis.fetch = mock(async (input: RequestInfo | URL) =>
 		respond(String(input), "throw"),
