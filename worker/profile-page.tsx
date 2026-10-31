@@ -27,6 +27,7 @@
 // Display, OG/canonical, external client targets, and the JSON twin carry
 // the primary; first-party navigation keeps the visitor's own words.
 
+import { sort } from "radash";
 import {
 	rescueHashViaFarcasterTv,
 	UPSTREAM_TIMEOUT_MS,
@@ -36,6 +37,7 @@ import {
 	quoteTargetsOf,
 	toCastData,
 	urlEmbedsOf,
+	type QuoteTarget,
 	type UnfurlResult,
 } from "./cast-data.ts";
 import { fetchQuote, renderEmbedCard, unfurl } from "./cast-page.tsx";
@@ -575,32 +577,58 @@ export async function renderCastsHtml(
 
 	// Enrichment up front, allSettled: every failure degrades alone
 	// (unfurl ⇒ hostname-only card, quotes ⇒ dropped) and never 404s a
-	// proven identity.
-	const unfurlJobs = casts.flatMap((cast) =>
-		urlEmbedsOf(cast).map((u) => unfurl(u, env)),
-	);
-	const quoteJobs = casts.flatMap((cast) =>
-		quoteTargetsOf(cast).map((t) => fetchQuote(t, env?.SHIM_POTATO_BASE)),
-	);
-	const unfurlResults = await Promise.allSettled(unfurlJobs);
-	const quoteResults = await Promise.allSettled(quoteJobs);
+	// proven identity. Results are keyed by URL/hash so enrichment never
+	// depends on positional ordering between the fetch set and the cast loop.
+	const orderedCasts = sort(casts, (cast) => cast.timestamp ?? 0, true);
+
+	const unfurlByUrl = new Map<string, UnfurlResult | undefined>();
+	{
+		const urls = new Set<string>();
+		for (const cast of orderedCasts) {
+			for (const u of urlEmbedsOf(cast)) urls.add(u);
+		}
+		const results = await Promise.allSettled(
+			[...urls].map((u) => unfurl(u, env)),
+		);
+		let i = 0;
+		for (const u of urls) {
+			const r = results[i++];
+			unfurlByUrl.set(u, r?.status === "fulfilled" ? r.value : undefined);
+		}
+	}
+
+	const quotesByHash = new Map<string, ShimCast | undefined>();
+	{
+		const targets = new Map<string, QuoteTarget>();
+		for (const cast of orderedCasts) {
+			for (const t of quoteTargetsOf(cast)) {
+				if (!targets.has(t.hash)) targets.set(t.hash, t);
+			}
+		}
+		const results = await Promise.allSettled(
+			[...targets.values()].map((t) =>
+				fetchQuote(t, env?.SHIM_POTATO_BASE),
+			),
+		);
+		let i = 0;
+		for (const t of targets.values()) {
+			const r = results[i++];
+			quotesByHash.set(t.hash, r?.status === "fulfilled" ? r.value : undefined);
+		}
+	}
 
 	const cards: string[] = [];
-	let unfurlIndex = 0;
-	let quoteIndex = 0;
-	for (const cast of casts) {
+	for (const cast of orderedCasts) {
 		// No hash ⇒ unroutable — skip rather than render a dead card.
 		if (!cast.hash) continue;
 		const hash = cast.hash;
 		const unfurlMap = new Map<string, UnfurlResult | undefined>();
 		for (const u of urlEmbedsOf(cast)) {
-			const r = unfurlResults[unfurlIndex++];
-			unfurlMap.set(u, r?.status === "fulfilled" ? r.value : undefined);
+			unfurlMap.set(u, unfurlByUrl.get(u));
 		}
-		const quotes = quoteTargetsOf(cast).map(() => {
-			const r = quoteResults[quoteIndex++];
-			return r?.status === "fulfilled" ? r.value : undefined;
-		});
+		const quotes = quoteTargetsOf(cast).map(
+			(t) => quotesByHash.get(t.hash),
+		);
 		try {
 			cards.push(
 				await renderEmbedCard({
