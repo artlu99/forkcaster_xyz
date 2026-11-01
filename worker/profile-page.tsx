@@ -43,6 +43,7 @@ import {
 import { fetchQuote, renderEmbedCard, unfurl } from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
+	SHEET_SCRIPT,
 	SHELL_SCRIPT,
 	TRACK_SCRIPT,
 	CLIENT_SCRIPT,
@@ -458,10 +459,10 @@ ${notice}
 			body,
 			og,
 			// Copy helper + the stateful layer's scripts (telemetry __fk, the
-			// cookie writer, the cookie-driven personalization into the
-			// mount). DEEPLINK_SCRIPT rides inside the menu row when any pill
-			// has a native target.
-			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${SHELL_SCRIPT}`,
+			// cookie writer, the sheet wiring, the cookie-driven
+			// personalization into the mount). DEEPLINK_SCRIPT rides inside
+			// the menu row when any pill has a native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
 		),
@@ -704,10 +705,10 @@ ${listHtml}`;
 			body,
 			og,
 			// Live-stats fills one slot per card; the stateful layer adds the
-			// telemetry helper + cookie writer + the cookie-driven
-			// personalization into the mount. DEEPLINK_SCRIPT ships inside
-			// the feed row when its pill has a native target.
-			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${SHELL_SCRIPT}`,
+			// telemetry helper + cookie writer + sheet wiring + the
+			// cookie-driven personalization into the mount. DEEPLINK_SCRIPT
+			// ships inside the feed row when its pill has a native target.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.

@@ -38,8 +38,10 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * once (there is no global purge for the Workers Cache API). v2: purges
  * shells cached from text-blind raw-node wins, whose body text was missing
  * mention names (the race now holds those wins until canonical text is
- * available — and never caches them). */
-export const SHELL_SALT = "v2";
+ * available — and never caches them). v3: purges shells cached from the
+ * pre-sheet UI — the bare pill row + the on-page auto-open chip; the
+ * sheet-era markup and scripts differ. */
+export const SHELL_SALT = "v3";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

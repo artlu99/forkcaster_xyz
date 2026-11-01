@@ -1,6 +1,7 @@
-// The cast page's interactive client UI: the "Open in …" action row and
-// the auto-open banner/overlay — the server-rendered halves that
-// CLIENT_SCRIPT / DEEPLINK_SCRIPT / AUTO_SCRIPT (cast-scripts.ts) drive.
+// The cast pages' interactive client UI: the client sheet (the drawer-style
+// "Open in…" chooser — trigger + dialog, clientActionsHtml below) and the
+// auto-open banner/overlay — the server-rendered halves that CLIENT_SCRIPT /
+// DEEPLINK_SCRIPT / SHEET_SCRIPT / AUTO_SCRIPT (cast-scripts.ts) drive.
 // Pure rendering: no fetches, no env.
 
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
@@ -48,7 +49,7 @@ export function clientPill(
 	);
 }
 
-// The action row. Cast mode (no `route`): one pill
+// The client sheet's offered set. Cast mode (no `route`): one pill
 // per clientsForPage entry, signed/link gates, {fid} gating, rank order.
 // Route mode: offered = clientsForRoute(kind, vars,
 // signed) — capability + the signed rule, fail-open — the row publishes
@@ -99,7 +100,35 @@ export function clientActionsHtml(
 	const rowAttrs = route
 		? ` data-kind="${route.kind}"${route.resolvedId ? ` data-resolved="${escapeHtml(route.resolvedId)}"` : ""}`
 		: "";
-	return `<p class="actions"${rowAttrs}>${pills}</p>${hasNative ? DEEPLINK_SCRIPT : ""}`;
+	// The client sheet: one trigger where the bare pill row used to be, and
+	// a <dialog class="sheet"> carrying the pills byte-identically. The
+	// hooks survive the relocation: the pills stay a.client-pill[data-client]
+	// (CLIENT_SCRIPT records clicks document-wide; SHELL_PREP reads them for
+	// its decision and stamps the badge); the in-sheet container keeps
+	// class="actions" with its route attrs (AUTO_SCRIPT pauses a countdown
+	// on pointerdown inside .actions; SHELL_PREP stamps data-resolved on
+	// p.actions[data-kind]); the trigger row carries the same class, so
+	// opening the chooser pauses a pending redirect too. The auto-open
+	// toggle inside the sheet is THE one control (the on-page chip is
+	// gone): SHELL_SCRIPT syncs its state from the local cookie and
+	// SHEET_SCRIPT writes flips through POST /prefs. Without JS the dialog
+	// never opens — shell()'s no-js CSS renders it as a plain block instead,
+	// pills reachable, trigger and toggle hidden (nothing works there).
+	if (ordered.length === 0) return "";
+	const triggerRow =
+		// The no-js → js swap rides HERE, not in the head: a synchronous
+		// inline script before the sheet markup parses is equally
+		// FOUC-proof, and pages without a sheet (channels pin "exactly one
+		// script") ship no swap at all.
+		`<script>document.documentElement.classList.replace("no-js","js")</script>` +
+		`<p class="actions"><button class="pill sheet-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fk-sheet" data-sheet-open>Open in\u2026</button></p>`;
+	const sheet =
+		`<dialog class="sheet" id="fk-sheet" data-sheet aria-labelledby="fk-sheet-title">` +
+		`<p class="sheet-title" id="fk-sheet-title">Open in</p>` +
+		`<p class="actions"${rowAttrs}>${pills}</p>` +
+		`<label class="sheet-pref"><input type="checkbox" role="switch" data-sheet-auto /><span>Auto-open with last used</span></label>` +
+		`</dialog>`;
+	return `${triggerRow}${sheet}${hasNative ? DEEPLINK_SCRIPT : ""}`;
 }
 
 // Auto-open flow: for a returning user with a last-used client.

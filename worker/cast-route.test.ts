@@ -512,6 +512,25 @@ test("GET /:username/:hash badges nothing server-side — the badge is client-si
 	expect(await personal.text()).toBe(bareBody);
 });
 
+test("GET /:username/:hash ships the client sheet — trigger, dialog, toggle", async () => {
+	const res = await app.request(`/zoo/${SHORT_HASH}`);
+	const body = await res.text();
+	expect(body).toContain('<dialog class="sheet"');
+	expect(body).toContain("data-sheet-open");
+	expect(body).toContain("data-sheet-auto");
+	expect(body).toContain("Auto-open with last used");
+	// The sheet's wiring script ships on the page.
+	expect(body).toContain("showModal");
+	// The pills live inside the dialog, hooks intact (AUTO_SCRIPT pauses on
+	// pointerdown inside .actions; SHELL_PREP reads the pills for its
+	// decision and stamps the badge).
+	const start = body.indexOf('<dialog class="sheet"');
+	const end = body.indexOf("</dialog>", start);
+	const dialog = body.slice(start, end);
+	expect(dialog).toContain('data-client="firefly"');
+	expect(dialog).toContain('<p class="actions">');
+});
+
 test("unknown fc_client cookie values render no badge", async () => {
 	const res = await app.request(`/zoo/${SHORT_HASH}`, {
 		headers: { Cookie: "fc_client=not-a-client" },

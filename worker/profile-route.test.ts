@@ -1319,6 +1319,20 @@ test("profile menu: cookie-blind shell — resolution is client-side", async () 
 	expect(farcaster).toBeGreaterThan(-1);
 });
 
+test("profile menu ships the client sheet — trigger, dialog, toggle", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}`);
+	const body = await res.text();
+	expect(body).toContain('<dialog class="sheet"');
+	expect(body).toContain("data-sheet-open");
+	expect(body).toContain("data-sheet-auto");
+	// The in-sheet row keeps the kind attr SHELL_PREP reads (data-resolved
+	// is stamped client-side from the local cookie).
+	expect(body).toContain('<p class="actions" data-kind="profile"');
+	// The sheet script ships on the profile belt too.
+	expect(body).toContain("showModal");
+});
+
 test("profile auto-open: client-side — the shell ships the kind-aware mount + machinery", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}`, {

@@ -87,7 +87,7 @@ export function shell(
 		: "";
 	// Title is escaped: it embeds the route's percent-decoded username.
 	return `<!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -225,13 +225,79 @@ main { padding-bottom: 8px; }
 }
 .auto-banner .auto-go { color: var(--ink); text-decoration: none; }
 .auto-banner .auto-go:hover { color: var(--accent); }
-.auto-banner .auto-settings, .auto-overlay .auto-settings,
-.auto-chip[href="/"] { color: var(--muted); font-size: 12px; text-decoration: none; }
+.auto-banner .auto-settings, .auto-overlay .auto-settings { color: var(--muted); font-size: 12px; text-decoration: none; }
 .auto-overlay { border-width: 2px; border-radius: 12px; padding: 22px; }
 .auto-overlay-title { font-size: 30px; font-weight: 700; margin: 0 0 12px; }
 .auto-overlay-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
 .auto-overlay .pill { font-size: 18px; padding: 10px 22px; }
 .auto-banner .pill, .auto-overlay .pill { cursor: pointer; }
+/* The client sheet (client-sheet.test.ts): the drawer-style "Open in…"
+   chooser. The sheet is a <dialog> bottom sheet — top-layer rendering
+   (no z-index wars, no fixed-position Safari jitter), compositor-only
+   motion (transform + opacity), MD3's emphasized curve, safe-area
+   padding for the home indicator. Escape and backdrop-tap close it
+   natively; SHEET_SCRIPT wires the rest. */
+.sheet-trigger { cursor: pointer; font: inherit; font-size: 14px; font-weight: 500; background: none; }
+dialog.sheet {
+  position: fixed; inset: auto 0 0 0; margin: 0 auto;
+  width: min(100%, 672px);
+  /* The UA stylesheet caps modal dialogs at ~(100% - 6px) - 2em — on a
+     phone that floats the sheet ~19px off each edge. Full-bleed wins. */
+  max-width: none;
+  border: 1px solid var(--line); border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  background: var(--bg); color: var(--ink);
+  padding: 18px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1),
+    overlay 0.3s allow-discrete, display 0.3s allow-discrete;
+}
+dialog.sheet[open] { transform: translateY(0); }
+@starting-style { dialog.sheet[open] { transform: translateY(100%); } }
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.4); opacity: 0; transition: opacity 0.3s;
+}
+dialog.sheet[open]::backdrop { opacity: 1; }
+@starting-style { dialog.sheet[open]::backdrop { opacity: 0; } }
+dialog.sheet .actions { margin: 0; }
+.sheet-title {
+  margin: 0 0 12px; font-size: 12px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+}
+.sheet-pref {
+  display: flex; align-items: center; gap: 10px;
+  margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
+  font-size: 14px; cursor: pointer;
+}
+.sheet-pref input {
+  appearance: none; -webkit-appearance: none;
+  width: 36px; height: 20px; border-radius: 999px;
+  background: var(--line); position: relative; margin: 0; flex: none;
+  cursor: pointer; transition: background-color 0.15s ease;
+}
+.sheet-pref input::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--bg); box-shadow: 0 0 0 1px var(--line);
+  transition: left 0.15s ease;
+}
+.sheet-pref input:checked { background: var(--accent); }
+.sheet-pref input:checked::after { left: 18px; }
+.sheet-pref input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* No-JS fallback: showModal never fires, so the sheet renders open as a
+   plain block — the pills stay reachable (they are plain anchors); the
+   trigger and the /prefs toggle disappear, since neither can work. The
+   title stays: it labels the row that replaced the trigger. */
+.no-js dialog.sheet {
+  display: block; position: static; inset: auto; width: auto;
+  margin: 20px 0 0; padding: 0; border: none; border-radius: 0;
+  box-shadow: none; transform: none;
+}
+.no-js .sheet-trigger, .no-js .sheet-pref { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet, dialog.sheet::backdrop { transition: none; }
+}
 </style>
 </head>
 <body>

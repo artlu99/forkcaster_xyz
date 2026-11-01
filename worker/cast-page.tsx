@@ -5,7 +5,7 @@
 // renderCastHtml() / renderCastJson() / renderQuotesFragment() render the
 // one result. Supporting modules:
 //   cast-data.ts    — Shim → embed-data mapping (pure)
-//   cast-actions.tsx — action row + auto-open banner (server halves)
+//   cast-actions.tsx — the client sheet (server halves)
 //   cast-scripts.ts — the inline client scripts those halves pair with
 //   shell.tsx       — the page frame (shared with /transparency)
 import { renderToString } from "preact-render-to-string";
@@ -38,6 +38,7 @@ import {
 	CLIENT_SCRIPT,
 	LIVE_STATS_SCRIPT,
 	QUOTE_FILL_SCRIPT,
+	SHEET_SCRIPT,
 	SHELL_SCRIPT,
 	TRACK_SCRIPT,
 } from "./cast-scripts.ts";
@@ -254,7 +255,7 @@ function castPage(
 		`${vars.username}/${vars.hash} · forkcaster`,
 		`<div id="auto-mount"></div>${cardHtml}${notice}${actions}`,
 		og,
-		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial && textCanonical ? QUOTE_FILL_SCRIPT : ""}${SHELL_SCRIPT}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial && textCanonical ? QUOTE_FILL_SCRIPT : ""}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 		canonicalUrl,
 	);
 }
@@ -281,7 +282,7 @@ function linkOnlyPage(
 			rank,
 		)}`,
 		undefined,
-		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${SHELL_SCRIPT}`,
+		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 	);
 }
 

@@ -210,7 +210,79 @@ export const QUOTE_FILL_SCRIPT = `<script>
 })();
 </script>`;
 
-// Shell personalization prep (cast pages only — the page must carry
+// The client sheet's wiring (the markup comes from clientActionsHtml in
+// cast-actions.tsx): the trigger opens the <dialog class="sheet"> via
+// showModal — top-layer rendering, so no z-index or scroll-lock code —
+// a click on the backdrop (::backdrop events land on the dialog element
+// itself) closes it, and Escape is the dialog's native cancel. The
+// auto-open toggle syncs its checked state from the LOCAL fc_client
+// cookie (the shell is cookie-blind — the same bytes every device),
+// writes flips through POST /prefs (server Set-Cookie, ITP-safe — the
+// same write the auto box uses), and announces the new pref on the
+// fk:auto document event so AUTO_SCRIPT's box re-renders coherently.
+// Browsers without showModal (no top layer) fall back to the open
+// attribute — the chooser surfaces inline, unstyled motion. Degrades
+// silently by contract: no trigger, no behavior.
+export const SHEET_SCRIPT = `<script>
+(function () {
+  var open = document.querySelector("[data-sheet-open]");
+  var sheet = document.getElementById("fk-sheet");
+  if (!open || !sheet) return;
+  if (sheet.showModal) {
+    open.addEventListener("click", function () {
+      sheet.showModal();
+      open.setAttribute("aria-expanded", "true");
+    });
+    sheet.addEventListener("click", function (e) {
+      if (e.target === sheet) sheet.close();
+    });
+    // aria-expanded mirrors the dialog for assistive tech; the close
+    // event covers Escape (the dialog's native cancel) as well as the
+    // backdrop and programmatic closes.
+    sheet.addEventListener("close", function () {
+      open.setAttribute("aria-expanded", "false");
+    });
+  } else {
+    // No top layer (very old browsers): the open attribute at least
+    // surfaces the chooser inline; a tap outside it dismisses (there is
+    // no backdrop to click).
+    open.addEventListener("click", function () {
+      sheet.setAttribute("open", "");
+      open.setAttribute("aria-expanded", "true");
+    });
+    document.addEventListener("click", function (e) {
+      if (sheet.getAttribute("open") !== null &&
+          !sheet.contains(e.target) && e.target !== open) {
+        sheet.removeAttribute("open");
+        open.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+  var toggle = sheet.querySelector("[data-sheet-auto]");
+  if (!toggle) return;
+  var m = document.cookie.match(/(?:^|; )${LAST_CLIENT_COOKIE}=([^;]*)/);
+  var raw = m ? m[1] : "";
+  try { raw = decodeURIComponent(raw); } catch (err) {}
+  var parts = String(raw).replace(/%7C/gi, "|").split("|");
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] === "auto-on") toggle.checked = true;
+    else if (parts[i] === "auto-off") toggle.checked = false;
+  }
+  toggle.addEventListener("change", function () {
+    var auto = toggle.checked ? "on" : "off";
+    fetch("/prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ auto: auto })
+    }).catch(function () {});
+    try {
+      document.dispatchEvent(new CustomEvent("fk:auto", { detail: { auto: auto } }));
+    } catch (err) {}
+  });
+})();
+</script>`;
+
+// Shell personalization prep (every stateful surface — the page must carry
 // <div id="auto-mount">). Reads fc_client LOCALLY, decides via the
 // serialized shellAutoDecision (shell-state.ts — the fixture-tested piece),
 // renders the initial auto-open box with the exact data-* attributes
@@ -218,8 +290,11 @@ export const QUOTE_FILL_SCRIPT = `<script>
 // own DOM attributes — server gates are already reflected in the pill
 // set), and badges the resolved pill. AUTO_SCRIPT is concatenated right
 // after and takes over unchanged — one state machine, zero drift. Without
-// the cookie the prep renders nothing; without the mount (profiles) it
-// never runs.
+// the cookie the prep renders nothing; without the mount it never runs.
+// The off/noredirect state renders a status-only line (no chip button):
+// the sheet's toggle is the one control. The prep also relabels the sheet
+// trigger with the resolved client's title ("Open in Firefly") — a
+// cookie-free shell ships the generic "Open in…".
 export const SHELL_PREP = `<script>
 (function () {
   var mount = document.getElementById("auto-mount");
@@ -282,8 +357,6 @@ export const SHELL_PREP = `<script>
       : "Auto-open is off";
     html = '<div class="auto-banner" aria-live="polite" data-auto="' + state.mode + '" ' + meta + ">" +
       '<span class="auto-status">' + status + "</span>" +
-      '<button class="pill auto-chip" data-auto-toggle aria-pressed="' + (state.prefOn ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
-      (state.prefOn ? "On" : "Off") + "</button>" +
       '<a class="auto-settings" href="/">settings</a></div>';
   } else {
     html = '<div class="auto-banner" aria-live="polite" data-auto="idle">' +
@@ -291,6 +364,11 @@ export const SHELL_PREP = `<script>
       '<a class="auto-settings" href="/">settings</a></div>';
   }
   mount.innerHTML = html;
+  // Relabel the sheet trigger with the resolved client ("Open in
+  // Firefly") — a cookie-free shell ships the generic "Open in…". Idle
+  // keeps it generic: the armed client isn't offered here.
+  var trigger = document.querySelector("[data-sheet-open]");
+  if (trigger && title) trigger.textContent = "Open in " + title;
   // Kind routes: stamp the row's data-resolved so CLIENT_SCRIPT's
   // first/switch/repeat telemetry compares against THIS resolution.
   var row = document.querySelector("p.actions[data-kind]");
@@ -314,13 +392,17 @@ export const SHELL_PREP = `<script>
 //   immediately) → redirect.
 // - on: LARGE arming overlay with the same countdown + Pause, then
 //   location.replace().
-// - off: compact status chip that toggles the preference on.
+// - off: compact status line (the sheet's toggle is the on/off control).
 // Bots never send the cookie and see none of this. Timer cancels on
 // any pill pointerdown. On cast pages SHELL_PREP renders the initial
 // box from the local cookie in the script tag immediately before this
-// one; on profiles the box is server-rendered (autoOpenUi). Either way
+// one; profiles render the same way (the kind-aware mount). Either way
 // the data-* attributes below are this script's only inputs — one
 // state machine, both surfaces, zero drift on the redirect logic.
+// The sheet's toggle announces pref flips on the fk:auto document event
+// (SHEET_SCRIPT): this listener re-renders the box from the one state
+// machine — flipping off cancels a pending redirect (a countdown the
+// user just revoked must never fire).
 export const AUTO_SCRIPT = `<script>
 (function () {
   var box = document.querySelector("[data-auto]");
@@ -371,13 +453,8 @@ export const AUTO_SCRIPT = `<script>
     if (delay === 0) return "Opening <strong>" + name + "</strong> now" + tail;
     return "Opening <strong>" + name + '</strong> in <span class="auto-secs">' + delay + "</span>s" + tail;
   };
-  var chip = function (pressed) {
-    return '<button class="pill auto-chip" data-auto-toggle aria-pressed="' +
-      (pressed ? "true" : "false") + '" title="Toggle auto-open">Auto-open: ' +
-      (pressed ? "On" : "Off") + '</button>';
-  };
   var settings = '<a class="auto-settings" href="/">settings</a>';
-  // One choice per view: Pause. Settings (Turn off / toggle) appear only
+  // One choice per view: Pause. Settings (Turn off) appear only
   // in the calm paused view, never during the redirect window.
   var views = {
     countdown: function () {
@@ -404,10 +481,10 @@ export const AUTO_SCRIPT = `<script>
     },
     stayed: function () {
       return '<span class="auto-status">Auto-open is on \u2014 next ' + noun + ' open in <strong>' + name + '</strong></span>' +
-        chip(true) + settings;
+        settings;
     },
     off: function () {
-      return '<span class="auto-status">Auto-open is off</span>' + chip(false) + settings;
+      return '<span class="auto-status">Auto-open is off</span>' + settings;
     }
   };
   var apply = function (view) {
@@ -417,9 +494,15 @@ export const AUTO_SCRIPT = `<script>
   var fired = false;
   var timer = null;
   var tick = null;
+  // The native attempt's web-fallback timer rides cancelAll too: a pref
+  // revoked mid-flight (fk:auto, from the sheet toggle) or a Pause during
+  // the 2.5s window must also stop the deferred web redirect — the open
+  // was committed but the fallback is still ours to cancel.
+  var fallback = null;
   var cancelAll = function () {
     if (timer) { clearTimeout(timer); timer = null; }
     if (tick) { clearInterval(tick); tick = null; }
+    if (fallback) { clearTimeout(fallback); fallback = null; }
   };
   // Every redirect path (delay-0, timer expiry, Go now) funnels through
   // open(): native attempt when the last-used client has a target and
@@ -441,7 +524,8 @@ export const AUTO_SCRIPT = `<script>
     document.addEventListener("visibilitychange", hide, { once: true });
     window.addEventListener("pagehide", hide, { once: true });
     window.location.href = native;
-    setTimeout(function () {
+    fallback = setTimeout(function () {
+      fallback = null;
       if (!opened && !document.hidden) location.replace(url);
     }, 2500);
   };
@@ -476,16 +560,6 @@ export const AUTO_SCRIPT = `<script>
   };
   if (box) {
     box.addEventListener("click", function (e) {
-      var t = e.target && e.target.closest ? e.target.closest("[data-auto-toggle]") : null;
-      if (t) {
-        var target = prefOn ? "off" : "on";
-        cancelAll();
-        post(target).then(function () {
-          prefOn = target === "on";
-          apply(prefOn ? "stayed" : "off");
-        });
-        return;
-      }
       // The countdown link is an explicit open of the saved client (the
       // anchor routes through DEEPLINK_SCRIPT on phones). Cancel the
       // pending timer and mark fired: a manual open supersedes the
@@ -505,6 +579,20 @@ export const AUTO_SCRIPT = `<script>
       if (action === "pause") pause();
       else if (action === "go") goNow();
       else if (action === "off") turnOff();
+    });
+    // The sheet's toggle (SHEET_SCRIPT) announces pref flips here — one
+    // state machine still owns the box, zero drift on the copy. Flipping
+    // OFF cancels a pending redirect: a countdown the user just revoked
+    // must never fire. Flipping ON shows the stayed status (turning
+    // auto-open on must not yank the visitor off the page mid-read).
+    // The idle box keeps its copy — the armed client isn't offered here;
+    // the pref flag doesn't change that.
+    document.addEventListener("fk:auto", function (e) {
+      var detail = e && e.detail;
+      if (!detail || (detail.auto !== "on" && detail.auto !== "off")) return;
+      prefOn = detail.auto === "on";
+      cancelAll();
+      if (mode !== "idle") apply(prefOn ? "stayed" : "off");
     });
     document.addEventListener("pointerdown", function (e) {
       var n = e.target;
@@ -530,6 +618,7 @@ export const AUTO_SCRIPT = `<script>
 
 // SHELL_SCRIPT = the prep (cookie → decision → initial box, from the
 // local cookie) + AUTO_SCRIPT verbatim: the prep builds the box, the
-// unchanged state machine takes over. Cast pages only — the prep bails
-// without <div id="auto-mount"> (profiles render server-side).
+// unchanged state machine takes over. Every stateful surface ships it —
+// the prep bails without <div id="auto-mount"> (channels, the stateless
+// surface, render none).
 export const SHELL_SCRIPT = SHELL_PREP + AUTO_SCRIPT;
