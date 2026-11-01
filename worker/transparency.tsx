@@ -7,7 +7,7 @@
 import { sort } from "radash";
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import { RANK_IDS, RANK_WEIGHTS, WARMING_UP_MIN } from "../scripts/client-rank-lib.ts";
-import { FID_SOURCES, type FidSnapshot } from "../scripts/fid-race-lib.ts";
+import type { FidSnapshot } from "../scripts/fid-race-lib.ts";
 import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
 import { CLIENTS, ROUTE_KINDS, targetFor } from "./client-registry.ts";
@@ -101,14 +101,18 @@ function statsTable(snapshot: Snapshot | null | undefined): string {
 const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${RANK_WEIGHTS.goNow} · repeat ×${RANK_WEIGHTS.repeat} · automatic ×${RANK_WEIGHTS.auto}. An automatic open repeats an earlier choice, so it counts less.`;
 
 // The fid-race rows sorted like statsTable — wins desc, p50 tiebreak,
-// sources without data sinking to the bottom (the row label IS the source
-// id: shim = this site's reader; haatz/snap = the raw gateways, tracked
-// independently). The vocabulary lives in the fid-race lib, typecheck-
-// coupled to cast-source.ts's FidRace ids.
+// sources without data sinking to the bottom. Row labels are the raw
+// FID_RACE source ids, an OPEN vocabulary (the row label IS the source
+// id): "shim" = the legacy cloud reader; "shim-potato", "shim-potato-2",
+// … = the shim fleet by var position (mirroring the cast race's member
+// ids); haatz/snap = the raw gateways, tracked independently. With no
+// snapshot yet, the historical trio renders as dashes.
+const FID_FALLBACK_SOURCES = ["shim", "haatz", "snap"];
 
 function fidTable(snapshot: FidSnapshot | null | undefined): string {
+	const names = snapshot ? Object.keys(snapshot.sources) : FID_FALLBACK_SOURCES;
 	const ordered = sort(
-		sort(FID_SOURCES, (s) => snapshot?.sources[s]?.p50Ms ?? Number.MAX_SAFE_INTEGER),
+		sort(names, (s) => snapshot?.sources[s]?.p50Ms ?? Number.MAX_SAFE_INTEGER),
 		(s) => snapshot?.sources[s]?.wins ?? -1,
 		true,
 	);
@@ -121,10 +125,13 @@ function fidTable(snapshot: FidSnapshot | null | undefined): string {
 			stats?.p95Ms != null ? `${stats.p95Ms}ms` : "—",
 		];
 	});
+	const lookups = snapshot
+		? Object.values(snapshot.legs).reduce((sum, n) => sum + n, 0)
+		: 0;
 	const asOf =
 		snapshot == null
 			? ""
-			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${snapshot.legs.haatz + snapshot.legs.snap} lookups raced · sorted by wins</li>`;
+			: `<li>From <code>${escapeHtml(snapshot.generatedAt)}</code> · last ${snapshot.window.hours} hours${snapshot.sampled ? " · sampled" : ""} · ${lookups} lookups raced · sorted by wins</li>`;
 	const asOfHtml = asOf === "" ? "" : `<ul>${asOf}</ul>`;
 	return `${renderTable(["source", "wins", "p50", "p95"], rows)}${asOfHtml}`;
 }
@@ -263,26 +270,20 @@ export function transparencyJson(
 					window: fid.window,
 					sampled: fid.sampled,
 					legs: fid.legs,
-					total:
-						fid.sources.shim.wins +
-						fid.sources.haatz.wins +
-						fid.sources.snap.wins,
-					sources: {
-						shim: fid.sources.shim,
-						haatz: fid.sources.haatz,
-						snap: fid.sources.snap,
-					},
+					total: Object.values(fid.sources).reduce(
+						(sum, s) => sum + s.wins,
+						0,
+					),
+					// Open vocabulary — every observed source passes through
+					// (fleet members included); all values are anonymous counts.
+					sources: fid.sources,
 				}
 			: {
 					status: "coming-soon",
 					window: null,
-					legs: { haatz: null, snap: null },
+					legs: {},
 					total: null,
-					sources: {
-						shim: { wins: null, p50Ms: null, p95Ms: null },
-						haatz: { wins: null, p50Ms: null, p95Ms: null },
-						snap: { wins: null, p50Ms: null, p95Ms: null },
-					},
+					sources: {},
 				},
 		clientRank: rank
 			? {

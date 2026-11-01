@@ -12,7 +12,10 @@ export type { FidSnapshot };
 
 const KEY = "fid-race";
 
-/** v/shape gate: an unrecognized snapshot is ignored (→ dashes), never half-parsed. */
+/** v/shape gate: an unrecognized snapshot is ignored (→ dashes), never half-parsed.
+ * v2 is the open-vocabulary contract (fleet members join `sources` as they
+ * appear); v1 predates per-member fleet ids and is ignored — re-run
+ * `bun run stats:fid` to publish v2 (the 168h window re-reads fine). */
 export function validateFidSnapshot(raw: unknown): FidSnapshot | null {
 	if (raw === null || typeof raw !== "object") return null;
 	const candidate = raw as {
@@ -21,16 +24,24 @@ export function validateFidSnapshot(raw: unknown): FidSnapshot | null {
 		legs?: unknown;
 	};
 	if (
-		candidate.v !== 1 ||
+		candidate.v !== 2 ||
 		!candidate.sources ||
+		typeof candidate.sources !== "object" ||
 		!candidate.legs ||
-		// All three sources must be present — a pre-per-node snapshot
-		// (shim/node keys only) predates the contract and is ignored.
-		candidate.sources.shim === undefined ||
-		candidate.sources.haatz === undefined ||
-		candidate.sources.snap === undefined
+		typeof candidate.legs !== "object"
 	) {
 		return null;
+	}
+	// Every source row must be a stats block with a numeric wins count —
+	// anything else is a half-shape, not a vocabulary we know.
+	for (const stats of Object.values(candidate.sources)) {
+		if (
+			stats === null ||
+			typeof stats !== "object" ||
+			typeof (stats as { wins?: unknown }).wins !== "number"
+		) {
+			return null;
+		}
 	}
 	return raw as FidSnapshot;
 }

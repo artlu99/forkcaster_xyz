@@ -9,6 +9,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import {
 	haatzProvider,
 	raceCast,
+	raceRoster,
 	shimProvider,
 	farcasterTvProvider,
 	type CastVars,
@@ -698,6 +699,80 @@ test("raceCast carries the fid-race outcome on the leg's timing row (shim wins)"
 	expect(race.kind).toBe("found");
 	const fid = race.timings[0]?.fid;
 	expect(fid?.winner).toBe("shim");
+});
+
+test("the identity race's shim side reports the answering fleet member (potato wins)", async () => {
+	// The threaded raw leg (raceRoster with a var) races the FLEET for the
+	// fid: the potato's /f answers, the node's proof route throws — the
+	// win is labeled with the member's own id, not a merged "shim".
+	const [threadedHaatz] = raceRoster("https://shim-potato.test");
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim-potato.test/f/zoo") {
+			return respond(url, { success: true, fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(
+		{ username: "zoo", hash: FULL_HASH },
+		{ providers: [threadedHaatz] },
+	);
+	expect(race.kind).toBe("found");
+	const fid = race.timings[0]?.fid;
+	expect(fid?.winner).toBe("shim-potato");
+});
+
+test("fleet position maps to the fid-race winner id (second member → shim-potato-2)", async () => {
+	const [threadedHaatz] = raceRoster(
+		"https://shim-potato.test,https://shim-potato-2.test",
+	);
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim-potato-2.test/f/zoo") {
+			return respond(url, { success: true, fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(
+		{ username: "zoo", hash: FULL_HASH },
+		{ providers: [threadedHaatz] },
+	);
+	expect(race.kind).toBe("found");
+	expect(race.timings[0]?.fid?.winner).toBe("shim-potato-2");
 });
 
 test("shim adapter maps success:false to an authoritative miss", async () => {

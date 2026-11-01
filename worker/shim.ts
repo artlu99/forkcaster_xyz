@@ -15,35 +15,38 @@ import { collectiveRace, staggerDelays, type RaceLeg } from "./race.ts";
 /**
  * One shim leg's terminal state — the raced wrappers below speak in these.
  * `found` is an affirmative answer any source may produce; `miss` carries
- * `fallback`, the CLOUD-shaped answer for that exact response, so the
- * wrapper replays today's per-endpoint verdict byte-for-byte when cloud is
- * the terminal leg (sparse users, ok:false timelines, null handles…);
- * `error` carries the thrown value cloud's contract propagates (outage
- * signals) plus the never-throw fallback for fail-soft endpoints.
- * (The general shape lives in race.ts — this alias keeps the shim-flavored
- * name every wrapper and call site already speaks.)
+ * `fallback`, the primary-shaped answer for that exact response, so the
+ * wrapper replays each endpoint's per-endpoint verdict byte-for-byte when
+ * the primary leg is the terminal (sparse users, ok:false timelines, null
+ * handles…); `error` carries the thrown value the primary's contract
+ * propagates (outage signals) plus the never-throw fallback for fail-soft
+ * endpoints. (The general shape lives in race.ts — this alias keeps the
+ * shim-flavored name every wrapper and call site already speaks.)
  */
 export type ShimProbe<T> = RaceLeg<T>;
 
 /**
- * Race cloud against the shim-potato fleet (`potatoBases` — the raw var
- * value, one or more comma-separated base URLs) under the caller's
- * AbortSignal: the shared collective-race machinery (race.ts) with cloud
- * as the primary leg and every potato staggering in behind it. Fleet
- * semantics — no single host is the source of truth:
+ * Race the shim fleet (`potatoBases` — the raw var value, one or more
+ * comma-separated base URLs) under the caller's AbortSignal: the shared
+ * collective-race machinery (race.ts) with one leg per var base. The var
+ * IS the fleet — cloud holds no special seat (cloud-retirement cutover):
+ * its base rides the var like any member's, first entry leads at 0ms and
+ * later members stagger in one tiny random step apart. Fleet semantics —
+ * no single host is the source of truth:
  *
  * - the FIRST affirmative (found) answer wins outright;
  * - a consulted miss (HTTP 200, index asked, no data) is a VOTE, not a
  *   verdict: not-found settles only when every leg has missed. A pending
  *   leg can still rescue a miss that already landed;
  * - errors (non-2xx/timeout — outage signals) never decide anything:
- *   they surface (cloud's, for legacy message stability) only when every
- *   leg errored;
+ *   they surface (the PRIMARY — first var entry — leg's, for message
+ *   stability) only when every leg errored;
  * - latency of a true miss = the slowest leg's miss (bounded by the
  *   caller's signal) — the deliberate price of softening the SPOF.
  *
- * Without `potatoBases` this is a pass-through — identical fetches, zero
- * overhead (which is what keeps every test and caller honest).
+ * Without `potatoBases` this is a pass-through to cloud — identical
+ * fetches, zero overhead (the legacy no-var roster; what keeps every test
+ * and caller honest).
  */
 export async function raceShimProbe<T>(
 	probe: (base: string) => Promise<ShimProbe<T>>,
@@ -51,43 +54,38 @@ export async function raceShimProbe<T>(
 ): Promise<ShimProbe<T>> {
 	const bases = fleetBases(potatoBases);
 	if (bases.length === 0) return probe(SHIM_CLOUD_BASE);
-	// The fleet LEADS: potatoes start immediately (tiny random steps between
-	// members), cloud trails one step — the fleet is primary, cloud the
-	// fallback (matching the cast race and the cloud-retirement direction).
-	// The primary index stays 0 (cloud) for fallback/error preference.
-	const fleetSteps = staggerDelays(bases.length + 1);
 	return collectiveRace({
-		legs: [SHIM_CLOUD_BASE, ...bases].map((base) => () => probe(base)),
-		delays: [...fleetSteps.slice(0, bases.length), fleetSteps[bases.length]],
+		legs: bases.map((base) => () => probe(base)),
+		delays: staggerDelays(bases.length),
 	});
 }
 
 /**
- * Parse the canary fleet list: comma-separated base URLs, trimmed,
- * trailing slashes stripped, deduped, cloud itself dropped. The
- * SHIM_POTATO_BASE var carries one base today and the comma-separated
- * fleet as the regional potatos come online.
+ * Parse the fleet list: comma-separated base URLs, trimmed, trailing
+ * slashes stripped, deduped. The SHIM_POTATO_BASE var carries the FULL
+ * shim fleet (cloud-retirement cutover) — every entry is a fleet member,
+ * cloud's own base included; var order is the stagger/primary order.
  */
 export function fleetBases(potatoBasess?: string | null): string[] {
 	const out: string[] = [];
 	for (const raw of (potatoBasess ?? "").split(",")) {
 		const base = raw.trim().replace(/\/+$/, "");
-		if (base === "" || base === SHIM_CLOUD_BASE || out.includes(base)) continue;
+		if (base === "" || out.includes(base)) continue;
 		out.push(base);
 	}
 	return out;
 }
 
-export const wcUrl = (username: string, hash: string): string =>
-	`${SHIM_CLOUD_BASE}/wc/${username}/${hash}`;
-export const hUrl = (hash: string): string => `${SHIM_CLOUD_BASE}/h/${hash}`;
-export const fUrl = (username: string): string => `${SHIM_CLOUD_BASE}/f/${username}`;
-export const uUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/u/${fid}`;
-export const userUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/user/${fid}`;
-export const castsAndRepliesUrl = (username: string, limit: number): string =>
-	`${SHIM_CLOUD_BASE}/${username}/casts-and-replies?limit=${limit}`;
-export const signedUrl = (fid: number): string => `${SHIM_CLOUD_BASE}/signed/${fid}`;
-export const refreshUrl = (): string => `${SHIM_CLOUD_BASE}/refresh`;
+/**
+ * Fleet member id: shim-potato, then shim-potato-2, -3, … — one stable id
+ * per var position, shared by the cast-race roster legs (cast-source.ts),
+ * the fid-race winner vocabulary, and the cross-fleet warm skip below.
+ * (The name is historical: "potato" once meant every non-cloud member;
+ * since the cutover it labels the fleet by position, cloud included.)
+ */
+export function fleetMemberId(index: number): string {
+	return index === 0 ? "shim-potato" : `shim-potato-${index + 1}`;
+}
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
 
@@ -224,8 +222,10 @@ export async function getCastByHash(
 /**
  * Cross-fleet warm (PLAN9): after a cast wins via one host, refresh every
  * OTHER shim-shaped host's index so the next visitor's read is warm there
- * too. The winner is warm by definition and is skipped. Fire-and-forget by
- * contract — every leg swallows its own failures; never rejects.
+ * too. The winner is warm by definition and is skipped — matched by the
+ * fleet member id its roster leg carries (fleetMemberId; the legacy
+ * no-var roster's "shim" is cloud itself). Fire-and-forget by contract —
+ * every leg swallows its own failures; never rejects.
  */
 export function warmShimIndexForCast(
 	fid: number,
@@ -240,22 +240,26 @@ export function warmShimIndexForCast(
 			signal: AbortSignal.timeout(15_000),
 		}).catch(() => undefined);
 	const fleet = fleetBases(potatoBases);
-	const legs: Promise<unknown>[] = [];
-	if (winnerProvider !== "shim") legs.push(warm(SHIM_CLOUD_BASE));
-	fleet.forEach((base, i) => {
-		const id = i === 0 ? "shim-potato" : `shim-potato-${i + 1}`;
-		if (id !== winnerProvider) legs.push(warm(base));
-	});
-	return Promise.all(legs);
+	if (fleet.length === 0) {
+		// Legacy no-var roster: cloud is the only shim-shaped host.
+		return winnerProvider === "shim"
+			? Promise.resolve()
+			: warm(SHIM_CLOUD_BASE);
+	}
+	return Promise.all(
+		fleet.map((base, index) =>
+			fleetMemberId(index) === winnerProvider ? undefined : warm(base),
+		),
+	);
 }
 
 /**
  * GET /wc/{username}/{hash} — a miss is `{"success":false}` or an empty
  * body, both HTTP 200; a non-2xx or a thrown request is an error carrying
  * the same message text the provider race has always produced. Raced
- * against the potato fleet when `potatoBases` is set — a found either way
- * wins; the terminal is always cloud's own lookup (misses stay consensus
- * votes).
+ * across the fleet when `potatoBases` is set — a found either way wins;
+ * the terminal replays the PRIMARY leg's own lookup (misses stay
+ * consensus votes).
  */
 export async function getCastByUsernameHash(
 	username: string,
@@ -280,13 +284,13 @@ export async function getCastByUsernameHash(
 }
 
 /**
- * POST /refresh {fids:[fid]} — pull that fid's recent casts into shim's
- * Postgres index, so a hash /h missed (cold — the index only holds
- * kept-warm fids) hits next time. Both indexes warm when `potatoBases` is
- * set (the potato's /h can only win if its index knows the fid too).
- * Fire-and-forget by contract: callers run it under waitUntil and never
- * await it on the response path; the generous cap only bounds the
- * background lifetime. Never throws.
+ * POST /refresh {fids:[fid]} — pull that fid's recent casts into a shim
+ * host's Postgres index, so a hash /h missed (cold — the index only holds
+ * kept-warm fids) hits next time. Every fleet member in the var warms
+ * (no var: cloud only — the legacy single-host roster). Fire-and-forget
+ * by contract: callers run it under waitUntil and never await it on the
+ * response path; the generous cap only bounds the background lifetime.
+ * Never throws.
  */
 export function warmShimHashIndex(
 	fid: number,
@@ -299,23 +303,27 @@ export function warmShimHashIndex(
 			body: JSON.stringify({ fids: [fid] }),
 			signal: AbortSignal.timeout(15_000),
 		}).catch(() => undefined);
-	const legs: Promise<unknown>[] = [warm(SHIM_CLOUD_BASE)];
-	if (potatoBases && potatoBases !== SHIM_CLOUD_BASE) legs.push(warm(potatoBases));
-	return Promise.all(legs);
+	const fleet = fleetBases(potatoBases);
+	const targets = fleet.length > 0 ? fleet : [SHIM_CLOUD_BASE];
+	return Promise.all(targets.map(warm));
 }
 
 /**
- * GET /f/{username} — username → fid. Undefined when missing or malformed.
- * Cloud non-2xx/network rejections propagate (an outage, NOT a miss —
- * retriable upstream); raced against the potato when `potatoBases` is set
- * (a potato fid rescues a slow or erroring cloud; a cloud miss still 404s).
+ * GET /f/{username} — username → fid, WITH attribution: `winnerBase` is
+ * the fleet member whose answer named the fid (undefined on a miss — no
+ * numeric fid ever won). Cloud non-2xx/network rejections propagate (an
+ * outage, NOT a miss — retriable upstream); raced across the full fleet
+ * when `potatoBases` is set (a member's fid rescues a slow or erroring
+ * primary; a fleet-wide miss still 404s).
  */
-export async function getFidByUsername(
+export async function raceFidByUsername(
 	username: string,
 	signal: AbortSignal,
 	potatoBases?: string | null,
-): Promise<number | undefined> {
-	const probe = async (base: string): Promise<ShimProbe<number>> => {
+): Promise<{ fid?: number; winnerBase?: string }> {
+	const probe = async (
+		base: string,
+	): Promise<ShimProbe<{ fid: number; base: string }>> => {
 		try {
 			const res = await fetch(`${base}/f/${username}`, { signal });
 			// A shim non-2xx is an outage signal, NOT a miss — it propagates so
@@ -334,7 +342,7 @@ export async function getFidByUsername(
 				| undefined;
 			const fid = data?.fid;
 			return typeof fid === "number"
-				? { kind: "found", value: fid }
+				? { kind: "found", value: { fid, base } }
 				: { kind: "miss", fallback: undefined };
 		} catch (error) {
 			return { kind: "error", error, fallback: undefined };
@@ -342,7 +350,22 @@ export async function getFidByUsername(
 	};
 	const result = await raceShimProbe(probe, potatoBases);
 	if (result.kind === "error") throw result.error;
-	return result.kind === "found" ? result.value : result.fallback;
+	return result.kind === "found"
+		? { fid: result.value.fid, winnerBase: result.value.base }
+		: { fid: undefined };
+}
+
+/**
+ * GET /f/{username} — username → fid. Undefined when missing or malformed.
+ * (The attribution-carrying form is raceFidByUsername — the raw-node
+ * identity race uses it to label the fid-race winner.)
+ */
+export async function getFidByUsername(
+	username: string,
+	signal: AbortSignal,
+	potatoBases?: string | null,
+): Promise<number | undefined> {
+	return (await raceFidByUsername(username, signal, potatoBases)).fid;
 }
 
 /**

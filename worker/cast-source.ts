@@ -19,11 +19,12 @@
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
 //                Its text IS canonical (Warpcast-processed).
 //
-// The shim-potato FLEET (PLAN8 canary graduated, Oct 2026): shim-shaped
-// complete legs stacked onto the race whenever SHIM_POTATO_BASE is set —
-// one base or a comma-separated regional list (see raceRoster). Originally
-// a measurement canary; now the redundancy layer cloud retires into. Two
-// properties carried over from the canary era:
+// The shim-potato FLEET (PLAN8 canary graduated, Oct 2026; cutover Nov
+// 2026): shim-shaped complete legs — one per comma-separated base in the
+// SHIM_POTATO_BASE var, which carries the FULL fleet, cloud's own base
+// included (see raceRoster; no var = the legacy cloud-led roster).
+// Originally a measurement canary; now the redundancy layer cloud retires
+// into. Two properties carried over from the canary era:
 // - a fleet member's FOUND can win like any complete provider (central
 //   hash validation still guards every win);
 // - misses are COLLECTIVE parity — no single host's consulted miss is the
@@ -42,8 +43,9 @@ import { staggerDelays } from "./race.ts";
 import {
 	SHIM_CLOUD_BASE,
 	fleetBases,
+	fleetMemberId,
 	getCastByUsernameHashFrom,
-	getFidByUsername,
+	raceFidByUsername,
 	resolvesHash,
 	type ShimCast,
 	type ShimEmbed,
@@ -61,11 +63,14 @@ export type ProviderId =
 
 /**
  * How resolveFid's two-source identity race settled on a raw-node leg —
- * which source named the fid first and how fast: shim, or the leg's own
- * gateway (winner id = the leg id). Public reporting: /transparency's
- * "Author id races" item. No cast identifiers.
+ * which source named the fid first and how fast: the leg's own gateway
+ * (winner id = the leg id), or the shim-side fleet member that answered
+ * ("shim" = the cloud reader; "shim-potato", "shim-potato-2", … = fleet
+ * members by var position, mirroring the cast race's member ids —
+ * fleetMemberId). Public reporting: /transparency's "Author id races"
+ * item. No cast identifiers.
  */
-export type FidRace = { winner: "shim" | "haatz" | "snap"; ms: number };
+export type FidRace = { winner: Exclude<ProviderId, "farcaster-tv">; ms: number };
 
 /** What a request can supply before any cast data exists. */
 export interface CastVars {
@@ -231,42 +236,38 @@ export const shimPotatoProvider = (base: string): CastProvider =>
 	shimProviderFor("shim-potato", base);
 
 /**
- * Fleet member id: shim-potato, then shim-potato-2, -3, … — one row per
- * regional potato once it joins the var. (The stats lib's static ROSTER
- * gains matching rows at cutover; unknown ids tally to zero until then.)
+ * The HTML race roster. Cutover shape (cloud retirement): the raw nodes
+ * and farcaster.tv race immediately, and the WHOLE shim fleet — one
+ * canonical-text leg per var base, cloud's own base riding the var like
+ * any member — staggers in behind (the raceCast stagger keys off the
+ * member ids). No var: the legacy static roster, cloud-led.
  */
-function potatoId(index: number): ProviderId {
-	return index === 0 ? "shim-potato" : `shim-potato-${index + 1}`;
-}
-
-/**
- * The HTML race roster: the static four, plus the potato fleet when the
- * canary is switched on (SHIM_POTATO_BASE — one base or a comma-separated
- * list). Undefined = raceCast's default roster.
- */
-export function raceRoster(potatoBases: string | undefined): CastProvider[] | undefined {
+export function raceRoster(potatoBases?: string | null): CastProvider[] {
 	const bases = fleetBases(potatoBases);
-	if (bases.length === 0) return undefined;
+	if (bases.length === 0) return PROVIDERS;
 	return [
-		...PROVIDERS,
-		...bases.map((base, index) => shimProviderFor(potatoId(index), base)),
-	];
-}
-
-/**
- * The strict JSON twin's roster: canonical shim plus the full potato
- * fleet — complete legs only (farcaster.tv's quote-blindness has no seat
- * here), so the twin stays complete. Misses are collective parity, the
- * same softened-SPOF semantics as every other surface (Oct 2026: the
- * twin's shim-only exception ended when cloud stopped being the verdict).
- */
-export function jsonRoster(potatoBases: string | undefined): CastProvider[] {
-	return [
-		shimProvider,
-		...fleetBases(potatoBases).map((base, index) =>
-			shimProviderFor(potatoId(index), base),
+		rawNodeProvider("haatz", HAATZ_BASE, potatoBases),
+		rawNodeProvider("snap", SNAP_BASE, potatoBases),
+		farcasterTvProvider,
+		...bases.map((base, index) =>
+			shimProviderFor(fleetMemberId(index) as ProviderId, base),
 		),
 	];
+}
+
+/**
+ * The strict JSON twin's roster: complete canonical-text legs only — one
+ * per fleet member (farcaster.tv's quote-blindness has no seat here), so
+ * the twin stays complete. Misses are collective parity, the same
+ * softened-SPOF semantics as every other surface. No var: the legacy
+ * cloud-only leg.
+ */
+export function jsonRoster(potatoBases?: string | null): CastProvider[] {
+	const bases = fleetBases(potatoBases);
+	if (bases.length === 0) return [shimProvider];
+	return bases.map((base, index) =>
+		shimProviderFor(fleetMemberId(index) as ProviderId, base),
+	);
 }
 
 // --- farcaster.tv (quote-blind partial, any hash form via prefix match) ---
@@ -496,20 +497,24 @@ function mapRawCast(
 
 /**
  * username → fid for the raw-node legs, RACED shim-vs-node (the
- * rpc-racer pattern at identity scale): both sources fire under the
- * leg's abort window, the first numeric answer wins, the loser is
+ * rpc-racer pattern at identity scale): the shim fleet (raced across
+ * itself when `potatoBases` is set) and the node's own gateway fire under
+ * the leg's abort window, the first numeric answer wins, the loser is
  * aborted, and a miss or failure from one source never wins while the
  * other is still pending. Neither source is on the critical path — a
- * hanging shim costs nothing when the node answers first, and vice
- * versa (both observed live Oct 2026). A stale fid for a transferred
- * username can never win — the central hash validation
- * rejects any cast that doesn't resolve the requested hash.
+ * hanging shim costs nothing when the node answers first, and vice versa
+ * (both observed live Oct 2026). A stale fid for a transferred username
+ * can never win — the central hash validation rejects any cast that
+ * doesn't resolve the requested hash. The shim-side winner is labeled
+ * with its fleet member id (fidSourceFor) — per-host attribution on
+ * /transparency, never a merged bucket.
  */
 async function resolveFid(
 	id: "haatz" | "snap",
 	base: string,
 	username: string,
 	signal: AbortSignal,
+	potatoBases?: string | null,
 ): Promise<{ fid: number | undefined; race?: FidRace }> {
 	const startedAt = Date.now();
 	const shim = new AbortController();
@@ -523,7 +528,7 @@ async function resolveFid(
 	if (signal.aborted) forward();
 	else signal.addEventListener("abort", forward, { once: true });
 	const detach = () => signal.removeEventListener("abort", forward);
-	const fromShim = getFidByUsername(username, shim.signal);
+	const fromShim = raceFidByUsername(username, shim.signal, potatoBases);
 	const fromNode = (async () => {
 		const { status, data } = await getJsonWithStatus(
 			`${base}/v1/userNameProofByName?name=${encodeURIComponent(username)}`,
@@ -555,10 +560,11 @@ async function resolveFid(
 		};
 		// Rejections (shim outage, node 5xx/abort) settle as undefined —
 		// only a numeric fid wins; the last source standing decides. The
-		// node's win is labeled with its own id (per-node tracking on
-		// /transparency).
-		fromShim.then(onSettle("shim", node), () =>
-			onSettle("shim", node)(undefined),
+		// shim-side win carries the answering member's id; the node's win
+		// its own (per-host tracking on /transparency).
+		fromShim.then(
+			(r) => onSettle(fidSourceFor(r.winnerBase, potatoBases), node)(r.fid),
+			() => onSettle("shim", node)(undefined),
 		);
 		fromNode.then(onSettle(id, shim), () =>
 			onSettle(id, shim)(undefined),
@@ -566,7 +572,27 @@ async function resolveFid(
 	});
 }
 
-function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
+/**
+ * Map the shim-side raceFidByUsername winner base onto its reporting id:
+ * the cloud reader keeps the historical "shim"; every var member reports
+ * its fleet position ("shim-potato", "shim-potato-2", …) — the same
+ * vocabulary the cast-race roster legs carry, so both telemetry surfaces
+ * agree on one name per host.
+ */
+function fidSourceFor(
+	winnerBase: string | undefined,
+	potatoBases?: string | null,
+): FidRace["winner"] {
+	if (winnerBase === undefined || winnerBase === SHIM_CLOUD_BASE) return "shim";
+	const index = fleetBases(potatoBases).indexOf(winnerBase);
+	return fleetMemberId(index < 0 ? 0 : index) as FidRace["winner"];
+}
+
+function rawNodeProvider(
+	id: "haatz" | "snap",
+	base: string,
+	potatoBases?: string | null,
+): CastProvider {
 	return {
 		id,
 		complete: true,
@@ -584,6 +610,7 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 					base,
 					vars.username,
 					signal,
+					potatoBases,
 				);
 				if (fid === undefined) {
 					return {
@@ -640,15 +667,13 @@ function rawNodeProvider(id: "haatz" | "snap", base: string): CastProvider {
 	};
 }
 
-export const haatzProvider = rawNodeProvider(
-	"haatz",
-	"https://haatz.quilibrium.com",
-);
+const HAATZ_BASE = "https://haatz.quilibrium.com";
 // The official Snapchain gateway answers on :3381 only (443 hangs).
-export const snapProvider = rawNodeProvider(
-	"snap",
-	"https://snap.farcaster.xyz:3381",
-);
+const SNAP_BASE = "https://snap.farcaster.xyz:3381";
+
+/** Legacy no-var roster legs: the identity race's shim side is cloud-only. */
+export const haatzProvider = rawNodeProvider("haatz", HAATZ_BASE);
+export const snapProvider = rawNodeProvider("snap", SNAP_BASE);
 
 export const PROVIDERS: CastProvider[] = [
 	shimProvider,
@@ -705,9 +730,9 @@ export async function raceCast(
 
 	const controllers = new Map<ProviderId, AbortController>();
 	const timings: ProviderTiming[] = [];
-	// Fleet LEADS ("lean on shim-potato"): the potato fleet starts
-	// immediately (tiny random steps between members) and shim trails the
-	// whole fleet by a step — the fleet is primary, cloud the fallback.
+	// Fleet LEADS ("lean on shim-potato"): the fleet members start
+	// immediately (tiny random steps between them) and a static "shim"
+	// leg — legacy no-var roster only — trails the whole fleet by a step.
 	// haatz/snap/farcaster-tv are distinct sources, not replicas, so they
 	// race immediately. A fast winner clears the timers of starts that
 	// never fired — the straggler reads are saved.

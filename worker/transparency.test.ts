@@ -402,7 +402,7 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 // --- fid race ("Author id races" item) ---
 
 const FID: import("./fid-race-store.ts").FidSnapshot = {
-	v: 1,
+	v: 2,
 	generatedAt: "2026-10-25T00:00:00.000Z",
 	window: { hours: 168 },
 	sampled: false,
@@ -410,21 +410,26 @@ const FID: import("./fid-race-store.ts").FidSnapshot = {
 		shim: { wins: 12, p50Ms: 8, p95Ms: 30 },
 		haatz: { wins: 9, p50Ms: 11, p95Ms: 40 },
 		snap: { wins: 31, p50Ms: 5, p95Ms: 22 },
+		"shim-potato": { wins: 7, p50Ms: 6, p95Ms: 25 },
 	},
-	legs: { haatz: 21, snap: 31 },
+	legs: { haatz: 21, snap: 37 },
 };
 
-test("fid-race table: per-source rows fill the item, absent snapshot keeps dashes", () => {
+test("fid-race table: observed sources fill the item (open vocabulary), absent snapshot keeps dashes", () => {
 	const filled = renderTransparencyHtml({
 		snapshot: SNAPSHOT,
 		rank: RANK,
 		fid: FID,
 	});
 	expect(filled).toContain("Author id races");
+	// Wins desc: snap, shim, haatz, shim-potato.
+	expect(filled).toContain("<td>snap</td><td>31</td><td>5ms</td><td>22ms</td>");
 	expect(filled).toContain("<td>shim</td><td>12</td><td>8ms</td><td>30ms</td>");
 	expect(filled).toContain("<td>haatz</td><td>9</td><td>11ms</td><td>40ms</td>");
-	expect(filled).toContain("<td>snap</td><td>31</td><td>5ms</td><td>22ms</td>");
-	expect(filled).toContain("52 lookups raced");
+	expect(filled).toContain(
+		"<td>shim-potato</td><td>7</td><td>6ms</td><td>25ms</td>",
+	);
+	expect(filled).toContain("58 lookups raced");
 	expect(filled).toContain("last 168 hours");
 
 	const empty = renderTransparencyHtml({ snapshot: SNAPSHOT, rank: RANK });
@@ -435,32 +440,33 @@ test("fid-race table: per-source rows fill the item, absent snapshot keeps dashe
 	expect(empty).not.toContain("lookups raced");
 });
 
-test("JSON twin: fidRace live with per-node totals; coming-soon with nulls", () => {
+test("JSON twin: fidRace live with the open source record; coming-soon with nulls", () => {
 	const live = transparencyJson(SNAPSHOT, RANK, FID) as {
 		fidRace: {
 			status: string;
 			total: number | null;
-			sources: { haatz: { wins: number | null }; snap: { wins: number | null } };
+			sources: Record<string, { wins: number | null }>;
 		};
 	};
 	expect(live.fidRace.status).toBe("live");
-	expect(live.fidRace.total).toBe(52);
+	// The open record passes through — fleet members included.
+	expect(live.fidRace.total).toBe(59);
 	expect(live.fidRace.sources.haatz.wins).toBe(9);
 	expect(live.fidRace.sources.snap.wins).toBe(31);
+	expect(live.fidRace.sources["shim-potato"].wins).toBe(7);
 
 	const dry = transparencyJson(SNAPSHOT, RANK) as {
 		fidRace: {
 			status: string;
 			window: null;
 			total: null;
-			sources: { shim: { wins: number | null }; snap: { wins: number | null } };
+			sources: Record<string, never>;
 		};
 	};
 	expect(dry.fidRace.status).toBe("coming-soon");
 	expect(dry.fidRace.window).toBeNull();
 	expect(dry.fidRace.total).toBeNull();
-	expect(dry.fidRace.sources.shim.wins).toBeNull();
-	expect(dry.fidRace.sources.snap.wins).toBeNull();
+	expect(dry.fidRace.sources).toEqual({});
 });
 
 test("JSON twin: the tracking counters declare the fid-race datapoint", () => {

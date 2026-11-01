@@ -63,22 +63,31 @@ const found = (id: ProviderId): ProviderResult => ({
 });
 
 describe("raceRoster", () => {
-	test("no host → undefined (raceCast's default roster)", () => {
-		expect(raceRoster(undefined)).toBeUndefined();
-		expect(raceRoster("")).toBeUndefined();
+	test("no var → the legacy static roster, cloud-led", () => {
+		expect(raceRoster(undefined).map((p) => p.id)).toEqual([
+			"shim",
+			"haatz",
+			"snap",
+			"farcaster-tv",
+		]);
+		expect(raceRoster("").map((p) => p.id)).toEqual([
+			"shim",
+			"haatz",
+			"snap",
+			"farcaster-tv",
+		]);
 	});
 
-	test("one host → default four plus a shim-potato tail", () => {
+	test("one host → the raw nodes, farcaster-tv, then the fleet tail", () => {
 		const roster = raceRoster("https://shim-potato.test");
-		expect(roster?.map((p) => p.id)).toEqual([
-			"shim",
+		expect(roster.map((p) => p.id)).toEqual([
 			"haatz",
 			"snap",
 			"farcaster-tv",
 			"shim-potato",
 		]);
 		// Full fleet membership: the leg's misses are parity votes.
-		const shimPotato = roster?.at(-1);
+		const shimPotato = roster.at(-1);
 		expect(shimPotato?.missAuthoritative).toBe(true);
 		expect(shimProvider.missAuthoritative).toBe(true);
 	});
@@ -87,8 +96,7 @@ describe("raceRoster", () => {
 		const roster = raceRoster(
 			"https://shim-potato.test, https://shim-potato-2.test ,https://shim-potato.test",
 		);
-		expect(roster?.map((p) => p.id)).toEqual([
-			"shim",
+		expect(roster.map((p) => p.id)).toEqual([
 			"haatz",
 			"snap",
 			"farcaster-tv",
@@ -96,8 +104,23 @@ describe("raceRoster", () => {
 			"shim-potato-2",
 		]);
 		// The duplicate base was dropped, not mapped twice.
-		expect(roster?.at(-1)?.canServe).toBeDefined();
-		expect(raceRoster("https://shim.artlu.xyz")).toBeUndefined();
+		expect(roster.at(-1)?.canServe).toBeDefined();
+	});
+
+	test("cloud's base rides the var like any member (cutover)", () => {
+		const roster = raceRoster("https://shim-potato.test,https://shim.artlu.xyz");
+		expect(roster.map((p) => p.id)).toEqual([
+			"haatz",
+			"snap",
+			"farcaster-tv",
+			"shim-potato",
+			"shim-potato-2",
+		]);
+		// The threaded raw legs carry the fleet race into the identity
+		// stage; roster assembly stays provider-shape-identical.
+		expect(raceRoster("https://shim.artlu.xyz").at(-1)?.id).toBe(
+			"shim-potato",
+		);
 	});
 });
 

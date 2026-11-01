@@ -11,7 +11,7 @@ import {
 } from "./fid-race-store.ts";
 
 const SNAPSHOT = {
-	v: 1,
+	v: 2,
 	generatedAt: "2026-10-25T00:00:00.000Z",
 	window: { hours: 168 },
 	sampled: false,
@@ -19,27 +19,27 @@ const SNAPSHOT = {
 		shim: { wins: 12, p50Ms: 8, p95Ms: 30 },
 		haatz: { wins: 9, p50Ms: 11, p95Ms: 40 },
 		snap: { wins: 31, p50Ms: 5, p95Ms: 22 },
+		"shim-potato": { wins: 7, p50Ms: 6, p95Ms: 25 },
 	},
-	legs: { haatz: 30, snap: 22 },
+	legs: { haatz: 30, snap: 29 },
 };
 
 describe("validateFidSnapshot", () => {
-	test("accepts the v:1 snapshot, rejects garbage and half-shapes", () => {
+	test("accepts the v:2 open-vocabulary snapshot, rejects garbage and half-shapes", () => {
 		expect(validateFidSnapshot(SNAPSHOT)).not.toBeNull();
 		expect(validateFidSnapshot(null)).toBeNull();
 		expect(validateFidSnapshot("nope")).toBeNull();
-		expect(validateFidSnapshot({ v: 2, sources: {}, legs: {} })).toBeNull();
+		// v:1 predates the per-member fleet ids — ignored, never half-parsed.
+		expect(
+			validateFidSnapshot({ ...SNAPSHOT, v: 1, sources: { shim: SNAPSHOT.sources.shim, haatz: SNAPSHOT.sources.haatz, snap: SNAPSHOT.sources.snap } }),
+		).toBeNull();
 		// Recognizable v but missing the sources/legs halves → ignored.
-		expect(validateFidSnapshot({ v: 1 })).toBeNull();
-		// The pre-per-node shape (shim/node keys only) predates the
-		// contract — ignored rather than half-parsed.
+		expect(validateFidSnapshot({ v: 2 })).toBeNull();
+		// A source row without a numeric wins count is a half-shape.
 		expect(
 			validateFidSnapshot({
 				...SNAPSHOT,
-				sources: {
-					shim: SNAPSHOT.sources.shim,
-					node: { wins: 1, p50Ms: 1, p95Ms: 1 },
-				},
+				sources: { ...SNAPSHOT.sources, junk: { p50Ms: 1 } },
 			}),
 		).toBeNull();
 	});

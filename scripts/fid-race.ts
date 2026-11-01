@@ -20,9 +20,8 @@ import {
 	wantsDry,
 } from "./ae-sql.ts";
 import {
-	buildFidLatencyQuery,
+	buildFidLegsQuery,
 	buildFidTalliesQuery,
-	FID_SOURCES,
 	type FidSnapshot,
 	type FidSourceStats,
 } from "./fid-race-lib.ts";
@@ -37,45 +36,48 @@ const DRY = wantsDry();
 
 // --- aggregate ---
 
-const emptyStats = (): FidSourceStats => ({
-	wins: 0,
-	p50Ms: null,
-	p95Ms: null,
-});
+/** One grouped tallies row → the source's stats block. */
+function sourceStats(row: Record<string, unknown> | undefined): FidSourceStats {
+	const wins = num(row?.wins);
+	return {
+		wins,
+		p50Ms: wins > 0 ? Math.round(num(row?.p50)) : null,
+		p95Ms: wins > 0 ? Math.round(num(row?.p95)) : null,
+	};
+}
 
 async function aggregate(hours: number): Promise<FidSnapshot> {
-	const [tallyRow] = await sql(buildFidTalliesQuery(hours));
-	const maxSampleInterval = num(tallyRow?.maxSampleInterval);
-
-	const sources = await Promise.all(
-		FID_SOURCES.map(async (source) => {
-			const [latencyRow] = await sql(buildFidLatencyQuery(source, hours));
-			const wins = num(tallyRow?.[`${source}_wins`]);
-			const samples = num(latencyRow?.samples);
-			const stats: FidSourceStats = {
-				wins,
-				p50Ms: samples > 0 ? Math.round(num(latencyRow?.p50)) : null,
-				p95Ms: samples > 0 ? Math.round(num(latencyRow?.p95)) : null,
-			};
-			return [source, stats] as const;
-		}),
-	);
-	const bySource = new Map(sources);
+	const [tallyRows, legRows] = await Promise.all([
+		sql(buildFidTalliesQuery(hours)),
+		sql(buildFidLegsQuery(hours)),
+	]);
+	// Open vocabulary: every observed index1 id gets a row — cloud-era
+	// "shim", fleet members ("shim-potato", -2, …), and the raw gateways.
+	// Key-sorted so the published snapshot is byte-stable across runs.
+	const sources: Record<string, FidSourceStats> = {};
+	for (const row of tallyRows ?? []) {
+		const source = String(row?.source ?? "");
+		if (source !== "") sources[source] = sourceStats(row);
+	}
+	const legs: Record<string, number> = {};
+	for (const row of legRows ?? []) {
+		const leg = String(row?.leg ?? "");
+		if (leg !== "") legs[leg] = num(row?.settled);
+	}
+	const sortKeys = (record: Record<string, unknown>) =>
+		Object.fromEntries(Object.entries(record).sort(([a], [b]) => (a < b ? -1 : 1)));
 
 	return {
-		v: 1,
+		v: 2,
 		generatedAt: new Date().toISOString(),
 		window: { hours },
-		sampled: maxSampleInterval > 1,
-		sources: {
-			shim: bySource.get("shim") ?? emptyStats(),
-			haatz: bySource.get("haatz") ?? emptyStats(),
-			snap: bySource.get("snap") ?? emptyStats(),
-		},
-		legs: {
-			haatz: num(tallyRow?.leg_haatz),
-			snap: num(tallyRow?.leg_snap),
-		},
+		sampled:
+			(tallyRows ?? []).reduce(
+				(max, row) => Math.max(max, num(row?.maxSampleInterval)),
+				0,
+			) > 1,
+		sources: sortKeys(sources) as Record<string, FidSourceStats>,
+		legs: sortKeys(legs) as Record<string, number>,
 	};
 }
 
