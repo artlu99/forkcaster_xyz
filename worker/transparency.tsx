@@ -16,11 +16,12 @@ import { escapeHtml, shell } from "./shell.tsx";
 // Public provider roster — names included on purpose (transparency over
 // infra obscurity). Keyed by ProviderId so a roster change in
 // cast-source.ts fails the typecheck here instead of drifting silently.
+// Cutover: cloud races as fleet member 2 ("shim-potato-2"); the "shim" id
+// is pre-cutover legacy and decays to zero through the stats window.
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
-	shim: "shim.artlu.xyz",
-	// PLAN8 canary leg — live at this host; races only when
-	// SHIM_POTATO_BASE is set, and its misses never 404 (cast-source.ts).
-	"shim-potato": "shim-potato.artlu.xyz (canary)",
+	shim: "shim.artlu.xyz (pre-cutover race id)",
+	"shim-potato": "shim-potato.artlu.xyz (fleet lead)",
+	"shim-potato-2": "shim.artlu.xyz (cloud, fleet member 2)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",
 	snap: "snap.farcaster.xyz:3381 (text-blind)",

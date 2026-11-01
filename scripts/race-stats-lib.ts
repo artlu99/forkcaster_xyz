@@ -6,12 +6,16 @@
 // toUInt32/toUInt8 conversions, position(needle IN haystack) syntax,
 // countIf/sumIf/quantileExactWeighted with _sample_interval weights.
 
-/** Static roster — keep in sync with worker/cast-source.ts (near-static by design). */
+/** Static roster — keep in sync with worker/cast-source.ts (near-static by design).
+ * Cutover (Nov 2026): the raced roster has no static "shim" leg — cloud races
+ * as a fleet member by var position ("shim-potato" leads, "shim-potato-2" =
+ * the cloud reader today). The "shim" row stays for now so its pre-cutover
+ * datapoints decay visibly through the 168h window; trim it once they've
+ * aged out. Add -3/-4 rows as regional members join the var. */
 export const ROSTER = [
 	{ id: "shim", role: "complete" },
-	// PLAN8 canary leg: zero row until SHIM_POTATO_BASE goes live (no shim-potato
-	// rows in RACE_STATS before that). Trimmed again at cutover.
 	{ id: "shim-potato", role: "complete" },
+	{ id: "shim-potato-2", role: "complete" },
 	{ id: "haatz", role: "complete" },
 	{ id: "snap", role: "complete" },
 	{ id: "farcaster-tv", role: "partial" },

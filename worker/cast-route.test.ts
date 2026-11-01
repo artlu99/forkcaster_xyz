@@ -789,12 +789,17 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	// Five: the four racers plus the shim-potato canary row (dashes until the
-	// SHIM_POTATO_BASE var goes live — PLAN8).
-	expect(json.data.providers).toHaveLength(5);
-	expect(json.data.providers.map((p: { id: string }) => p.id)).toContain(
+	// Six: the raw nodes, farcaster.tv, the fleet lead, cloud's fleet seat
+	// (shim-potato-2), and the decaying pre-cutover "shim" id.
+	expect(json.data.providers).toHaveLength(6);
+	expect(json.data.providers.map((p: { id: string }) => p.id)).toEqual([
+		"shim",
 		"shim-potato",
-	);
+		"shim-potato-2",
+		"farcaster-tv",
+		"haatz",
+		"snap",
+	]);
 	expect(json.racingStats.status).toBe("coming-soon");
 	// counters became one entry per counter when click-through tracking
 	// shipped (declared shape change) — both entries keep the negative list.
