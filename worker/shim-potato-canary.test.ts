@@ -1,6 +1,6 @@
 /**
  * Shim-potato FLEET — the regional legs' contract (SPOF softened Oct 2026,
- * successor to the PLAN8 canary guards):
+ * successor to the canary-era guards):
  *  - roster assembly: one provider per comma-separated base, ids
  *    shim-potato / shim-potato-2 / …;
  *  - a fleet member's FOUND wins like any complete provider;

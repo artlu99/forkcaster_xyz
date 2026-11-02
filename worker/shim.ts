@@ -220,7 +220,7 @@ export async function getCastByHash(
 }
 
 /**
- * Cross-fleet warm (PLAN9): after a cast wins via one host, refresh every
+ * Cross-fleet warm: after a cast wins via one host, refresh every
  * OTHER shim-shaped host's index so the next visitor's read is warm there
  * too. The winner is warm by definition and is skipped — matched by the
  * fleet member id its roster leg carries (fleetMemberId; the legacy

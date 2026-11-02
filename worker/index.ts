@@ -329,7 +329,7 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
-	// Cross-fleet warm (PLAN9): the winning host is warm by definition —
+	// Cross-fleet warm: the winning host is warm by definition —
 	// refresh every OTHER shim-shaped host's index so the next visitor's
 	// read is warm there too. Fills only (hits never reach here);
 	// non-blocking, best-effort — same guard as the telemetry above.

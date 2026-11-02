@@ -19,10 +19,11 @@
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
 //                Its text IS canonical (Warpcast-processed).
 //
-// The shim-potato FLEET (PLAN8 canary graduated, Oct 2026; cutover Nov
-// 2026): shim-shaped complete legs — one per comma-separated base in the
-// SHIM_POTATO_BASE var, which carries the FULL fleet, cloud's own base
-// included (see raceRoster; no var = the legacy cloud-led roster).
+// The shim-potato FLEET (measurement canary graduated Oct 2026; fleet
+// cutover Nov 2026): shim-shaped complete legs — one per
+// comma-separated base in the SHIM_POTATO_BASE var, which carries the
+// FULL fleet, cloud's own base included (see raceRoster; no var = the
+// legacy cloud-led roster).
 // Originally a measurement canary; now the redundancy layer cloud retires
 // into. Two properties carried over from the canary era:
 // - a fleet member's FOUND can win like any complete provider (central
