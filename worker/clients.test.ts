@@ -752,7 +752,12 @@ describe("kind targets", () => {
 			web: "https://quilcast.com/u/{username}",
 			pointer: "fine",
 		});
-		expect(targetFor(quilcast, "channel")).toBeUndefined();
+		// Channel — VERIFIED (Nov 2026, registry comment has the trail):
+		// /channel/{id}, desktop scope per the standing assignment.
+		expect(targetFor(quilcast, "channel")).toEqual({
+			web: "https://quilcast.com/channel/{channelId}",
+			pointer: "fine",
+		});
 
 		const vibeshift = findClient("vibeshift") as ClientDefinition;
 		// Owner-provided profile view (the Firefly merged-surface pattern:
@@ -879,6 +884,7 @@ describe("kind targets", () => {
 			"farcaster",
 			"quorum",
 			"firefly",
+			"quilcast",
 			"vibeshift",
 			"opencaster",
 			"terminus",
@@ -888,6 +894,7 @@ describe("kind targets", () => {
 			"farcaster",
 			"quorum",
 			"firefly",
+			"quilcast",
 			"vibeshift",
 			"opencaster",
 			"terminus",

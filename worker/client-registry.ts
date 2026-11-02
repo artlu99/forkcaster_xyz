@@ -347,7 +347,7 @@ export const CLIENTS: ClientDefinition[] = [
 		// Quilcast" with the bio as description) and live-checked
 		// (quilcast.com/u/decent-artlu serves exactly that SSR meta for the
 		// right profile). fine-only: the fork's assignment is Quilcast
-		// DESKTOP / Quorum MOBILE. Channel: unknown.
+		// DESKTOP / Quorum MOBILE.
 		profile: {
 			web: "https://quilcast.com/u/{username}",
 			pointer: "fine",
@@ -366,6 +366,25 @@ export const CLIENTS: ClientDefinition[] = [
 		// bio. Same template as the profile target, fine-only.
 		feed: {
 			web: "https://quilcast.com/u/{username}",
+			pointer: "fine",
+		},
+		// Channel — VERIFIED (Nov 2026, owner provided the URL):
+		// /channel/{id} — SOURCE-VERIFIED against the open-source server
+		// (backmeupplz/quilcast server/index.mjs:
+		// /^\/channel\/([a-z0-9-]{1,64})$/ → the channel directory
+		// (channels.mjs) → SSR page titled "{name} (/{id}) on Farcaster ·
+		// Quilcast"; src/app.tsx's Channel screen renders farcaster.xyz's
+		// details plus the cast feed under the channel's parent URL,
+		// newest first, via /v2/farcaster/feed/parent_urls). LIVE:
+		// quilcast.com/channel/base SSRs "Base (/base) on Farcaster ·
+		// Quilcast" with the channel's real description, self-canonical
+		// og:url; an unknown id returns the generic app shell (server
+		// `if (!c) return app()` — no wrong-channel render). Charset is
+		// lowercase [a-z0-9-] — Farcaster channel ids are lowercase.
+		// fine-only, per the standing Quilcast DESKTOP / Quorum MOBILE
+		// assignment. Web-only (no scheme evidence).
+		channel: {
+			web: "https://quilcast.com/channel/{channelId}",
 			pointer: "fine",
 		},
 	},

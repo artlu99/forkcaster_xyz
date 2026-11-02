@@ -322,9 +322,10 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>quorum</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
-	// quilcast: cast + profile + feed (the merged /u/ surface).
+	// quilcast: every kind — cast/profile/feed on the merged /u/ surface,
+	// channel /channel/{id} (Nov 2026); fine-only beyond the cast.
 	expect(html).toContain(
-		"<td>quilcast</td><td>✓</td><td>✓</td><td>✓</td><td>—</td>",
+		"<td>quilcast</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
 	// firefly: every kind — feed = the merged profile surface (Oct 2026).
 	expect(html).toContain(
