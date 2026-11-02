@@ -420,6 +420,22 @@ export const CLIENTS: ClientDefinition[] = [
 		feed: {
 			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
 		},
+		// Channel — VERIFIED (Nov 2026, owner surfaced the URL):
+		// ?mode=channel&view=feed&farcasterChannel={id} is first-class in
+		// their code — the SSR fc:frame miniapp manifest embeds the exact
+		// URL as its launch_frame target, og:url echoes it back, and the
+		// root page's SSR searchParams parse all three keys
+		// (mode/view/farcasterChannel). Live-checked logged-out through a
+		// JS-rendering reader: farcasterChannel=degen renders the DEGEN
+		// channel feed, =base a different feed, and an unknown id renders
+		// app chrome with NO cast feed — the param is load-bearing. The
+		// /share-image endpoint renders the identical default card for
+		// every id (no channel-specific art, unlike the profile view's
+		// distinct PNG). Web-only (no scheme evidence); needs only
+		// {channelId} — no fid gate on channel routes.
+		channel: {
+			web: "https://vibeshift.onchain.cooking/?mode=channel&view=feed&farcasterChannel={channelId}",
+		},
 	},
 	// Linkcast is a links-only view of Farcaster: "Farcaster, but only the
 	// links… a live feed of every cast that shares a link" (ghostlinkz.eth's

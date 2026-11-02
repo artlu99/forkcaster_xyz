@@ -764,7 +764,12 @@ describe("kind targets", () => {
 		expect(targetFor(vibeshift, "feed")).toEqual({
 			web: "https://vibeshift.onchain.cooking/?view=profile&profileFid={fid}&profileTab=casts",
 		});
-		expect(targetFor(vibeshift, "channel")).toBeUndefined();
+		// Channel — VERIFIED (Nov 2026, registry comment has the trail):
+		// ?mode=channel&view=feed&farcasterChannel={id}; needs only
+		// {channelId} — no fid gate on channel routes.
+		expect(targetFor(vibeshift, "channel")).toEqual({
+			web: "https://vibeshift.onchain.cooking/?mode=channel&view=feed&farcasterChannel={channelId}",
+		});
 
 		const opencaster = findClient("opencaster") as ClientDefinition;
 		// Source + live verified (Oct 2026, registry comment has the
@@ -868,12 +873,13 @@ describe("kind targets", () => {
 		).toContain('class="pill client-pill"');
 	});
 
-	test("clientsForRoute: channel kind — registry order matches the trio, unknown signed fails open", () => {
+	test("clientsForRoute: channel kind — registry order matches the roster, unknown signed fails open", () => {
 		const vars: TemplateVars = { channelId: "farcaster" };
 		expect(clientsForRoute("channel", vars).map((c) => c.id)).toEqual([
 			"farcaster",
 			"quorum",
 			"firefly",
+			"vibeshift",
 			"opencaster",
 			"terminus",
 		]);
@@ -882,6 +888,7 @@ describe("kind targets", () => {
 			"farcaster",
 			"quorum",
 			"firefly",
+			"vibeshift",
 			"opencaster",
 			"terminus",
 		]);

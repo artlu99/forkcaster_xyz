@@ -96,8 +96,8 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 	expect(body).toContain("Created Aug 2, 2023");
 	expect(body).toContain("lead fid 1");
 	// Way out: the hand-verified roster — desktop sees Farcaster + Firefly
-	// + Opencaster (web-only), phones additionally see Quorum (coarse-
-	// only; its web build has no channel page). The channel's
+	// + Vibeshift + Opencaster (web-only), phones additionally see Quorum
+	// (coarse-only; its web build has no channel page). The channel's
 	// externalLink is empty ⇒ no external-link pill.
 	expect(body).toContain(
 		`href="https://farcaster.xyz/~/channel/${CHANNEL_ID}" data-scheme="farcaster://~/channel/${CHANNEL_ID}" data-intent="intent://~/channel/${CHANNEL_ID}#Intent;scheme=farcaster;package=com.farcaster.mobile;S.browser_fallback_url=https%3A%2F%2Ffarcaster.xyz%2F~%2Fchannel%2Ffarcaster;end">Farcaster</a>`,
@@ -110,15 +110,23 @@ test("channel page renders the identity card from the Warpcast API entity", asyn
 	);
 	expect(body).toContain("package=com.quilibrium.quorummobile");
 	expect(body).toContain('href="https://opencaster.org/channel/farcaster"');
-	// Row order (owner call): Farcaster, Quorum, Firefly.
+	// Vibeshift — VERIFIED Nov 2026 (registry comment): the channel
+	// surface is query-param shaped; web-only, so no data-scheme/intent.
+	expect(body).toContain(
+		`<a class="pill" href="https://vibeshift.onchain.cooking/?mode=channel&amp;view=feed&amp;farcasterChannel=${CHANNEL_ID}">Vibeshift</a>`,
+	);
+	// Row order (registry order): Farcaster, Quorum, Firefly, Vibeshift,
+	// Opencaster.
 	const iFc = body.indexOf(">Farcaster</a>");
 	const iQr = body.indexOf(">Quorum</a>");
 	const iFf = body.indexOf(">Firefly</a>");
+	const iVs = body.indexOf(">Vibeshift</a>");
 	const iOc = body.indexOf(">Opencaster</a>");
 	expect(iFc).toBeGreaterThan(-1);
 	expect(iQr).toBeGreaterThan(iFc);
 	expect(iFf).toBeGreaterThan(iQr);
-	expect(iOc).toBeGreaterThan(iFf);
+	expect(iVs).toBeGreaterThan(iFf);
+	expect(iOc).toBeGreaterThan(iVs);
 	expect(body).not.toContain('data-scheme="https://firefly.social');
 	expect(body).not.toContain('rel="noopener noreferrer"');
 	// Engagement counts are withheld from HTML — neither the
