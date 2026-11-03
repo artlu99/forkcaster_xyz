@@ -779,6 +779,170 @@ test("GET ?embeds=quotes renders fallback-hydrated quote cards (/h miss, /u→/w
 	expect(body).toContain("Metaphorical");
 });
 
+// --- The problematic cast, enshrined (Nov 2026) -------------------------------
+//
+// mvr/0x7fea908d… quotes nikolaiii's 0x3b71f5d4… — the real cast that
+// surfaced three stacked bugs at once and swallowed every quote on every
+// quote-blind partial page:
+//   1. farcaster.tv's payload DENIES the quote — no casts bucket in its
+//      embeds object and quoteCount: 0, factually wrong on-chain (the
+//      castId embed is in the message; Warpcast/Firefly render it);
+//   2. the heal fragment was cloud-only legacy (fixed: it races the var);
+//   3. QUOTE_FILL_SCRIPT queried .farcaster-embed, a class no element
+//      carries, so the heal never injected anything (fixed: container).
+// Real hashes, fids, usernames, text, timestamps; payloads trimmed to the
+// fields the pipeline reads. If any of these fail, the exact
+// visitor-visible breakage from Nov 2026 is back.
+
+const MVR_USERNAME = "mvr";
+const MVR_FID = 230238;
+const MVR_HASH = "0x7fea908d7e9bc0804288771b02d693128f4d3b7f";
+const NIK_FID = 366713;
+const NIK_QUOTED_HASH = "0x3b71f5d4b7c38e16ec473b791a0463a8874e5926";
+const MVR_TEXT =
+	"No actual @neynar score changes recorded yet since tracking began on 1 October 2026.";
+const NIK_TEXT =
+	"Hey are neynar scores being updated or are they obsolete?\n\nThank you!";
+
+// shim /wc — the canonical shape: the castId embed IS present.
+const MVR_SHIM_CAST = {
+	fid: MVR_FID,
+	hash: MVR_HASH,
+	text: MVR_TEXT,
+	timestamp: 1_793_685_920, // 2026-11-03T06:05:20Z, unix seconds
+	embeds: [{ castId: { fid: NIK_FID, hash: NIK_QUOTED_HASH } }],
+	user: {
+		fid: MVR_FID,
+		username: "mvr",
+		fname: "mvr",
+		displayName: "mvr",
+		pfpUrl: "https://img.test/mvr.png",
+	},
+};
+
+// shim /h — nikolaiii's quoted cast, the hydration hit.
+const NIK_QUOTED_CAST = {
+	fid: NIK_FID,
+	hash: NIK_QUOTED_HASH,
+	text: NIK_TEXT,
+	timestamp: 1_793_682_042, // 2026-11-03T05:00:42Z, unix seconds
+	embeds: [],
+	user: {
+		fid: NIK_FID,
+		username: "nikolaii.eth",
+		fname: "nikolaiii",
+		displayName: "nikolaii.eth",
+		pfpUrl: "https://img.test/nik.png",
+	},
+};
+
+// farcaster.tv — the SAME cast, quote-blind: no casts bucket in embeds and
+// quoteCount: 0 (on-chain wrong). This payload is what made the page
+// partial.
+const MVR_FCTV_PAYLOAD = {
+	result: {
+		casts: [
+			{
+				hash: MVR_HASH,
+				text: MVR_TEXT,
+				timestamp: 1_793_685_920_000, // unix milliseconds
+				author: {
+					fid: MVR_FID,
+					username: "mvr",
+					displayName: "mvr",
+					pfp: { url: "https://img.test/mvr.png" },
+				},
+				embeds: { images: [], urls: [], unknowns: [], videos: [] },
+				quoteCount: 0,
+			},
+		],
+	},
+};
+
+test("mvr regression: the quote-blind partial ships the WORKING heal script", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://farcaster.tv/${MVR_USERNAME}/${MVR_HASH}`) {
+			return Response.json(MVR_FCTV_PAYLOAD);
+		}
+		// Every shim leg errors (no mock) — farcaster.tv is the only
+		// answer, so the win is partial and the heal ships.
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/${MVR_USERNAME}/${MVR_HASH}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	// Mention-free slice: the library linkifies @neynar into anchors, so
+	// the raw contiguous string does not survive rendering.
+	expect(body).toContain("score changes recorded yet since tracking began");
+	expect(body).toContain('querySelector(".farcaster-embed-container")');
+	expect(body).not.toContain("quote-embeds");
+});
+
+test("mvr regression: the heal fragment renders the real quote card", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/${MVR_USERNAME}/${MVR_HASH}`) {
+			return Response.json({ success: true, cast: MVR_SHIM_CAST });
+		}
+		if (url === `https://shim.artlu.xyz/h/${NIK_QUOTED_HASH}`) {
+			return Response.json({ success: true, cast: NIK_QUOTED_CAST });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/${MVR_USERNAME}/${MVR_HASH}?embeds=quotes`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain("quote-embeds");
+	expect(body).toContain("neynar scores being updated");
+});
+
+test("mvr regression: the JSON twin never drops the quote — Firefly pointer on hydration failure", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/${MVR_USERNAME}/${MVR_HASH}`) {
+			return Response.json({ success: true, cast: MVR_SHIM_CAST });
+		}
+		if (url === `https://shim.artlu.xyz/h/${NIK_QUOTED_HASH}`) {
+			return Response.json({ success: false }); // /h miss
+		}
+		if (url === `https://shim.artlu.xyz/u/${NIK_FID}`) {
+			return Response.json({ success: true }); // no username → /u miss
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/${MVR_USERNAME}/${MVR_HASH}?format=json`);
+	expect(res.status).toBe(200);
+	const body = (await res.json()) as { quotes?: string[] };
+	// Hydration failed end-to-end, but the quote survives as a pointer —
+	// never dropped (this exact degradation was observed live Nov 2026).
+	expect(body.quotes).toEqual([
+		`https://firefly.social/post/farcaster/${NIK_QUOTED_HASH}`,
+	]);
+});
+
+test("mvr regression: a hydrated quote points at the forkcaster waypoint", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/${MVR_USERNAME}/${MVR_HASH}`) {
+			return Response.json({ success: true, cast: MVR_SHIM_CAST });
+		}
+		if (url === `https://shim.artlu.xyz/h/${NIK_QUOTED_HASH}`) {
+			return Response.json({ success: true, cast: NIK_QUOTED_CAST });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/${MVR_USERNAME}/${MVR_HASH}?format=json`);
+	expect(res.status).toBe(200);
+	const body = (await res.json()) as { quotes?: string[] };
+	// Identity law: the pointer carries the quoted author's PRIMARY — the
+	// fname (nikolaiii), not the username (nikolaii.eth). The card's
+	// rendered handle staying on the username is the separate owner
+	// decision in the identity-law bullet.
+	expect(body.quotes?.[0]?.endsWith(`/${NIK_QUOTED_HASH}`)).toBe(true);
+	expect(body.quotes?.[0]).toContain("/nikolaiii/");
+});
+
 test("GET /transparency serves terse facts; JSON twin; casts for username 'transparency' unaffected", async () => {
 	const res = await app.request("/transparency");
 	expect(res.status).toBe(200);
