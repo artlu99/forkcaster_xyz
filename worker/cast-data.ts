@@ -69,6 +69,28 @@ export function primaryHandle(
 	return user?.fname ?? user?.username ?? fallback;
 }
 
+/**
+ * The display waterfall: displayName → username → fname. For NAME slots —
+ * the embed library renders author.displayName with NO fallback (an empty
+ * <p> for a no-displayName author), so this guarantees something human
+ * always renders on the card. NOT @-safe (displayName may carry emoji and
+ * spaces): never feed it to an @handle or URL slot — identity/route slots
+ * keep primaryHandle (fname-first — the identity law).
+ */
+export function displayNameOf(
+	user:
+		| {
+				displayName?: string | null;
+				username?: string | null;
+				fname?: string | null;
+		  }
+		| undefined,
+): string {
+	const name = user?.displayName?.trim();
+	if (name) return name;
+	return user?.username?.trim() || user?.fname?.trim() || "";
+}
+
 export function toCastData(
 	cast: ShimCast,
 	unfurled?: Map<string, UnfurlResult | undefined>,
@@ -116,7 +138,11 @@ export function toCastData(
 		author: {
 			fid: cast.user?.fid,
 			username: cast.user?.username,
-			displayName: cast.user?.displayName,
+			// Display waterfall (displayNameOf): the library renders this
+			// raw with no fallback — without it a no-displayName author
+			// shows an empty name <p>. The @handle below stays the
+			// newest-proof username by design.
+			displayName: displayNameOf(cast.user),
 			pfp: { url: cast.user?.pfpUrl },
 			profile: cast.user?.bio ? { bio: { text: cast.user.bio } } : undefined,
 		},

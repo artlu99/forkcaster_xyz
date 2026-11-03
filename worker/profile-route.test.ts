@@ -261,6 +261,38 @@ test("optional entity fields vanish instead of rendering empty", async () => {
 	expect(body).not.toContain('<li class="profile-address">');
 });
 
+test("display waterfall: no displayName falls to the username before the fname", async () => {
+	// nikolaiii's shape: fname ≠ username, no displayName. The h1/og:title
+	// fallback (displayFallback) carries the USERNAME — the name they go
+	// by — while the handle LINE below keeps the identity-law primary.
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: {
+			success: true,
+			user: {
+				fid: FID,
+				username: "nikolaii.eth",
+				fname: USERNAME,
+				displayName: null,
+				bio: null,
+			},
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
+			success: true,
+			casts: [],
+		},
+	});
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+
+	const body = await res.text();
+	expect(body).toContain('<h1 class="profile-title">@nikolaii.eth</h1>');
+	expect(body).toContain('<meta property="og:title" content="@nikolaii.eth" />');
+	// The handle line keeps the fname primary (the identity law's route
+	// handle — attestations render beside it).
+	expect(body).toContain("@<strong>decent-artlu</strong>");
+});
+
 test("a malformed primaryAddress renders as bare text — no copy, no explorer", async () => {
 	globalThis.fetch = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },

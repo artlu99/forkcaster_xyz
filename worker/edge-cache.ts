@@ -53,8 +53,13 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * queried .farcaster-embed, a class no element carries (the library's
  * tokens are all compounds), so the heal silently no-oped on every
  * partial page since it shipped; the container-targeting script must
- * reach cached shells. */
-export const SHELL_SALT = "v6";
+ * reach cached shells. v7: the display waterfall (displayNameOf) —
+ * toCastData author.displayName falls through to username/fname (a
+ * no-displayName author's card name was an empty <p>), and profile
+ * h1/og:title fallbacks flip to username-first for no-displayName,
+ * fname≠username authors; cached shells carry the old empty-name and
+ * fname-first-fallback bytes. */
+export const SHELL_SALT = "v7";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

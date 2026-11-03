@@ -399,7 +399,13 @@ export function renderProfileHtml(
 	// fallback chain stays honest — nothing is faked when shim answers.
 	const primary = primaryHandle(user, username);
 	const displayName = user.displayName ?? null;
-	const title = displayName ? `${displayName} (@${primary})` : `@${primary}`;
+	// Display waterfall fallback (displayNameOf's spirit, @-prefixed): a
+	// no-displayName author's title/h1 carry the USERNAME first — the name
+	// they actually go by — and drop to the fname primary only when no
+	// username exists. The (@primary) parenthetical keeps the identity-law
+	// route handle.
+	const displayFallback = `@${user.username ?? primary}`;
+	const title = displayName ? `${displayName} (@${primary})` : displayFallback;
 	const bio = collapseText(user.bio);
 
 	const avatar = user.pfpUrl
@@ -434,7 +440,7 @@ ${PROFILE_STYLE}
 <div class="profile-card">
 ${avatar}
 <div class="profile-head">
-<h1 class="profile-title">${escapeHtml(displayName ?? `@${primary}`)}</h1>
+<h1 class="profile-title">${escapeHtml(displayName ?? `@${user.username ?? primary}`)}</h1>
 <p class="profile-handle">${handleLine(user, primary)}</p>
 ${bio ? `<p class="profile-bio">${renderBio(bio)}</p>` : ""}
 <ul class="profile-facts">${facts.join("")}</ul>
@@ -680,7 +686,7 @@ export async function renderCastsHtml(
 ${PROFILE_STYLE}
 <div id="auto-mount" data-kind="feed" data-noun="feeds"></div>
 <div class="casts-page-head">
-<h1 class="profile-title">${escapeHtml(displayName ?? `@${primary}`)}</h1>
+<h1 class="profile-title">${escapeHtml(displayName ?? `@${user.username ?? primary}`)}</h1>
 <p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a></p>
 </div>
 ${menu}

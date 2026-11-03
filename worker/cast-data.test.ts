@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { ShimCast } from "./shim.ts";
 import {
 	classifyUrl,
+	displayNameOf,
 	externalUrlEmbedsOf,
 	hasExternalLinks,
 	toOgDescription,
@@ -15,6 +16,28 @@ import {
 
 const FULL = `0x${"ab".repeat(20)}`;
 const QUOTE_HASH = `0x${"cd".repeat(20)}`;
+
+describe("displayNameOf — the display waterfall", () => {
+	test("displayName → username → fname", () => {
+		expect(displayNameOf({ displayName: "mvr 🦊", username: "mvr", fname: "mvr" })).toBe(
+			"mvr 🦊",
+		);
+		expect(
+			displayNameOf({ displayName: null, username: "nikolaii.eth", fname: "nikolaiii" }),
+		).toBe("nikolaii.eth");
+		expect(displayNameOf({ displayName: null, username: null, fname: "nikolaiii" })).toBe(
+			"nikolaiii",
+		);
+	});
+
+	test("empty/whitespace displayName falls through; nothing at all is empty", () => {
+		expect(displayNameOf({ displayName: "   ", username: "mvr", fname: "mvr" })).toBe(
+			"mvr",
+		);
+		expect(displayNameOf({ displayName: "", username: "", fname: "" })).toBe("");
+		expect(displayNameOf(undefined)).toBe("");
+	});
+});
 
 describe("classifyUrl", () => {
 	test("core hosts are internal, in every spelling", () => {
