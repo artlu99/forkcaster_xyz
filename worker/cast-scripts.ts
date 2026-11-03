@@ -323,12 +323,15 @@ export const SHELL_PREP = `<script>
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   };
   var title = "";
+  var logoSrc = "";
   if (state.variant !== "idle") {
     for (var j = 0; j < nodes.length; j++) {
       if (nodes[j].getAttribute("data-client") === state.slug) {
         var clone = nodes[j].cloneNode(true);
         var badge = clone.querySelector(".pill-badge");
         if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+        var logo = clone.querySelector(".pill-logo");
+        logoSrc = logo ? logo.getAttribute("src") || "" : "";
         title = (clone.textContent || "").replace(/\\s+/g, " ").trim();
         break;
       }
@@ -364,11 +367,46 @@ export const SHELL_PREP = `<script>
       '<a class="auto-settings" href="/">settings</a></div>';
   }
   mount.innerHTML = html;
-  // Relabel the sheet trigger with the resolved client ("Open in
-  // Firefly") — a cookie-free shell ships the generic "Open in…". Idle
-  // keeps it generic: the armed client isn't offered here.
+  // Resolution-first primary: rewrite the trigger row into the resolved
+  // client's DIRECT action — "Open in Firefly" (its logo, its web href,
+  // the pill's exact data-* wiring) — plus a "More apps" overflow that
+  // opens the sheet. Building the primary as an <a> with href/
+  // data-client/data-scheme/data-intent means every existing delegated
+  // script handles it with zero new wiring: CLIENT_SCRIPT writes the
+  // cookie and fires the pill event, DEEPLINK_SCRIPT attempts the native
+  // scheme on phones (its web fallback reads href), AUTO_SCRIPT's
+  // .actions pointerdown pause already covers the row. The original
+  // [data-sheet-open] button SURVIVES as the overflow — SHEET_SCRIPT's
+  // showModal binding stays attached to the same element, only its label
+  // moves. Idle/no-cookie keep the generic chooser: nothing resolves, so
+  // nothing acts ("Open this cast in…" — SSR ships it; a shell is
+  // cookie-blind and byte-identical for every device).
   var trigger = document.querySelector("[data-sheet-open]");
-  if (trigger && title) trigger.textContent = "Open in " + title;
+  if (trigger && title && trigger.parentNode) {
+    var prow = trigger.parentNode;
+    var primary = document.createElement("a");
+    primary.className = "pill sheet-open-client";
+    primary.href = state.url;
+    primary.setAttribute("data-client", state.slug);
+    if (state.scheme) primary.setAttribute("data-scheme", state.scheme);
+    if (state.intent) primary.setAttribute("data-intent", state.intent);
+    if (logoSrc) {
+      var img = document.createElement("img");
+      img.className = "pill-logo";
+      img.src = logoSrc;
+      img.alt = "";
+      img.width = 16;
+      img.height = 16;
+      primary.appendChild(img);
+    }
+    primary.appendChild(document.createTextNode("Open in " + title));
+    // The row carries data-resolved: CLIENT_SCRIPT's first/switch/repeat
+    // compares THIS resolution (kind routes included).
+    prow.setAttribute("data-resolved", state.slug);
+    prow.insertBefore(primary, trigger);
+    trigger.textContent = "More apps";
+    trigger.className = "pill sheet-trigger sheet-more";
+  }
   // Kind routes: stamp the row's data-resolved so CLIENT_SCRIPT's
   // first/switch/repeat telemetry compares against THIS resolution.
   var row = document.querySelector("p.actions[data-kind]");

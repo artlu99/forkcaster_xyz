@@ -238,6 +238,13 @@ main { padding-bottom: 8px; }
    padding for the home indicator. Escape and backdrop-tap close it
    natively; SHEET_SCRIPT wires the rest. */
 .sheet-trigger { cursor: pointer; font: inherit; font-size: 14px; font-weight: 500; background: none; }
+/* Resolution-first primary (SHELL_PREP's client-side rewrite): the
+   resolved client's direct action reads as THE action — accent-bordered,
+   logo included — and the sheet trigger survives as the muted "More
+   apps" overflow. The SSR shell ships neither: a cookie-free page shows
+   only the generic "Open this cast in…" chooser. */
+.pill.sheet-open-client { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.pill.sheet-more { color: var(--muted); font-size: 13px; }
 dialog.sheet {
   position: fixed; inset: auto 0 0 0; margin: 0 auto;
   width: min(100%, 672px);

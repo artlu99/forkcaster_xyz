@@ -233,7 +233,7 @@ function castPage(
 	// are suppressed. The embed itself still renders for everyone.
 	const notice =
 		signed === false
-			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz.</p>`
+			? `<p class="notice">The author hasn't signed the social smart contract — the cast may be restricted on farcaster.xyz, so the Farcaster app isn't offered below.</p>`
 			: "";
 	// The stateful layer is CLIENT-side on cast pages: the shell renders
 	// every offered pill (gates already applied) and SHELL_SCRIPT — driven

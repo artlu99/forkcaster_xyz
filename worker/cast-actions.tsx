@@ -115,20 +115,57 @@ export function clientActionsHtml(
 	// never opens — shell()'s no-js CSS renders it as a plain block instead,
 	// pills reachable, trigger and toggle hidden (nothing works there).
 	if (ordered.length === 0) return "";
+	// Copy names its object, kind-aware — trigger, sheet title, and the
+	// profile/feed rows alike ("Open this cast in…"). SHELL_PREP's
+	// resolution-first rewrite keys off the same markup, not the words.
+	const noun =
+		route?.kind === "profile" ? "profile" : route?.kind === "feed" ? "feed" : "cast";
+	return chooserMarkup({
+		count: ordered.length,
+		pills,
+		rowAttrs,
+		hasNative,
+		noun,
+	});
+}
+
+/**
+ * The chooser's two shapes, from already-computed pieces: two-or-more
+ * offers get the trigger + <dialog class="sheet"> (the sheet earns its
+ * keep as a chooser only when there is a choice); ONE offer gets the bare
+ * pill row — one option never earns two taps (pre-sheet era markup,
+ * byte-identical pills, route attrs intact; the stateful layer still
+ * badges it and resolves auto-open, and native pills keep their
+ * click-time script). Zero offers render nothing. Exported for
+ * client-single-offer.test.ts: the real roster never shrinks to one
+ * today, so the branch is pinned at this seam instead of behind a
+ * registry mock (which would leak across bun's shared module cache).
+ */
+export function chooserMarkup(opts: {
+	count: number;
+	pills: string;
+	rowAttrs: string;
+	hasNative: boolean;
+	noun: string;
+}): string {
+	if (opts.count === 0) return "";
+	if (opts.count === 1) {
+		return `<p class="actions"${opts.rowAttrs}>${opts.pills}</p>${opts.hasNative ? DEEPLINK_SCRIPT : ""}`;
+	}
 	const triggerRow =
 		// The no-js → js swap rides HERE, not in the head: a synchronous
 		// inline script before the sheet markup parses is equally
 		// FOUC-proof, and pages without a sheet (channels pin "exactly one
 		// script") ship no swap at all.
 		`<script>document.documentElement.classList.replace("no-js","js")</script>` +
-		`<p class="actions"><button class="pill sheet-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fk-sheet" data-sheet-open>Open in\u2026</button></p>`;
+		`<p class="actions"><button class="pill sheet-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fk-sheet" data-sheet-open>Open this ${opts.noun} in\u2026</button></p>`;
 	const sheet =
 		`<dialog class="sheet" id="fk-sheet" data-sheet aria-labelledby="fk-sheet-title">` +
-		`<p class="sheet-title" id="fk-sheet-title">Open in</p>` +
-		`<p class="actions"${rowAttrs}>${pills}</p>` +
-		`<label class="sheet-pref"><input type="checkbox" role="switch" data-sheet-auto /><span>Auto-open with last used</span></label>` +
+		`<p class="sheet-title" id="fk-sheet-title">Open this ${opts.noun} in</p>` +
+		`<p class="actions"${opts.rowAttrs}>${opts.pills}</p>` +
+		`<label class="sheet-pref"><input type="checkbox" role="switch" data-sheet-auto /><span>Open automatically next time</span></label>` +
 		`</dialog>`;
-	return `${triggerRow}${sheet}${hasNative ? DEEPLINK_SCRIPT : ""}`;
+	return `${triggerRow}${sheet}${opts.hasNative ? DEEPLINK_SCRIPT : ""}`;
 }
 
 // Auto-open flow: for a returning user with a last-used client.

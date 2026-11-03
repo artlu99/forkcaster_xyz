@@ -44,8 +44,12 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * old sheet CSS — the exit transition ran unconditionally, and on WebKit
  * (no `overlay` support) a closed sheet could linger rendered over the
  * bottom action rows, eating their taps; the @supports-gated choreography
- * must reach cached shells. */
-export const SHELL_SALT = "v4";
+ * must reach cached shells. v5: purges shells from the pre-primary sheet
+ * UX — kind-aware copy ("Open this cast in…"), the "Open automatically
+ * next time" toggle label, the connected unsigned-notice line, and the
+ * single-offer bare-row shape; the resolution-first primary is a
+ * client-side rewrite and needs no purge itself. */
+export const SHELL_SALT = "v5";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

@@ -518,7 +518,7 @@ test("GET /:username/:hash ships the client sheet — trigger, dialog, toggle", 
 	expect(body).toContain('<dialog class="sheet"');
 	expect(body).toContain("data-sheet-open");
 	expect(body).toContain("data-sheet-auto");
-	expect(body).toContain("Auto-open with last used");
+	expect(body).toContain("Open automatically next time");
 	// The sheet's wiring script ships on the page.
 	expect(body).toContain("showModal");
 	// The pills live inside the dialog, hooks intact (AUTO_SCRIPT pauses on

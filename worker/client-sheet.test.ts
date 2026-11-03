@@ -67,7 +67,12 @@ describe("clientActionsHtml — sheet markup", () => {
 			'<p class="actions"><button class="pill sheet-trigger" type="button" aria-haspopup="dialog"',
 		);
 		expect(html).toContain('data-sheet-open');
-		expect(html).toContain(">Open in\u2026</button>");
+		// Copy names its object — kind-aware (route mode swaps the noun).
+		expect(html).toContain(">Open this cast in\u2026</button>");
+		const profileHtml = clientActionsHtml(VARS, false, undefined, undefined, undefined, {
+			kind: "profile",
+		});
+		expect(profileHtml).toContain(">Open this profile in\u2026</button>");
 	});
 
 	test("wraps the pills in a dialog.sheet, pill markup byte-identical", () => {
@@ -99,7 +104,9 @@ describe("clientActionsHtml — sheet markup", () => {
 		expect(dialog).toMatch(
 			/<input type="checkbox" role="switch" data-sheet-auto( \/)?>/,
 		);
-		expect(dialog).toContain("Auto-open with last used");
+		// Plainer copy: the toggle promises the behavior, not the mechanism.
+		expect(dialog).toContain("Open automatically next time");
+		expect(dialog).toContain("Open this cast in");
 		// No on-page chip anywhere in the emitted markup.
 		expect(html).not.toContain("auto-chip");
 		expect(html).not.toContain("data-auto-toggle");
@@ -141,10 +148,20 @@ describe("client sheet scripts", () => {
 		expect(AUTO_SCRIPT).toContain("cancelAll");
 	});
 
-	test("SHELL_PREP relabels the trigger with the resolved client", () => {
-		expect(SHELL_SCRIPT).toContain('trigger.textContent = "Open in " + title');
-		// Idle keeps the generic label (title stays "" there).
-		expect(SHELL_SCRIPT).toContain("if (trigger && title)");
+	test("SHELL_PREP builds the resolution-first primary; idle keeps the chooser", () => {
+		// The primary is an <a> with the pill's data-* wiring — the
+		// delegated scripts (cookie write, telemetry, native attempt)
+		// handle it unchanged.
+		expect(SHELL_SCRIPT).toContain('primary.className = "pill sheet-open-client"');
+		expect(SHELL_SCRIPT).toContain('primary.setAttribute("data-client", state.slug)');
+		expect(SHELL_SCRIPT).toContain('primary.appendChild(document.createTextNode("Open in " + title))');
+		// The overflow is the SAME [data-sheet-open] button — SHEET_SCRIPT's
+		// showModal binding survives the rewrite; only the label moves.
+		expect(SHELL_SCRIPT).toContain('trigger.textContent = "More apps"');
+		// CLIENT_SCRIPT's first/switch/repeat compares the resolution.
+		expect(SHELL_SCRIPT).toContain('prow.setAttribute("data-resolved", state.slug)');
+		// Idle keeps the generic chooser (title stays "" there).
+		expect(SHELL_SCRIPT).toContain("if (trigger && title && trigger.parentNode)");
 	});
 });
 

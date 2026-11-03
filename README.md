@@ -45,7 +45,7 @@ Cloudflare Worker (Hono; dual-domain; registration-order routing)
 - **Identity law** — the fname is the PRIMARY handle everywhere; ENS names are attestations.
 - **Echo-the-valid-input** — first-party links carry the gate-validated route input; display, OG, and client targets carry the primary.
 - **Privacy: no identifiable tracking, only analytics.** One anonymous click datapoint per client selection; the negative list (no cast IDs, no usernames, no IPs, no UA strings, no identifiers) is verbatim-checkable in `worker/track.ts` and declared on `/transparency`. Pages make no third-party requests — logos are self-hosted because a hotlinked logo would leak every visitor's IP to that client's servers. The one cookie carries a client slug, nothing else.
-- **Personalization is client-side on cast pages.** The page shell (the client sheet's pills included, gates applied) is cookie-blind server-side; `SHELL_SCRIPT` reads the local `fc_client` cookie and applies the last-used badge and the auto-open state machine after parse (the sheet's auto-open toggle syncs from the same cookie). That is what makes the full page — cookie-holders included — servable from the 12h edge shell; profiles cache 10 minutes (they are mutable) under the same client-side model. Bump `SHELL_SALT` in `worker/edge-cache.ts` to invalidate every shell (there is no global purge; `v3` dropped the pre-sheet UI — bare pill row + on-page auto-open chip).
+- **Personalization is client-side on cast pages.** The page shell (the client sheet's pills included, gates applied) is cookie-blind server-side; `SHELL_SCRIPT` reads the local `fc_client` cookie and applies the last-used badge, the resolution-first primary ("Open in X" — a direct anchor with the pill's exact wiring — beside a muted "More apps" sheet trigger), and the auto-open state machine after parse (the sheet's auto-open toggle syncs from the same cookie). That is what makes the full page — cookie-holders included — servable from the 12h edge shell; profiles cache 10 minutes (they are mutable) under the same client-side model. Bump `SHELL_SALT` in `worker/edge-cache.ts` to invalidate every shell (there is no global purge; `v3` dropped the pre-sheet UI — bare pill row + on-page auto-open chip; `v4` reached cached shells with the Safari-safe sheet CSS; `v5` reached them with the kind-aware chooser copy and single-offer bare-row shape).
 - **Registry as the one roster** — clients and their verification provenance are enumerated exactly once, in `worker/client-registry.ts`.
 
 ## Stack
@@ -98,7 +98,7 @@ bun run cf-typegen   # wrangler types → worker-configuration.d.ts
 │   ├── cast-source.ts         # provider race: shim ∥ potato fleet ∥ haatz ∥ snap ∥ farcaster.tv (+ the /~/{hash} hash-only rescue); fleet stagger + collective miss parity
 │   ├── cast-page.tsx          # resolve (race) → render orchestration: SSR / 404 / link fallback
 │   ├── cast-data.ts           # pure Shim → embed-data mapping + embed helpers
-│   ├── cast-actions.tsx       # client sheet — trigger + dialog, pills byte-identical inside
+│   ├── cast-actions.tsx       # client sheet — chooser shapes (single-offer bare row / trigger + dialog), pills byte-identical inside
 │   ├── cast-scripts.ts        # inline client scripts (TRACK/CLIENT/DEEPLINK/AUTO/LIVE_STATS/QUOTE_FILL)
 │   ├── profile-page.tsx       # profile landings: resolve-once/render-twice, waypoint law
 │   ├── warpcast.ts            # Warpcast channel API client (zod contract; /v1/channel — keyless, first-party)
