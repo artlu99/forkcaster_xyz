@@ -48,8 +48,13 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * UX — kind-aware copy ("Open this cast in…"), the "Open automatically
  * next time" toggle label, the connected unsigned-notice line, and the
  * single-offer bare-row shape; the resolution-first primary is a
- * client-side rewrite and needs no purge itself. */
-export const SHELL_SALT = "v5";
+ * client-side rewrite and needs no purge itself. v6: purges quote-blind
+ * partial shells carrying the broken QUOTE_FILL selector — the script
+ * queried .farcaster-embed, a class no element carries (the library's
+ * tokens are all compounds), so the heal silently no-oped on every
+ * partial page since it shipped; the container-targeting script must
+ * reach cached shells. */
+export const SHELL_SALT = "v6";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

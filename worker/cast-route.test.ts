@@ -741,6 +741,13 @@ test("a quote-blind win ships the fill-in script and no quote cards", async () =
 	expect(body).toContain("rendered from farcaster.tv");
 	// ...with the quote fill-in script pointing at the fragment endpoint,
 	expect(body).toContain('?embeds=quotes"');
+	// targeting the slot that EXISTS — the pipeline's wrapper. The bare
+	// farcaster-embed class matches no element (the library's tokens are
+	// all compounds; class selectors match whole tokens), and a null slot
+	// makes the heal silently no-op — the bug that ate every partial
+	// page's quotes until Nov 2026.
+	expect(body).toContain('querySelector(".farcaster-embed-container")');
+	expect(body).not.toContain('querySelector(".farcaster-embed")');
 	// but no server-rendered quote cards on this page.
 	expect(body).not.toContain("quote-embeds");
 });

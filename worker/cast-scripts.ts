@@ -196,9 +196,14 @@ export const DEEPLINK_SCRIPT = `<script>
 // shim-resolved SSR fragment (?embeds=quotes) into the page — the same
 // silent-degradation contract as the live-stats script. Bots and no-JS
 // visitors keep the OG-complete page; no server cache is involved.
+// The slot is .farcaster-embed-container — the pipeline's own wrapper.
+// The library renders NO element with the bare farcaster-embed class
+// (its tokens are all compounds: farcaster-embed-container/-body/…), and
+// class selectors match whole tokens — .farcaster-embed matched nothing,
+// so this script silently no-oped for its entire life until Nov 2026.
 export const QUOTE_FILL_SCRIPT = `<script>
 (function () {
-  var slot = document.querySelector(".farcaster-embed");
+  var slot = document.querySelector(".farcaster-embed-container");
   if (!slot) return;
   fetch(location.pathname + "?embeds=quotes")
     .then(function (r) { return r.ok ? r.text() : null; })
