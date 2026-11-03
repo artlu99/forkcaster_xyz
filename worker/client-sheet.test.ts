@@ -163,6 +163,23 @@ describe("shell — no-js fallback for the sheet", () => {
 		expect(page).toContain("prefers-reduced-motion");
 		expect(page).toContain(".no-js dialog.sheet");
 	});
+
+	test("the exit choreography is @supports-gated; closed sheets hide hard", () => {
+		// The allow-discrete display exit defers the UA's display:none for
+		// the slide-out — without `overlay` (WebKit: bug 276727) the closed
+		// sheet lingers rendered over the bottom action rows and eats their
+		// taps. The full transition must ship only where `overlay` exists.
+		expect(page).toContain("@supports (overlay: auto)");
+		// Author-side closed-state hiding: restates the UA rule for engines
+		// without <dialog> (unknown element would render inline otherwise).
+		expect(page).toContain("dialog.sheet:not([open]) { display: none; }");
+		// Equal-specificity cascade guard: the :not([open]) rule must come
+		// BEFORE .no-js dialog.sheet, which must win to keep surfacing the
+		// chooser as a plain block when JS never runs.
+		expect(page.indexOf("dialog.sheet:not([open])")).toBeLessThan(
+			page.indexOf(".no-js dialog.sheet"),
+		);
+	});
 });
 
 describe("shell cache invalidation", () => {

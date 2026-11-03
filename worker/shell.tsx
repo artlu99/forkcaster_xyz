@@ -250,11 +250,39 @@ dialog.sheet {
   padding: 18px 20px calc(18px + env(safe-area-inset-bottom, 0px));
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
   transform: translateY(100%);
-  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1),
-    overlay 0.3s allow-discrete, display 0.3s allow-discrete;
 }
-dialog.sheet[open] { transform: translateY(0); }
+/* A closed sheet must be display:none the INSTANT close() fires: the
+   sheet is position:fixed at bottom:0, and the page's own action rows
+   (the profile's "Casts and replies" pill, the cast client sheet) live
+   in that strip — anything rendered there eats their taps. The exit
+   choreography's allow-discrete display transition defers the UA's
+   display:none for the slide-out, and WebKit's half of that deal is
+   broken: it has no 'overlay' property (bug 276727), so the dialog
+   leaves the top layer at once while the display transition STILL
+   postpones hiding — a closed sheet lingering rendered and hit-testable
+   over the bottom of the page for the whole exit (and stranded there if
+   the transition stalls; iOS 26 has dialog bugs in exactly this area).
+   So the enter animation rides the [open] state (works everywhere via
+   @starting-style below), and the exit choreography ships ONLY where
+   'overlay' exists — Chromium, the sole engine where it actually works;
+   WebKit's own suggested workaround for the ungraceful degradation
+   (bug 289473). Everywhere else close() snaps straight to hidden. The
+   explicit :not([open]) display:none restates the UA rule so engines
+   without <dialog> support at all (unknown element, inline default)
+   also hide the closed chooser — placed BEFORE the .no-js rule, which
+   must win on equal specificity (it re-surfaces the sheet as a block). */
+dialog.sheet:not([open]) { display: none; }
+dialog.sheet[open] {
+  transform: translateY(0);
+  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
 @starting-style { dialog.sheet[open] { transform: translateY(100%); } }
+@supports (overlay: auto) {
+  dialog.sheet {
+    transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1),
+      overlay 0.3s allow-discrete, display 0.3s allow-discrete;
+  }
+}
 dialog.sheet::backdrop {
   background: rgba(0, 0, 0, 0.4); opacity: 0; transition: opacity 0.3s;
 }
