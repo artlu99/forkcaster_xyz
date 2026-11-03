@@ -17,7 +17,6 @@ import {
 	jsonRoster,
 	raceCast,
 	raceRoster,
-	shimProvider,
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
@@ -505,23 +504,32 @@ export async function renderCastHtml(
 	}
 }
 
-// SSR fragment for QUOTE_FILL_SCRIPT: shim-resolved quote cards for a cast
-// that a quote-blind provider won. Served at ?embeds=quotes with
-// no-store; the fetcher is our own script, so any failure just means the
-// quote cards stay absent (same degradation as the live stats row).
+// SSR fragment for QUOTE_FILL_SCRIPT: fleet-raced shim resolution and
+// quote hydration for a cast that a quote-blind provider won. Served at
+// ?embeds=quotes with no-store; the fetcher is our own script, so any
+// failure just means the quote cards stay absent (same degradation as the
+// live stats row). The var's fleet races both the cast lookup and the
+// hydration chain — a heal that depended on one host would rebuild the
+// SPOF the fleet removed.
 export async function renderQuotesFragment(
 	username: string,
 	hash: string,
+	potatoBases?: string | null,
 ): Promise<{ status: 200 | 404 | 503; html: string }> {
-	const outcome = await shimProvider.fetchCast(
-		{ username, hash },
+	// Fleet-raced resolution: the same /wc lookup every shim reader uses,
+	// raced across the var's members — the heal must not depend on one
+	// host being up (the fragment exists BECAUSE a provider failed).
+	const lookup = await getCastByUsernameHash(
+		username,
+		hash,
 		AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+		potatoBases,
 	);
-	if (outcome.kind === "error") return { status: 503, html: "" };
-	if (outcome.kind === "miss") return { status: 404, html: "" };
-	const quoteTargets = quoteTargetsOf(outcome.cast);
+	if (lookup.status === "error") return { status: 503, html: "" };
+	if (lookup.status === "miss") return { status: 404, html: "" };
+	const quoteTargets = quoteTargetsOf(lookup.cast);
 	const quoteFetches = await Promise.allSettled(
-		quoteTargets.map((t) => fetchQuote(t)),
+		quoteTargets.map((t) => fetchQuote(t, potatoBases)),
 	);
 	const cards: string[] = [];
 	for (const settled of quoteFetches) {

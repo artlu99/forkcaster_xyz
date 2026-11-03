@@ -298,7 +298,11 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 	// SSR fragment for the quote fill-in script (partial, quote-blind wins).
 	// Our own script is the only intended consumer; responses are no-store.
 	if (c.req.query("embeds") === "quotes") {
-		const fragment = await renderQuotesFragment(username, hash);
+		const fragment = await renderQuotesFragment(
+			username,
+			hash,
+			(c.env as Env | undefined)?.SHIM_POTATO_BASE,
+		);
 		return c.html(fragment.html, fragment.status, {
 			"cache-control": "no-store",
 		});
