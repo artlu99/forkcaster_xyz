@@ -650,8 +650,8 @@ export const CLIENTS: ClientDefinition[] = [
 	// GET /v1/feed/cast/thread accepts (CAST_HASH_PATTERN; full 0x+40 hex
 	// resolves directly against the node), hence {fullHash}. The thread read
 	// is public — signed-out visitors see the cast; reacting routes them to
-	// sign in. LIVE CHECK: PENDING — the public read ships in
-	// 99darwin/farcaster-audio-client#373; fill in once deployed.
+	// sign in. LIVE CHECK (Nov 2026, signed out, JS-rendering browser):
+	// juke.audio/app/cast/0x895ecc74… renders zoo's "omg so relevant!".
 	// Scheme VERIFIED at source: farcaster-audio/app.json registers scheme
 	// "juke" (iOS CFBundleURLSchemes + an Android VIEW intent filter) and
 	// expo-router automatic linking maps juke://cast/<hash> onto
