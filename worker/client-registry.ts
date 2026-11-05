@@ -642,6 +642,33 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/fatline.svg",
 		web: "https://fatline.ink/c/{username}/{fullHash}",
 	},
+	// Juke is a Farcaster client built around live audio spaces and voice
+	// notes (iOS app + the juke.audio/app web client), reading from its own
+	// Hypersnap node. Per-cast format VERIFIED against the open-source client
+	// (github.com/99darwin/farcaster-audio): the web route
+	// landing/app/app/cast/[hash]/page.tsx renders the thread for any hash
+	// GET /v1/feed/cast/thread accepts (CAST_HASH_PATTERN; full 0x+40 hex
+	// resolves directly against the node), hence {fullHash}. The thread read
+	// is public — signed-out visitors see the cast; reacting routes them to
+	// sign in. LIVE CHECK (Nov 2026, signed out, JS-rendering browser):
+	// juke.audio/app/cast/0x895ecc74… renders zoo's "omg so relevant!".
+	// Scheme VERIFIED at source: farcaster-audio/app.json registers scheme
+	// "juke" (iOS CFBundleURLSchemes + an Android VIEW intent filter) and
+	// expo-router automatic linking maps juke://cast/<hash> onto
+	// app/cast/[hash].tsx, the native thread screen. The native app requires
+	// sign-in (app/_layout.tsx redirects signed-out users to /login).
+	// No androidPackage: juke.audio serves no assetlinks.json, so Android
+	// takes the raw scheme. Universal links don't apply — the AASA claims
+	// /space/* only. No signed rule; not links-only.
+	{
+		id: "juke",
+		title: "Juke",
+		logoUrl: "/logos/juke.png",
+		web: "https://juke.audio/app/cast/{fullHash}",
+		deeplink: {
+			scheme: "juke://cast/{fullHash}",
+		},
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>

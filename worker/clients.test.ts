@@ -194,6 +194,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"juke",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -208,6 +209,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"juke",
 		]);
 	});
 
@@ -233,6 +235,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"juke",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -312,9 +315,9 @@ describe("deeplinkTargets", () => {
 });
 
 describe("roster native targets", () => {
-	test("farcaster, quorum and terminus are the clients with native schemes", () => {
+	test("farcaster, quorum, terminus and juke are the clients with native schemes", () => {
 		const withScheme = CLIENTS.filter((c) => c.deeplink).map((c) => c.id);
-		expect(withScheme).toEqual(["farcaster", "quorum", "terminus"]);
+		expect(withScheme).toEqual(["farcaster", "quorum", "terminus", "juke"]);
 	});
 
 	test("farcaster's scheme resolves per cast; androidPackage composes intent", () => {
@@ -492,6 +495,28 @@ test("fatline's cast route is the /c/ page the SPA router matches", () => {
 	expect(html).not.toContain("data-intent");
 });
 
+test("juke's scheme opens the native thread; the href is the web thread", () => {
+	const juke = findClient("juke");
+	expect(juke).toBeDefined();
+	// Verified at source (farcaster-audio/app.json scheme "juke" + expo-router
+	// mapping juke://cast/<hash> onto app/cast/[hash].tsx). No androidPackage
+	// (no assetlinks.json), so no intent:// form.
+	const targets = deeplinkTargets(juke as ClientDefinition, VARS);
+	expect(targets).toEqual({
+		scheme: "juke://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",
+	});
+	const html = clientPill(juke as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://juke.audio/app/cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain(
+		'data-scheme="juke://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="juke"');
+	expect(html).toContain('src="/logos/juke.png"');
+	expect(html).not.toContain("data-intent");
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -633,6 +658,7 @@ describe("external-link gate", () => {
 			"homiehouse.app",
 			"testflight.apple.com",
 			"fatline.ink",
+			"juke.audio",
 		]);
 	});
 });
