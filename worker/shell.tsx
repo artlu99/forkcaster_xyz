@@ -4,6 +4,7 @@
 
 import { siGithub, siGithubsponsors, siOpenaccess } from "simple-icons";
 import { iconMark } from "../shared/icon-mark.ts";
+import type { FarcatPreview, SiteChrome } from "./site-chrome.ts";
 
 // Shared with transparency.tsx — the only escaper for hand-built HTML.
 export function escapeHtml(s: string): string {
@@ -34,6 +35,29 @@ export function collapseText(text: string | null | undefined): string {
 	return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
+const SAFE_FARCAT_NAME = /^FarCats #\d+$/;
+const SAFE_FARCAT_PRICE = /^\d+(?:\.\d+)? (?:ETH|WETH)$/;
+const SAFE_FARCAT_HREF =
+	/^https:\/\/opensea\.io\/item\/ethereum\/0x9340204616750cb61e56437befc95172c6ff6606\/\d+$/;
+const SAFE_FARCAT_IMAGE =
+	/^https:\/\/i2c\.seadn\.io\/ethereum\/0x9340204616750cb61e56437befc95172c6ff6606\/[a-z0-9]+\.(?:jpe?g|png|gif|webp)\?w=64&h=64$/;
+
+/** Bottom-of-page banner. Empty unless every field matches the FarCats
+ * allowlist — the preview is parsed from a third-party document. */
+export function farcatChipHtml(farcat: FarcatPreview | null | undefined): string {
+	if (!farcat) return "";
+	if (!SAFE_FARCAT_NAME.test(farcat.name)) return "";
+	if (!SAFE_FARCAT_HREF.test(farcat.href)) return "";
+	if (!SAFE_FARCAT_IMAGE.test(farcat.imageUrl)) return "";
+	if (farcat.priceLabel !== undefined && !SAFE_FARCAT_PRICE.test(farcat.priceLabel)) {
+		return "";
+	}
+	const price = farcat.priceLabel
+		? `<span class="farcat-price">${escapeHtml(farcat.priceLabel)}</span>`
+		: "";
+	return `<a class="farcat" href="${escapeHtml(farcat.href)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(farcat.imageUrl)}" alt="" width="32" height="32" /><span class="farcat-name">${escapeHtml(farcat.name)}</span>${price}</a>`;
+}
+
 export function shell(
 	title: string,
 	bodyHtml: string,
@@ -52,13 +76,21 @@ export function shell(
 	// The casts skeleton page has no JSON twin: it omits the alternate link
 	// instead of advertising an endpoint that would answer HTML.
 	jsonAlternate = true,
+	// warpcats.com passes chrome; absent keeps the forkcaster bytes.
+	chrome?: SiteChrome,
 ): string {
+	const siteName = chrome?.site === "warpcats" ? "warpcats" : "forkcaster";
+	const brandedTitle =
+		siteName === "warpcats" && title.endsWith(" · forkcaster")
+			? `${title.slice(0, -"forkcaster".length)}warpcats`
+			: title;
+	const farcat = siteName === "warpcats" ? farcatChipHtml(chrome?.farcat) : "";
 	const canonicalMeta = canonicalUrl
 		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
 		: "";
 	const meta = og
 		? [
-				`<meta property="og:site_name" content="forkcaster" />`,
+				`<meta property="og:site_name" content="${siteName}" />`,
 				`<meta property="og:type" content="${escapeHtml(ogType)}" />`,
 				`<meta property="og:title" content="${escapeHtml(og.ogTitle)}" />`,
 				...(canonicalUrl
@@ -91,7 +123,7 @@ export function shell(
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${escapeHtml(title)}</title>
+<title>${escapeHtml(brandedTitle)}</title>
 ${canonicalMeta}
 ${meta}
 ${jsonAlternate ? `<link rel="alternate" type="application/json" href="?format=json" />` : ""}
@@ -141,6 +173,32 @@ body {
 }
 .wordmark:hover { color: var(--ink); }
 .wordmark b { color: var(--accent); font-weight: 600; }
+/* Bottom strip on warpcats.com only. In document flow, under the footer,
+   so it never covers the sheet or the action row. */
+a.farcat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 672px;
+  margin: 0 auto;
+  padding: 14px 20px 32px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.farcat img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--line);
+  flex: none;
+}
+.farcat-name { font-weight: 600; }
+.farcat-price { color: var(--muted); }
+a.farcat:hover, a.farcat:focus-visible { color: var(--accent); }
 main { padding-bottom: 8px; }
 .notice { color: var(--muted); font-size: 14px; margin: 18px 0 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 0; }
@@ -337,7 +395,7 @@ dialog.sheet .actions { margin: 0; }
 </head>
 <body>
 <header class="site-header">
-  <a class="wordmark" href="/">forkcaster<b>.</b></a>
+  <a class="wordmark" href="/">${siteName}<b>.</b></a>
 </header>
 <main>
 ${bodyHtml}
@@ -347,6 +405,7 @@ ${bodyHtml}
   <a href="https://github.com/artlu99/forkcaster_xyz/tree/main?tab=contributing-ov-file">${iconMark(siGithubsponsors.svg)}Contributing</a>
   <a href="/transparency">${iconMark(siOpenaccess.svg)}Transparency</a>
 </footer>
+${farcat}
 ${clientScript ?? ""}
 </body>
 </html>`;

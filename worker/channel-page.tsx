@@ -30,6 +30,7 @@ import {
 } from "./client-registry.ts";
 import { getChannelById, type WarpcastChannel } from "./warpcast.ts";
 import { collapseText, escapeHtml, formatDate, shell } from "./shell.tsx";
+import type { SiteChrome } from "./site-chrome.ts";
 
 export type ResolvedChannel =
 	| { kind: "found"; channel: WarpcastChannel }
@@ -105,17 +106,29 @@ function externalLinkPill(
 	return `<a class="pill" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
 }
 
-function notFoundPage(id: string): string {
+function notFoundPage(id: string, chrome?: SiteChrome): string {
 	return shell(
 		`${id} · forkcaster`,
 		`<p class="notice">Channel not found: /${escapeHtml(id)}. The channel id may be wrong or the channel retired.</p>`,
+		undefined,
+		undefined,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
-function unavailablePage(id: string): string {
+function unavailablePage(id: string, chrome?: SiteChrome): string {
 	return shell(
 		`${id} · forkcaster`,
 		`<p class="notice">Channel data is temporarily unavailable. <a href="/~/channel/${escapeHtml(id)}">Retry</a>.</p>`,
+		undefined,
+		undefined,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
@@ -130,12 +143,13 @@ export function renderChannelHtml(
 	channel: ResolvedChannel,
 	id: string,
 	primaryOrigin?: string,
+	chrome?: SiteChrome,
 ): { status: 200 | 404 | 503; html: string } {
 	if (channel.kind === "not-found") {
-		return { status: 404, html: notFoundPage(id) };
+		return { status: 404, html: notFoundPage(id, chrome) };
 	}
 	if (channel.kind === "unreachable") {
-		return { status: 503, html: unavailablePage(id) };
+		return { status: 503, html: unavailablePage(id, chrome) };
 	}
 	const ch = channel.channel;
 	const name = ch.name?.trim() ? ch.name : id;
@@ -185,7 +199,16 @@ ${channelActionsHtml(id, external)}`;
 		: undefined;
 	return {
 		status: 200,
-		html: shell(`${id} · forkcaster`, body, og, undefined, canonicalUrl, "website"),
+		html: shell(
+			`${id} · forkcaster`,
+			body,
+			og,
+			undefined,
+			canonicalUrl,
+			"website",
+			true,
+			chrome,
+		),
 	};
 }
 

@@ -10,6 +10,8 @@ import {
 	runGetCastLink,
 	type CastRefOutput,
 } from "./cast-ref.ts";
+import { farcatChipHtml } from "./shell.tsx";
+import type { SiteChrome } from "./site-chrome.ts";
 
 export function createMcpServer(potatoBases?: string | null): McpServer {
 	const server = new McpServer({ name: "forkcaster", version: "1.0.0" });
@@ -58,12 +60,14 @@ export const mcpHandler = createMcpHandler(() => createMcpServer());
 
 /**
  * GET /mcp — a shareable server card for browsers and link crawlers
- * (POST remains the protocol transport). Static, first-party constants
- * only: nothing from the request is reflected, so there is no injection
- * surface and every platform renders the same card.
+ * (POST remains the protocol transport). Copy is first-party constants.
+ * The only request-derived choice is the host name (warpcats.com vs
+ * forkcaster); the optional FarCat chip is allowlisted in farcatChipHtml.
  */
-export function mcpLandingHtml(): string {
-	const title = "forkcaster — MCP server for Farcaster casts";
+export function mcpLandingHtml(chrome?: SiteChrome): string {
+	const site = chrome?.site === "warpcats" ? "warpcats" : "forkcaster";
+	const chip = site === "warpcats" ? farcatChipHtml(chrome?.farcat) : "";
+	const title = `${site} — MCP server for Farcaster casts`;
 	// Roster mentions stay generic on purpose: a new registry entry must
 	// not require touching this copy. The authoritative list is the tool's
 	// own client enum, derived from the registry.
@@ -75,7 +79,7 @@ export function mcpLandingHtml(): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>forkcaster — MCP server</title>
+<title>${site} — MCP server</title>
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
 <meta property="og:image" content="https://forkcaster.xyz/mcp-card.png" />
@@ -84,7 +88,7 @@ export function mcpLandingHtml(): string {
 <meta property="og:image:alt" content="forkcaster MCP server card — dark, stylized fork mark, get_cast_link" />
 <meta property="og:url" content="${endpoint}" />
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="forkcaster" />
+<meta property="og:site_name" content="${site}" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${title}" />
 <meta name="twitter:description" content="${description}" />
@@ -110,10 +114,14 @@ a { color: var(--ink); }
 code { background: var(--line); padding: 2px 6px; border-radius: 4px; }
 h1 { font-size: 22px; }
 h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 28px; }
+a.farcat { display: flex; align-items: center; gap: 10px; margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 14px; font-variant-numeric: tabular-nums; }
+.farcat img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none; }
+.farcat-name { font-weight: 600; }
+.farcat-price { color: var(--muted); }
 </style>
 </head>
 <body>
-<h1>forkcaster MCP server</h1>
+<h1>${site} MCP server</h1>
 <p>An MCP (Model Context Protocol) server that turns Farcaster casts into shareable deep links — race-verified cast identity, every supported Farcaster client app, author signed-contract status included.</p>
 <h2>Connect</h2>
 <p>Point any MCP client at <code>${endpoint}</code> — Streamable HTTP, public, no auth.</p>
@@ -128,6 +136,6 @@ h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: v
 <li><a href="/transparency">Transparency</a> — what forkcaster is and what it tracks</li>
 <li><a href="https://github.com/artlu99/forkcaster_xyz">Source</a> — MIT</li>
 </ul>
-</body>
+${chip ? `${chip}\n` : ""}</body>
 </html>`;
 }

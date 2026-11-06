@@ -58,8 +58,12 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * no-displayName author's card name was an empty <p>), and profile
  * h1/og:title fallbacks flip to username-first for no-displayName,
  * fname≠username authors; cached shells carry the old empty-name and
- * fname-first-fallback bytes. */
-export const SHELL_SALT = "v7";
+ * fname-first-fallback bytes. v8: warpcats.com chrome — the wordmark
+ * follows the host, and a floor FarCat chip rides the header. Shells
+ * cached on that host still say forkcaster; the header CSS lives in
+ * every shell. v9: that chip moves to a banner under the footer, on
+ * every shell page. */
+export const SHELL_SALT = "v9";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

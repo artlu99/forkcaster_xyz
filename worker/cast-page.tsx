@@ -51,6 +51,7 @@ import {
 	type ShimCast,
 } from "./shim.ts";
 import { escapeHtml, shell } from "./shell.tsx";
+import type { SiteChrome } from "./site-chrome.ts";
 
 // react-farcaster-embed emits every card anchor as a bare target="_blank"
 // (url cards, images, body links, the Show-on-Farcaster icon) with no rel.
@@ -225,6 +226,7 @@ function castPage(
 	// text-blind wins already carry their quotes inline, so the fill would
 	// just duplicate them — withheld there.
 	textCanonical = true,
+	chrome?: SiteChrome,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -240,8 +242,9 @@ function castPage(
 	// auto-open state machine into the mount. No server cookie read, which
 	// is what makes the whole page edge-cacheable.
 	const actions = clientActionsHtml(vars, signed, undefined, rank, externalLinks);
-	// Dual-serve canonicalization: every host renders the same page, but
+	// Dual-serve canonicalization: every host renders the same cast, but
 	// points at the primary origin so link equity and unfurlers agree.
+	// Host chrome (warpcats.com) is applied by shell(), not here.
 	// The full hash additionally dedupes short/long variants of the same
 	// cast — the form the JSON renderer and MCP tool already advertise.
 	const canonicalUrl = primaryOrigin
@@ -256,6 +259,9 @@ function castPage(
 		og,
 		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial && textCanonical ? QUOTE_FILL_SCRIPT : ""}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 		canonicalUrl,
+		"article",
+		true,
+		chrome,
 	);
 }
 
@@ -263,6 +269,7 @@ function linkOnlyPage(
 	username: string,
 	hash: string,
 	rank?: RankSnapshot | null,
+	chrome?: SiteChrome,
 ): string {
 	// No provider resolved the cast: signed state is unknown, which fails
 	// open — every registry client is offered. External-link state is
@@ -282,15 +289,25 @@ function linkOnlyPage(
 		)}`,
 		undefined,
 		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
-function notFoundPage(username: string, hash: string): string {
+function notFoundPage(username: string, hash: string, chrome?: SiteChrome): string {
 	// username is a percent-decoded route param — escape it before it
 	// reaches the body (the title is escaped inside shell()).
 	return shell(
 		`${username}/${hash} · forkcaster`,
 		`<p class="notice">Cast not found: ${escapeHtml(username)}/${escapeHtml(hash)}. The username or hash may be wrong, or the cast was deleted.</p>`,
+		undefined,
+		undefined,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
@@ -422,14 +439,15 @@ export async function renderCastHtml(
 	hash: string,
 	primaryOrigin?: string,
 	rank?: RankSnapshot | null,
+	chrome?: SiteChrome,
 ): Promise<{ status: 200 | 404; html: string }> {
 	if (resolved.kind === "not-found") {
-		return { status: 404, html: notFoundPage(username, hash) };
+		return { status: 404, html: notFoundPage(username, hash, chrome) };
 	}
 	if (resolved.kind === "unreachable") {
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, rank),
+			html: linkOnlyPage(username, hash, rank, chrome),
 		};
 	}
 	const { cast, unfurlMap, quotes, signed, partial } = resolved;
@@ -493,13 +511,14 @@ export async function renderCastHtml(
 				rank,
 				hasExternalLinks(cast),
 				resolved.textCanonical,
+				chrome,
 			),
 		};
 	} catch {
 		// Embed rendering failed — degrade to links instead of erroring.
 		return {
 			status: 200,
-			html: linkOnlyPage(username, hash, rank),
+			html: linkOnlyPage(username, hash, rank, chrome),
 		};
 	}
 }

@@ -40,6 +40,8 @@ import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { getFidRaceSnapshot } from "./fid-race-store.ts";
 import { parseTrackEvent, writeTrackEvent } from "./track.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
+import { loadFarcatPreview } from "./farcat.ts";
+import { siteNameForHost, type SiteChrome } from "./site-chrome.ts";
 
 export const app = new Hono<{ Bindings: Env }>();
 
@@ -56,6 +58,16 @@ function negotiatesJson(c: Context<{ Bindings: Env }>): boolean {
 		c.req.query("format") === "json" ||
 		(c.req.header("Accept") ?? "").includes("application/json")
 	);
+}
+
+// warpcats.com only. forkcaster.xyz (and localhost, tests) stays the
+// default chrome — undefined so renderers keep today's bytes. The FarCat
+// read is best-effort: a miss still brands the wordmark.
+function chromeFor(hostname: string): Promise<SiteChrome | undefined> {
+	if (siteNameForHost(hostname) !== "warpcats") return Promise.resolve(undefined);
+	return loadFarcatPreview()
+		.then((farcat) => ({ site: "warpcats" as const, farcat }))
+		.catch(() => ({ site: "warpcats" as const, farcat: null }));
 }
 
 // Auto-open preference write. Server `Set-Cookie` (not document.cookie)
@@ -123,14 +135,15 @@ app.post("/mcp", (c) =>
 	mcpHandlerFor((c.env as Env | undefined)?.SHIM_POTATO_BASE).fetch(
 		c.req.raw,
 	));
-app.get("/mcp", (c) => {
+app.get("/mcp", async (c) => {
 	// MCP clients probe GET for a server-initiated SSE stream (explicit
 	// text/event-stream accept) — answer with protocol semantics. Browsers
 	// and link crawlers get a shareable OG-tagged server card instead.
 	if ((c.req.header("Accept") ?? "").includes("text/event-stream")) {
 		return c.body(null, 405, { Allow: "POST" });
 	}
-	return c.html(mcpLandingHtml());
+	const chrome = await chromeFor(new URL(c.req.url).hostname);
+	return c.html(mcpLandingHtml(chrome));
 });
 
 // /transparency — edge-cached SSR. The three store reads (parallel: a
@@ -162,10 +175,13 @@ app.get("/transparency", async (c) => {
 	if (hit) return hit;
 	// One fan-out of the three per-isolate-TTL'd stores; absent/unreachable
 	// snapshots → dashes/coming-soon (each read caps a cold lmdis at 2s).
-	const [snapshot, rank, fid] = await Promise.all([
+	const [snapshot, rank, fid, chrome] = await Promise.all([
 		getRaceStatsSnapshot(c.env),
 		getRankSnapshot(c.env),
 		getFidRaceSnapshot(c.env),
+		wantsJson
+			? Promise.resolve(undefined)
+			: chromeFor(new URL(c.req.url).hostname),
 	]);
 	const res: Response = wantsJson
 		? c.json(transparencyJson(snapshot, rank, fid))
@@ -177,6 +193,7 @@ app.get("/transparency", async (c) => {
 					snapshot,
 					rank,
 					fid,
+					chrome,
 				}),
 			);
 	res.headers.set("Cache-Control", `public, s-maxage=${TRANSPARENCY_S_MAXAGE}`);
@@ -254,6 +271,9 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 	// routes: ?format=json wins over Accept; only strict application/json
 	// Accept also negotiates JSON.
 	const wantsJson = negotiatesJson(c);
+	const chromeP = wantsJson
+		? undefined
+		: chromeFor(new URL(c.req.url).hostname);
 	const resolved = await resolveChannel(id);
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderChannelJson(resolved, id);
@@ -267,6 +287,7 @@ async function channelLanding(c: Context<{ Bindings: Env }>) {
 		resolved,
 		id,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
+		await chromeP,
 	);
 	// Retry-After rides the 503 in both variants (identity has no fail-open
 	// source — unlike casts, there is nothing to render without the API).
@@ -330,6 +351,11 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		const hit = await getShell(shellKey);
 		if (hit) return hit;
 	}
+	// Overlaps the cast race. Cache hits returned above, so a warm shell
+	// never fetches a FarCat. JSON never does either.
+	const chromeP = wantsJson
+		? undefined
+		: chromeFor(new URL(c.req.url).hostname);
 	const resolved = await resolveCast(username, hash, c.env, {
 		boxMs: wantsJson ? null : 700,
 	});
@@ -423,13 +449,17 @@ app.get("/:username/:hash{0x[0-9a-fA-F]+}", async (c) => {
 			retryAfter ? { "retry-after": retryAfter } : undefined,
 		);
 	}
-	const rank = await getRankSnapshotSoon(c.env, 400);
+	const [rank, chrome] = await Promise.all([
+		getRankSnapshotSoon(c.env, 400),
+		chromeP ?? Promise.resolve(undefined),
+	]);
 	const { status, html } = await renderCastHtml(
 		resolved,
 		username,
 		hash,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		rank,
+		chrome,
 	);
 	const res = c.html(html, status);
 	// The invariant gate: only found shells with canonical body text enter
@@ -530,6 +560,9 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		const hit = await getShell(shellKey);
 		if (hit) return hit;
 	}
+	const chromeP = wantsJson
+		? undefined
+		: chromeFor(new URL(c.req.url).hostname);
 	const resolved = await resolveProfile(username, {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
@@ -549,12 +582,16 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		);
 	}
 	// Pill order rides the rank snapshot through a per-isolate TTL store.
-	const rank = await getRankSnapshotSoon(c.env, 400);
+	const [rank, chrome] = await Promise.all([
+		getRankSnapshotSoon(c.env, 400),
+		chromeP ?? Promise.resolve(undefined),
+	]);
 	const { status, html } = renderProfileHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		rank,
+		chrome,
 	);
 	// Retry-After rides the 503 in both variants (identity has no fail-open
 	// source — unlike casts, there is nothing to render without shim).
@@ -600,6 +637,7 @@ app.get("/:username/casts-and-replies", async (c) => {
 		const hit = await getShell(shellKey);
 		if (hit) return hit;
 	}
+	const chromeP = chromeFor(new URL(c.req.url).hostname);
 	const resolved = await resolveProfile(username, {
 		timeline: true,
 		// Same ban-signal fork as the profile page: the head's way out
@@ -608,13 +646,17 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// Every shim read races the shim-potato fleet when it's configured.
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
-	const rank = await getRankSnapshotSoon(c.env, 400);
+	const [rank, chrome] = await Promise.all([
+		getRankSnapshotSoon(c.env, 400),
+		chromeP,
+	]);
 	const { status, html } = await renderCastsHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
 		c.env,
 		rank,
+		chrome,
 	);
 	const res = c.html(
 		html,

@@ -64,6 +64,7 @@ import {
 	type ShimUser,
 } from "./shim.ts";
 import { collapseText, escapeHtml, shell } from "./shell.tsx";
+import type { SiteChrome } from "./site-chrome.ts";
 
 /** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
 const TIMELINE_LIMIT = 10;
@@ -338,17 +339,29 @@ function addressFacts(address: string): string {
 	return `<li class="profile-address">${linked}${copy}</li>`;
 }
 
-function notFoundPage(username: string, key = username): string {
+function notFoundPage(username: string, key = username, chrome?: SiteChrome): string {
 	return shell(
 		`${key} · forkcaster`,
 		`<p class="notice">Profile not found: @${escapeHtml(username)}. The username may be wrong or unregistered.</p>`,
+		undefined,
+		undefined,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
-function unavailablePage(username: string, key = username): string {
+function unavailablePage(username: string, key = username, chrome?: SiteChrome): string {
 	return shell(
 		`${key} · forkcaster`,
 		`<p class="notice">Profile data is temporarily unavailable. <a href="/${escapeHtml(username)}">Retry</a>.</p>`,
+		undefined,
+		undefined,
+		undefined,
+		"article",
+		true,
+		chrome,
 	);
 }
 
@@ -386,12 +399,13 @@ export function renderProfileHtml(
 	username: string,
 	primaryOrigin?: string,
 	rank?: RankSnapshot | null,
+	chrome?: SiteChrome,
 ): { status: 200 | 404 | 503; html: string } {
 	if (profile.kind === "not-found") {
-		return { status: 404, html: notFoundPage(username) };
+		return { status: 404, html: notFoundPage(username, undefined, chrome) };
 	}
 	if (profile.kind === "unreachable") {
-		return { status: 503, html: unavailablePage(username) };
+		return { status: 503, html: unavailablePage(username, undefined, chrome) };
 	}
 	const { user, fid } = profile;
 	// Identity law: primary = fname, falling back to the newest-proof
@@ -471,6 +485,8 @@ ${notice}
 			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${COPY_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
+			true,
+			chrome,
 		),
 	};
 }
@@ -558,13 +574,14 @@ export async function renderCastsHtml(
 	primaryOrigin?: string,
 	env?: { UNFURL?: Fetcher; SHIM_POTATO_BASE?: string },
 	rank?: RankSnapshot | null,
+	chrome?: SiteChrome,
 ): Promise<{ status: 200 | 404 | 503; html: string }> {
 	const key = `${username}/casts-and-replies`;
 	if (profile.kind === "not-found") {
-		return { status: 404, html: notFoundPage(username, key) };
+		return { status: 404, html: notFoundPage(username, key, chrome) };
 	}
 	if (profile.kind === "unreachable") {
-		return { status: 503, html: unavailablePage(username, key) };
+		return { status: 503, html: unavailablePage(username, key, chrome) };
 	}
 	const { user, fid, casts, timelineOk, signed } = profile;
 	const primary = primaryHandle(user, username);
@@ -719,6 +736,7 @@ ${listHtml}`;
 			"profile",
 			// No JSON twin — never advertise one.
 			false,
+			chrome,
 		),
 	};
 }

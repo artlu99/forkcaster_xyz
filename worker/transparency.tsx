@@ -12,6 +12,7 @@ import type { Snapshot } from "../scripts/race-stats-lib.ts";
 import type { ProviderId } from "./cast-source.ts";
 import { CLIENTS, ROUTE_KINDS, targetFor } from "./client-registry.ts";
 import { escapeHtml, shell } from "./shell.tsx";
+import type { SiteChrome } from "./site-chrome.ts";
 
 // Public provider roster — names included on purpose (transparency over
 // infra obscurity). Keyed by ProviderId so a roster change in
@@ -345,6 +346,7 @@ export function renderTransparencyHtml(
 		snapshot?: Snapshot | null;
 		rank?: RankSnapshot | null;
 		fid?: FidSnapshot | null;
+		chrome?: SiteChrome;
 	} = {},
 ): string {
 	// Section order serves the common visitor: what it is → what's tracked
@@ -413,15 +415,19 @@ ${DOMAINS.registrations
 
 <p class="notice">Questions? <a href="${REPO}/issues">Open an issue</a>.</p>
 </div>`;
+	const site = options.chrome?.site === "warpcats" ? "warpcats" : "forkcaster";
 	return shell(
 		"transparency · forkcaster",
 		body,
 		{
-			ogTitle: "forkcaster — transparency",
+			ogTitle: `${site} — transparency`,
 			description:
 				"What forkcaster shows, what it collects, and where the data comes from.",
 		},
 		undefined,
 		options.canonicalUrl,
+		"article",
+		true,
+		options.chrome,
 	);
 }
