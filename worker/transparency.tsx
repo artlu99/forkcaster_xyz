@@ -17,19 +17,23 @@ import type { SiteChrome } from "./site-chrome.ts";
 // Public provider roster — names included on purpose (transparency over
 // infra obscurity). Keyed by ProviderId so a roster change in
 // cast-source.ts fails the typecheck here instead of drifting silently.
-// Seats: "shim-potato" leads the var, "shim-potato-2" is fleet member 2's
-// host. Retired ids stay while their datapoints decay through the 168h
-// stats window: "shim-cloud" (cloud's seat name — the base was pruned
-// from the production var and the Render host decommissioned, Nov 2026),
-// "shim" (the pre-cutover race-stats id — still cloud's live FID-race id
-// vocabulary) and "shim-potato-3" (the seat's first-days name before the
-// shim-cloud rename).
+// Seat ids are POSITIONAL (fleetMemberId by var index); hostnames count
+// cloud, ids don't — so member 3's host is named shim-potato-4 and
+// member 4's shim-potato-5 (both joined Nov 7 2026, live-checked 8/8
+// against the shim contract). "shim-potato-3" also still carries cloud's
+// pre-rename datapoints, decaying through the 168h window (~Nov 12).
+// Retired ids stay while their datapoints decay: "shim-cloud" (base
+// pruned from the production var, Render host decommissioned, Nov 2026)
+// and "shim" (the pre-cutover race-stats id). Labels describe the
+// STEADY-STATE var (the lead restored); while shim-potato re-deploys the
+// ids shift positionally — the table self-corrects as the window rolls.
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
 	shim: "shim.artlu.xyz (cloud's fid-race id; pre-cutover race-stats id)",
 	"shim-potato": "shim-potato.artlu.xyz (fleet lead)",
 	"shim-potato-2": "shim-potato-2.artlu.xyz (fleet member 2)",
 	"shim-cloud": "shim.artlu.xyz (retired Nov 2026 — decaying stats id)",
-	"shim-potato-3": "shim.artlu.xyz (cloud's pre-rename seat id — decaying)",
+	"shim-potato-3": "shim-potato-4.artlu.xyz (fleet member 3)",
+	"shim-potato-4": "shim-potato-5.artlu.xyz (fleet member 4)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",
 	snap: "snap.farcaster.xyz:3381 (text-blind)",

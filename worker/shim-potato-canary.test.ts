@@ -329,7 +329,9 @@ describe("default roster", () => {
  * The production fleet var, asserted BY CONTRACT (the roster-guard rule):
  * the shim-cloud retirement (Nov 2026) pruned cloud's base — these tests
  * fail if a var edit ever re-adds it, so the retired host stays retired
- * and generates no new "shim-cloud" datapoints.
+ * and generates no new "shim-cloud" datapoints. The exact-fleet guard
+ * makes every membership change deliberate: update EXPECTED_FLEET in the
+ * same commit as the var.
  */
 describe("production fleet var (shim-cloud retirement)", () => {
 	const varSource = readFileSync(
@@ -350,5 +352,18 @@ describe("production fleet var (shim-cloud retirement)", () => {
 
 	test("no cloud base — the retired host never races again", () => {
 		expect(bases).not.toContain(SHIM_CLOUD_BASE);
+	});
+
+	// TEMPORARY (Nov 7 2026): the lead (shim-potato.artlu.xyz) is out
+	// while it re-deploys. Restoring it means putting it back at the
+	// FRONT — order is the stagger/primary order, and the seats are
+	// positional (the new hosts shim-potato-4/-5 race as ids
+	// shim-potato-3/-4 only once the lead is back at index 0).
+	test("fleet membership is exactly this list, in this order", () => {
+		expect(bases).toEqual([
+			"https://shim-potato-2.artlu.xyz",
+			"https://shim-potato-4.artlu.xyz",
+			"https://shim-potato-5.artlu.xyz",
+		]);
 	});
 });

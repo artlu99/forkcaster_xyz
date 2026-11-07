@@ -960,16 +960,19 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	// Eight: the raw nodes, farcaster.tv, the fleet lead, fleet member 2,
-	// and the decaying ids — cloud's seat (shim-cloud, retired Nov 2026),
-	// its pre-rename seat id (shim-potato-3), and the pre-cutover "shim".
-	expect(json.data.providers).toHaveLength(8);
+	// Nine: the raw nodes, farcaster.tv, the fleet lead, fleet member 2,
+	// the two live potato seats (ids 3 and 4 — hosts shim-potato-4/-5,
+	// joined Nov 7 2026; id 3 also still decays cloud's pre-rename
+	// datapoints), the retired cloud seat id (shim-cloud), and the
+	// pre-cutover "shim" id.
+	expect(json.data.providers).toHaveLength(9);
 	expect(json.data.providers.map((p: { id: string }) => p.id)).toEqual([
 		"shim",
 		"shim-potato",
 		"shim-potato-2",
 		"shim-cloud",
 		"shim-potato-3",
+		"shim-potato-4",
 		"farcaster-tv",
 		"haatz",
 		"snap",
