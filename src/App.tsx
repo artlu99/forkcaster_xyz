@@ -5,6 +5,7 @@ import { iconMark } from '../shared/icon-mark.ts'
 // registry's read-only per-kind summary line.
 import { LAST_CLIENT_COOKIE, parseClientCookie } from '../worker/clients.ts'
 import { kindSummary } from '../worker/client-registry.ts'
+import { siteNameForHost, type FarcatPreview } from '../worker/site-chrome.ts'
 import './App.css'
 
 function readCookiePrefs() {
@@ -93,12 +94,57 @@ function KindSummary() {
   return <p className="kind-summary">{line}</p>
 }
 
+function isFarcatPreview(value: unknown): value is FarcatPreview {
+  if (!value || typeof value !== 'object') return false
+  const cat = value as FarcatPreview
+  return (
+    typeof cat.name === 'string' &&
+    typeof cat.href === 'string' &&
+    cat.href.startsWith(
+      'https://opensea.io/item/ethereum/0x9340204616750cb61e56437befc95172c6ff6606/',
+    ) &&
+    typeof cat.imageUrl === 'string' &&
+    cat.imageUrl.startsWith('https://i2c.seadn.io/')
+  )
+}
+
 function App() {
+  // The landing is client-only, so the host is known on the first paint.
+  const site = siteNameForHost(location.hostname)
+  const [cat, setCat] = useState<FarcatPreview | null>(null)
+  useEffect(() => {
+    if (site !== 'warpcats') return
+    document.title = 'warpcats — Farcaster casts, unfurled'
+    let cancelled = false
+    fetch('/farcat.json')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled && isFarcatPreview(body)) setCat(body)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [site])
   return (
     <>
       <section id="center">
         <p className="eyebrow">Farcaster, unfurled</p>
-        <h1>forkcaster</h1>
+        <h1>{site}</h1>
+        {cat ? (
+          <a
+            className="farcat-preview"
+            href={cat.href}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <img src={cat.imageUrl} alt={cat.name} width={168} height={168} />
+            <span className="farcat-name">{cat.name}</span>
+            {cat.priceLabel ? (
+              <span className="farcat-price">{cat.priceLabel}</span>
+            ) : null}
+          </a>
+        ) : null}
         <p className="lede">
           Every Farcaster cast, one clean link away — rendered straight from
           the chain. No app, no login.

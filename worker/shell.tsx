@@ -4,6 +4,7 @@
 
 import { siGithub, siGithubsponsors, siOpenaccess } from "simple-icons";
 import { iconMark } from "../shared/icon-mark.ts";
+import { FARCAT_IMAGE_QUERY } from "./farcat.ts";
 import type { FarcatPreview, SiteChrome } from "./site-chrome.ts";
 
 // Shared with transparency.tsx — the only escaper for hand-built HTML.
@@ -39,8 +40,9 @@ const SAFE_FARCAT_NAME = /^FarCats #\d+$/;
 const SAFE_FARCAT_PRICE = /^\d+(?:\.\d+)? (?:ETH|WETH)$/;
 const SAFE_FARCAT_HREF =
 	/^https:\/\/opensea\.io\/item\/ethereum\/0x9340204616750cb61e56437befc95172c6ff6606\/\d+$/;
-const SAFE_FARCAT_IMAGE =
-	/^https:\/\/i2c\.seadn\.io\/ethereum\/0x9340204616750cb61e56437befc95172c6ff6606\/[a-z0-9]+\.(?:jpe?g|png|gif|webp)\?w=64&h=64$/;
+const SAFE_FARCAT_IMAGE = new RegExp(
+	`^https://i2c\\.seadn\\.io/ethereum/0x9340204616750cb61e56437befc95172c6ff6606/[a-z0-9]+\\.(?:jpe?g|png|gif|webp)${FARCAT_IMAGE_QUERY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+);
 
 /** Bottom-of-page banner. Empty unless every field matches the FarCats
  * allowlist — the preview is parsed from a third-party document. */
@@ -55,7 +57,57 @@ export function farcatChipHtml(farcat: FarcatPreview | null | undefined): string
 	const price = farcat.priceLabel
 		? `<span class="farcat-price">${escapeHtml(farcat.priceLabel)}</span>`
 		: "";
-	return `<a class="farcat" href="${escapeHtml(farcat.href)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(farcat.imageUrl)}" alt="" width="32" height="32" /><span class="farcat-name">${escapeHtml(farcat.name)}</span>${price}</a>`;
+	return `<a class="farcat" href="${escapeHtml(farcat.href)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(farcat.imageUrl)}" alt="" width="168" height="168" /><span class="farcat-copy"><span class="farcat-name">${escapeHtml(farcat.name)}</span>${price}</span></a>`;
+}
+
+/**
+ * Empty mount plus the script that fills it from /farcat.json. The HTML
+ * is constant — no listing is baked in — so a cached shell stays valid
+ * while the cat can change. The script builds DOM nodes and refuses any
+ * field outside the same allowlist as farcatChipHtml.
+ */
+export function farcatMountHtml(): string {
+	return `<div id="farcat-mount"></div>
+<script>
+(function () {
+  var mount = document.getElementById("farcat-mount");
+  if (!mount || mount.firstChild) return;
+  fetch("/farcat.json").then(function (res) {
+    return res.ok ? res.json() : null;
+  }).then(function (cat) {
+    if (!cat) return;
+    if (!${SAFE_FARCAT_NAME}.test(cat.name)) return;
+    if (!${SAFE_FARCAT_HREF}.test(cat.href)) return;
+    if (!${SAFE_FARCAT_IMAGE}.test(cat.imageUrl)) return;
+    if (cat.priceLabel != null && !${SAFE_FARCAT_PRICE}.test(cat.priceLabel)) return;
+    var a = document.createElement("a");
+    a.className = "farcat";
+    a.href = cat.href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    var img = document.createElement("img");
+    img.src = cat.imageUrl;
+    img.alt = "";
+    img.width = 168;
+    img.height = 168;
+    var copy = document.createElement("span");
+    copy.className = "farcat-copy";
+    var name = document.createElement("span");
+    name.className = "farcat-name";
+    name.textContent = cat.name;
+    copy.appendChild(name);
+    if (cat.priceLabel) {
+      var price = document.createElement("span");
+      price.className = "farcat-price";
+      price.textContent = cat.priceLabel;
+      copy.appendChild(price);
+    }
+    a.appendChild(img);
+    a.appendChild(copy);
+    mount.appendChild(a);
+  }).catch(function () {});
+})();
+</script>`;
 }
 
 export function shell(
@@ -84,7 +136,7 @@ export function shell(
 		siteName === "warpcats" && title.endsWith(" · forkcaster")
 			? `${title.slice(0, -"forkcaster".length)}warpcats`
 			: title;
-	const farcat = siteName === "warpcats" ? farcatChipHtml(chrome?.farcat) : "";
+	const farcat = siteName === "warpcats" ? farcatMountHtml() : "";
 	const canonicalMeta = canonicalUrl
 		? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`
 		: "";
@@ -178,10 +230,10 @@ body {
 a.farcat {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
   max-width: 672px;
   margin: 0 auto;
-  padding: 14px 20px 32px;
+  padding: 16px 20px 32px;
   border-top: 1px solid var(--line);
   color: var(--ink);
   text-decoration: none;
@@ -189,14 +241,15 @@ a.farcat {
   font-variant-numeric: tabular-nums;
 }
 .farcat img {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 168px;
+  height: 168px;
+  border-radius: 12px;
   object-fit: cover;
   background: var(--line);
   flex: none;
 }
-.farcat-name { font-weight: 600; }
+.farcat-copy { display: flex; flex-direction: column; gap: 4px; }
+.farcat-name { font-weight: 600; font-size: 16px; }
 .farcat-price { color: var(--muted); }
 a.farcat:hover, a.farcat:focus-visible { color: var(--accent); }
 main { padding-bottom: 8px; }

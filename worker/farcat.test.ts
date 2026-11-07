@@ -1,6 +1,6 @@
 /**
- * warpcats.com chrome: hostname selects the brand, and the header chip is
- * the cheapest FarCat embedded in the OpenSea collection document.
+ * warpcats.com chrome: hostname selects the brand, and the banner is
+ * the highest FarCat ask embedded in the OpenSea collection document.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
@@ -11,7 +11,7 @@ mock.module("react/jsx-runtime", () => require("preact/jsx-runtime"));
 mock.module("react/jsx-dev-runtime", () => require("preact/jsx-runtime"));
 
 const { app } = await import("./index.ts");
-const { clearFarcatCache, loadFarcatPreview, parseFloorFarcat } = await import(
+const { clearFarcatCache, loadFarcatPreview, parseTopFarcat } = await import(
 	"./farcat.ts"
 );
 const { farcatChipHtml, shell } = await import("./shell.tsx");
@@ -25,14 +25,14 @@ function item(id: string, name: string, price: string, image: string): string {
 	return `"tokenId":"${id}","name":"${name}","bestListing":{"pricePerItem":{"token":{"unit":${price},"symbol":"ETH"}}},"imageUrl":"${image}"`;
 }
 
-const FIXTURE = `"collectionItems":{"items":[${item("10", "FarCats #2", "0.02", IMAGE_A)},${item("1377", "FarCats #1648", "0.0008899", IMAGE_B)}]}`;
+const FIXTURE = `"collectionItems":{"items":[${item("1377", "FarCats #1648", "0.0008899", IMAGE_B)},${item("10", "FarCats #2", "0.02", IMAGE_A)}]}`;
 
-const FLOOR = {
-	name: "FarCats #1648",
-	tokenId: "1377",
-	imageUrl: `${IMAGE_B}?w=64&h=64`,
-	priceLabel: "0.0008899 ETH",
-	href: `https://opensea.io/item/ethereum/${CONTRACT}/1377`,
+const TOP = {
+	name: "FarCats #2",
+	tokenId: "10",
+	imageUrl: `${IMAGE_A}?w=336&h=336`,
+	priceLabel: "0.02 ETH",
+	href: `https://opensea.io/item/ethereum/${CONTRACT}/10`,
 };
 
 describe("host", () => {
@@ -46,18 +46,18 @@ describe("host", () => {
 	});
 });
 
-describe("floor listing parse", () => {
-	test("picks the cheapest ask, not the first item or the collection image", () => {
-		expect(parseFloorFarcat(FIXTURE)).toEqual(FLOOR);
+describe("highest listing parse", () => {
+	test("picks the highest ask, not the first item or the floor", () => {
+		expect(parseTopFarcat(FIXTURE)).toEqual(TOP);
 	});
 
 	test("ignores an item whose only image is the collection logo", () => {
 		const html = `"collectionItems":{"items":[{"tokenId":"1","name":"FarCats #9","bestListing":{"unit":0.1,"symbol":"ETH"},"imageUrl":"https://i2c.seadn.io/ethereum/0809f716d3254bfc88c82747dfffbc53/abcd.gif"}]}`;
-		expect(parseFloorFarcat(html)).toBeNull();
+		expect(parseTopFarcat(html)).toBeNull();
 	});
 
 	test("no listings block ⇒ null", () => {
-		expect(parseFloorFarcat("<html>no items</html>")).toBeNull();
+		expect(parseTopFarcat("<html>no items</html>")).toBeNull();
 	});
 });
 
@@ -69,7 +69,7 @@ describe("bottom banner", () => {
 		expect(html).not.toContain('class="farcat"');
 	});
 
-	test("warpcats shell brands the wordmark and banners the floor cat under the footer", () => {
+	test("warpcats shell brands the wordmark and mounts a client-filled cat", () => {
 		const html = shell(
 			"zoo/0x · forkcaster",
 			"<p>hi</p>",
@@ -78,7 +78,7 @@ describe("bottom banner", () => {
 			undefined,
 			"article",
 			true,
-			{ site: "warpcats", farcat: FLOOR },
+			{ site: "warpcats", farcat: TOP },
 		);
 		expect(html).toContain("<title>zoo/0x · warpcats</title>");
 		expect(html).toContain('content="warpcats"');
@@ -86,17 +86,19 @@ describe("bottom banner", () => {
 		const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
 		expect(header).not.toContain("farcat");
 		const afterFooter = html.slice(html.indexOf("</footer>"));
-		expect(afterFooter).toContain('class="farcat"');
-		expect(afterFooter).toContain("FarCats #1648");
-		expect(afterFooter).toContain("0.0008899 ETH");
-		expect(afterFooter).toContain(FLOOR.href);
-		expect(afterFooter).toContain(`${IMAGE_B}?w=64&amp;h=64`);
+		expect(afterFooter).toContain('id="farcat-mount"');
+		expect(afterFooter).toContain('fetch("/farcat.json")');
+		expect(afterFooter).toContain("img.width = 168");
+		// The listing itself is not in the HTML. The browser reads it.
+		expect(afterFooter).not.toContain(TOP.href);
+		expect(afterFooter).not.toContain("0.02 ETH");
+		expect(afterFooter).not.toContain("FarCats #2");
 	});
 
 	test("a non-allowlisted image is dropped", () => {
-		expect(farcatChipHtml({ ...FLOOR, imageUrl: "https://evil.test/x.jpg" })).toBe("");
-		expect(farcatChipHtml({ ...FLOOR, href: "https://evil.test/item" })).toBe("");
-		expect(farcatChipHtml({ ...FLOOR, priceLabel: "<script>" })).toBe("");
+		expect(farcatChipHtml({ ...TOP, imageUrl: "https://evil.test/x.jpg" })).toBe("");
+		expect(farcatChipHtml({ ...TOP, href: "https://evil.test/item" })).toBe("");
+		expect(farcatChipHtml({ ...TOP, priceLabel: "<script>" })).toBe("");
 	});
 });
 
@@ -119,11 +121,18 @@ describe("loader and route", () => {
 			return new Response(FIXTURE, { status: 200 });
 		}) as typeof fetch;
 		const [a, b] = await Promise.all([loadFarcatPreview(), loadFarcatPreview()]);
-		expect(a).toEqual(FLOOR);
-		expect(b).toEqual(FLOOR);
+		expect(a).toEqual(TOP);
+		expect(b).toEqual(TOP);
 		expect(calls).toBe(1);
-		expect(await loadFarcatPreview()).toEqual(FLOOR);
+		expect(await loadFarcatPreview()).toEqual(TOP);
 		expect(calls).toBe(1);
+	});
+
+	test("GET /farcat.json returns the highest listing", async () => {
+		globalThis.fetch = (async () => new Response(FIXTURE, { status: 200 })) as typeof fetch;
+		const res = await app.request("https://warpcats.com/farcat.json");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual(TOP);
 	});
 
 	test("forkcaster /mcp does not fetch a FarCat", async () => {
@@ -141,16 +150,17 @@ describe("loader and route", () => {
 		expect(calls).toBe(0);
 	});
 
-	test("warpcats /mcp shows the floor cat, and still brands when the fetch fails", async () => {
+	test("warpcats /mcp mounts the cat client-side, and still brands with no listing baked in", async () => {
 		globalThis.fetch = (async () => new Response(FIXTURE, { status: 200 })) as typeof fetch;
 		const ok = await app.request("https://warpcats.com/mcp");
 		const okBody = await ok.text();
 		expect(okBody).toContain("<title>warpcats — MCP server</title>");
 		expect(okBody).toContain("<h1>warpcats MCP server</h1>");
-		const afterCopy = okBody.slice(okBody.indexOf("</ul>"));
-		expect(afterCopy).toContain('class="farcat"');
-		expect(afterCopy).toContain("0.0008899 ETH");
-		expect(afterCopy).toContain(FLOOR.href);
+		const afterCopy = okBody.slice(okBody.lastIndexOf("</ul>"));
+		expect(afterCopy).toContain('id="farcat-mount"');
+		expect(afterCopy).toContain('fetch("/farcat.json")');
+		expect(afterCopy).not.toContain(TOP.href);
+		expect(afterCopy).not.toContain("0.02 ETH");
 
 		clearFarcatCache();
 		globalThis.fetch = (async () => {

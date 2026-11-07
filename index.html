@@ -7,6 +7,14 @@
     <link rel="mcp-server" href="/mcp" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>forkcaster — Farcaster casts, unfurled</title>
+    <script>
+      (function () {
+        var host = location.hostname.replace(/\.$/, "").toLowerCase();
+        if (host === "warpcats.com" || host === "www.warpcats.com") {
+          document.title = "warpcats — Farcaster casts, unfurled";
+        }
+      })();
+    </script>
     <link rel="canonical" href="https://forkcaster.xyz/" />
     <meta property="og:url" content="https://forkcaster.xyz/" />
     <meta

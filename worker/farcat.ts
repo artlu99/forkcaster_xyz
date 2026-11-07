@@ -1,4 +1,4 @@
-// Floor FarCat for the warpcats.com header.
+// Highest-listed FarCat for the warpcats.com banner and landing.
 //
 // FarCats (ERC-721, Ethereum mainnet):
 //   contract  0x9340204616750cb61e56437befc95172c6ff6606
@@ -12,18 +12,21 @@
 // The public API requires a key this worker does not have. The collection
 // page's server render embeds the current listings (token id, metadata
 // name, seadn image, best ask). One fetch, parsed below, cached per
-// isolate. The image URL gets ?w=64&h=64 — seadn then returns ~2KB, which
-// is the right weight for a 32px header mark. A miss leaves the header
-// without a cat; the page never waits on a second gateway.
+// isolate. Buyer offers on this collection are one shared dust bid, so
+// the highlight is the highest ask, not that bid and not the floor.
+// Pages do not inline the result: the browser reads /farcat.json and
+// paints the banner. The image URL gets ?w=336&h=336 for a ~168px preview.
 
 import type { FarcatPreview } from "./site-chrome.ts";
 
 const CONTRACT = "0x9340204616750cb61e56437befc95172c6ff6606";
 const COLLECTION_URL = "https://opensea.io/collection/farcats";
 
-const FLOOR_TTL_MS = 15 * 60 * 1000;
+const PREVIEW_TTL_MS = 15 * 60 * 1000;
 const MISS_TTL_MS = 45 * 1000;
 const FETCH_MS = 1500;
+/** 2× a 168px preview. seadn resizes; the banner and the landing share it. */
+export const FARCAT_IMAGE_QUERY = "?w=336&h=336";
 
 const IMAGE_RE =
 	/https:\/\/i2c\.seadn\.io\/ethereum\/0x9340204616750cb61e56437befc95172c6ff6606\/[a-z0-9]+\.(?:jpe?g|png|gif|webp)/;
@@ -45,23 +48,23 @@ export function clearFarcatCache(): void {
 export function loadFarcatPreview(): Promise<FarcatPreview | null> {
 	if (cached && Date.now() < cached.until) return Promise.resolve(cached.preview);
 	if (!pending) {
-		pending = resolveFloor().finally(() => {
+		pending = resolveTop().finally(() => {
 			pending = null;
 		});
 	}
 	return pending;
 }
 
-async function resolveFloor(): Promise<FarcatPreview | null> {
-	const preview = await fetchFloor();
+async function resolveTop(): Promise<FarcatPreview | null> {
+	const preview = await fetchTop();
 	cached = {
 		preview,
-		until: Date.now() + (preview ? FLOOR_TTL_MS : MISS_TTL_MS),
+		until: Date.now() + (preview ? PREVIEW_TTL_MS : MISS_TTL_MS),
 	};
 	return preview;
 }
 
-async function fetchFloor(): Promise<FarcatPreview | null> {
+async function fetchTop(): Promise<FarcatPreview | null> {
 	try {
 		const res = await fetch(COLLECTION_URL, {
 			signal: AbortSignal.timeout(FETCH_MS),
@@ -77,18 +80,18 @@ async function fetchFloor(): Promise<FarcatPreview | null> {
 		if (!res.ok) return null;
 		const html = await res.text();
 		if (html.length > 3_000_000) return null;
-		return parseFloorFarcat(html);
+		return parseTopFarcat(html);
 	} catch {
 		return null;
 	}
 }
 
 /**
- * Cheapest listed FarCat in an OpenSea collection document. Returns null
+ * Highest listed FarCat in an OpenSea collection document. Returns null
  * when the listings block is missing or no item has an ask, a FarCats
  * name, and a seadn image under this contract — never a partial.
  */
-export function parseFloorFarcat(html: string): FarcatPreview | null {
+export function parseTopFarcat(html: string): FarcatPreview | null {
 	const start = html.indexOf('"collectionItems"');
 	if (start < 0) return null;
 	const slice = html.slice(start, start + 800_000);
@@ -101,14 +104,14 @@ export function parseFloorFarcat(html: string): FarcatPreview | null {
 		if (!id || !name || !image || !listing) continue;
 		const value = Number(listing[1]);
 		if (!Number.isFinite(value) || value <= 0) continue;
-		if (best && value >= best.value) continue;
+		if (best && value <= best.value) continue;
 		const tokenId = id[1] ?? "";
 		best = {
 			value,
 			preview: {
 				name: name[1] ?? "",
 				tokenId,
-				imageUrl: `${image[0]}?w=64&h=64`,
+				imageUrl: `${image[0]}${FARCAT_IMAGE_QUERY}`,
 				priceLabel: `${listing[1]} ${listing[2]}`,
 				href: `https://opensea.io/item/ethereum/${CONTRACT}/${tokenId}`,
 			},

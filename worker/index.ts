@@ -61,13 +61,11 @@ function negotiatesJson(c: Context<{ Bindings: Env }>): boolean {
 }
 
 // warpcats.com only. forkcaster.xyz (and localhost, tests) stays the
-// default chrome — undefined so renderers keep today's bytes. The FarCat
-// read is best-effort: a miss still brands the wordmark.
+// default chrome — undefined so renderers keep today's bytes. The cat
+// itself is not rendered here; the page fetches /farcat.json.
 function chromeFor(hostname: string): Promise<SiteChrome | undefined> {
 	if (siteNameForHost(hostname) !== "warpcats") return Promise.resolve(undefined);
-	return loadFarcatPreview()
-		.then((farcat) => ({ site: "warpcats" as const, farcat }))
-		.catch(() => ({ site: "warpcats" as const, farcat: null }));
+	return Promise.resolve({ site: "warpcats", farcat: null });
 }
 
 // Auto-open preference write. Server `Set-Cookie` (not document.cookie)
@@ -229,6 +227,16 @@ app.get("/race-stats.json", async (c) => {
 		}
 	}
 	return res;
+});
+
+// Highest FarCat listing for the warpcats landing. Same isolate cache as
+// the banner. Registered before /:username so "farcat.json" is not a profile.
+app.get("/farcat.json", async (c) => {
+	const farcat = await loadFarcatPreview();
+	if (!farcat) return c.body(null, 404);
+	return c.json(farcat, 200, {
+		"cache-control": "public, max-age=60, s-maxage=300",
+	});
 });
 
 // Agent-facing index: the JSON surfaces this worker serves.

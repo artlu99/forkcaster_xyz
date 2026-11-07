@@ -62,8 +62,10 @@ export const PROFILE_SHELL_TTL_SECONDS = 600;
  * follows the host, and a floor FarCat chip rides the header. Shells
  * cached on that host still say forkcaster; the header CSS lives in
  * every shell. v9: that chip moves to a banner under the footer, on
- * every shell page. */
-export const SHELL_SALT = "v9";
+ * every shell page. v10: the banner shows the highest ask at 168px,
+ * not the floor at pfp size. v11: the cat is no longer baked into the
+ * shell; the page fills #farcat-mount from /farcat.json. */
+export const SHELL_SALT = "v11";
 
 /** Request-side gate: only HTML requests may read or fill the shell
  * cache. JSON variants bypass entirely. (Personalization is client-side

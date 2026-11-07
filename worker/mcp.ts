@@ -10,7 +10,7 @@ import {
 	runGetCastLink,
 	type CastRefOutput,
 } from "./cast-ref.ts";
-import { farcatChipHtml } from "./shell.tsx";
+import { farcatMountHtml } from "./shell.tsx";
 import type { SiteChrome } from "./site-chrome.ts";
 
 export function createMcpServer(potatoBases?: string | null): McpServer {
@@ -62,11 +62,11 @@ export const mcpHandler = createMcpHandler(() => createMcpServer());
  * GET /mcp — a shareable server card for browsers and link crawlers
  * (POST remains the protocol transport). Copy is first-party constants.
  * The only request-derived choice is the host name (warpcats.com vs
- * forkcaster); the optional FarCat chip is allowlisted in farcatChipHtml.
+ * forkcaster). The FarCat banner is filled in the browser from /farcat.json.
  */
 export function mcpLandingHtml(chrome?: SiteChrome): string {
 	const site = chrome?.site === "warpcats" ? "warpcats" : "forkcaster";
-	const chip = site === "warpcats" ? farcatChipHtml(chrome?.farcat) : "";
+	const chip = site === "warpcats" ? farcatMountHtml() : "";
 	const title = `${site} — MCP server for Farcaster casts`;
 	// Roster mentions stay generic on purpose: a new registry entry must
 	// not require touching this copy. The authoritative list is the tool's
@@ -114,9 +114,10 @@ a { color: var(--ink); }
 code { background: var(--line); padding: 2px 6px; border-radius: 4px; }
 h1 { font-size: 22px; }
 h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 28px; }
-a.farcat { display: flex; align-items: center; gap: 10px; margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 14px; font-variant-numeric: tabular-nums; }
-.farcat img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none; }
-.farcat-name { font-weight: 600; }
+a.farcat { display: flex; align-items: center; gap: 16px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 14px; font-variant-numeric: tabular-nums; }
+.farcat img { width: 168px; height: 168px; border-radius: 12px; object-fit: cover; flex: none; }
+.farcat-copy { display: flex; flex-direction: column; gap: 4px; }
+.farcat-name { font-weight: 600; font-size: 16px; }
 .farcat-price { color: var(--muted); }
 </style>
 </head>
