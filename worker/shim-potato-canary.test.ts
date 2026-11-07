@@ -107,19 +107,19 @@ describe("raceRoster", () => {
 		expect(roster.at(-1)?.canServe).toBeDefined();
 	});
 
-	test("cloud's base rides the var like any member (cutover)", () => {
+	test("cloud's base rides the var under its own name — it is not a potato", () => {
 		const roster = raceRoster("https://shim-potato.test,https://shim.artlu.xyz");
 		expect(roster.map((p) => p.id)).toEqual([
 			"haatz",
 			"snap",
 			"farcaster-tv",
 			"shim-potato",
-			"shim-potato-2",
+			"shim-cloud",
 		]);
 		// The threaded raw legs carry the fleet race into the identity
 		// stage; roster assembly stays provider-shape-identical.
 		expect(raceRoster("https://shim.artlu.xyz").at(-1)?.id).toBe(
-			"shim-potato",
+			"shim-cloud",
 		);
 	});
 });

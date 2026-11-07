@@ -7,15 +7,18 @@
 // countIf/sumIf/quantileExactWeighted with _sample_interval weights.
 
 /** Static roster — keep in sync with worker/cast-source.ts (near-static by design).
- * Cutover (Nov 2026): the raced roster has no static "shim" leg — cloud races
- * as a fleet member by var position ("shim-potato" leads, "shim-potato-2" =
- * the cloud reader today). The "shim" row stays for now so its pre-cutover
- * datapoints decay visibly through the 168h window; trim it once they've
- * aged out. Add -3/-4 rows as regional members join the var. */
+ * Cutover (Nov 2026): the raced roster has no static "shim" leg — the var
+ * IS the fleet ("shim-potato" leads, "shim-potato-2" is member 2's host,
+ * and cloud's base races under its own name, "shim-cloud" — it is not a
+ * potato). "shim" was trimmed Nov 6 (pre-cutover id, aged out); keep
+ * "shim-potato-3" — the seat's name during its first days, before the
+ * shim-cloud rename — until those datapoints decay out of the window
+ * (~Nov 12), then trim it too. Add potato rows as regional members join. */
 export const ROSTER = [
-	{ id: "shim", role: "complete" },
 	{ id: "shim-potato", role: "complete" },
 	{ id: "shim-potato-2", role: "complete" },
+	{ id: "shim-cloud", role: "complete" },
+	{ id: "shim-potato-3", role: "complete" },
 	{ id: "haatz", role: "complete" },
 	{ id: "snap", role: "complete" },
 	{ id: "farcaster-tv", role: "partial" },

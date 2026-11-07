@@ -45,6 +45,7 @@ import {
 	SHIM_CLOUD_BASE,
 	fleetBases,
 	fleetMemberId,
+	fleetSeatId,
 	getCastByUsernameHashFrom,
 	raceFidByUsername,
 	resolvesHash,
@@ -56,10 +57,12 @@ export type { ShimCast, ShimEmbed };
 
 export type ProviderId =
 	| "shim"
+	/** Cloud's var seat under its own name — it is not a potato. */
+	| "shim-cloud"
 	| "haatz"
 	| "snap"
 	| "farcaster-tv"
-	/** The potato fleet: shim-potato, shim-potato-2, -3, … (comma-separated var). */
+	/** The potato fleet: shim-potato, shim-potato-2, … (comma-separated var). */
 	| `shim-potato${string}`;
 
 /**
@@ -251,7 +254,7 @@ export function raceRoster(potatoBases?: string | null): CastProvider[] {
 		rawNodeProvider("snap", SNAP_BASE, potatoBases),
 		farcasterTvProvider,
 		...bases.map((base, index) =>
-			shimProviderFor(fleetMemberId(index) as ProviderId, base),
+			shimProviderFor(fleetSeatId(base, index) as ProviderId, base),
 		),
 	];
 }
@@ -267,7 +270,7 @@ export function jsonRoster(potatoBases?: string | null): CastProvider[] {
 	const bases = fleetBases(potatoBases);
 	if (bases.length === 0) return [shimProvider];
 	return bases.map((base, index) =>
-		shimProviderFor(fleetMemberId(index) as ProviderId, base),
+		shimProviderFor(fleetSeatId(base, index) as ProviderId, base),
 	);
 }
 
@@ -577,8 +580,9 @@ async function resolveFid(
  * Map the shim-side raceFidByUsername winner base onto its reporting id:
  * the cloud reader keeps the historical "shim"; every var member reports
  * its fleet position ("shim-potato", "shim-potato-2", …) — the same
- * vocabulary the cast-race roster legs carry, so both telemetry surfaces
- * agree on one name per host.
+ * vocabulary the cast-race roster legs carry, except cloud's cast-race
+ * seat, which rides its own name ("shim-cloud") while the fid race keeps
+ * "shim" for it. One fid-race name per host, stable across the rename.
  */
 function fidSourceFor(
 	winnerBase: string | undefined,
@@ -738,16 +742,30 @@ export async function raceCast(
 	// race immediately. A fast winner clears the timers of starts that
 	// never fired — the straggler reads are saved.
 	const staggerTimers: ReturnType<typeof setTimeout>[] = [];
-	const fleetCount = eligible.filter((p) => /^shim-potato/.test(p.id)).length;
+	// Fleet membership by id: the potato positional ids, plus cloud's
+	// "shim-cloud" name-id. The legacy no-var "shim" leg is not a seat.
+	const isFleetSeat = (id: ProviderId): boolean =>
+		id === "shim-cloud" || /^shim-potato/.test(id);
+	const fleetCount = eligible.filter((p) => isFleetSeat(p.id)).length;
 	const fleetDelays = staggerDelays(fleetCount + 1);
-	const delayFor = (id: ProviderId): number => {
-		// First potato leads at 0ms; later members one step apart; shim
-		// trails the whole fleet by a step.
-		const fleetMatch = /^shim-potato(?:-(\d+))?$/.exec(id);
-		if (fleetMatch) return fleetDelays[Number(fleetMatch[1] ?? 1) - 1] ?? 0;
-		if (id === "shim") return fleetDelays[fleetCount] ?? 0;
-		return 0;
-	};
+	// Stagger slots ride ROSTER order (== var order) rather than parsing a
+	// position number out of the id — cloud's seat id carries none: each
+	// fleet leg takes the next slot in encounter order (the lead at 0ms,
+	// later members one tiny random step apart; the legacy "shim" leg
+	// trails the whole fleet by a step). Ids are unique per roster
+	// (fleetBases dedupes), so the per-id map is total.
+	const fleetSeatDelays = new Map<ProviderId, number>();
+	let fleetSeatSlot = 0;
+	for (const p of eligible) {
+		if (isFleetSeat(p.id)) {
+			fleetSeatDelays.set(p.id, fleetDelays[fleetSeatSlot++] ?? 0);
+		} else if (p.id === "shim") {
+			fleetSeatDelays.set(p.id, fleetDelays[fleetCount] ?? 0);
+		} else {
+			fleetSeatDelays.set(p.id, 0);
+		}
+	}
+	const delayFor = (id: ProviderId): number => fleetSeatDelays.get(id) ?? 0;
 	// Set once the race has resolved: aborts from here on are the race
 	// cutting off losers, not provider failures (see settled()).
 	let raceOver = false;

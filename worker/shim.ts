@@ -87,6 +87,18 @@ export function fleetMemberId(index: number): string {
 	return index === 0 ? "shim-potato" : `shim-potato-${index + 1}`;
 }
 
+/**
+ * Cast-race seat id for one var base: potato hosts keep the positional
+ * fleetMemberId; cloud's base is not a potato — it races under its own
+ * name, "shim-cloud" (Nov 2026 rename; the seat wrote "shim-potato-3"
+ * for its first days, so those datapoints decay through the stats window
+ * under the old id). The fid race keeps its own vocabulary — cloud stays
+ * "shim" there (see cast-source.ts fidSourceFor).
+ */
+export function fleetSeatId(base: string, index: number): string {
+	return base === SHIM_CLOUD_BASE ? "shim-cloud" : fleetMemberId(index);
+}
+
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
 
 /** Canonical cast shape as returned by shim (unix-SECONDS timestamp). */
@@ -223,7 +235,7 @@ export async function getCastByHash(
  * Cross-fleet warm: after a cast wins via one host, refresh every
  * OTHER shim-shaped host's index so the next visitor's read is warm there
  * too. The winner is warm by definition and is skipped — matched by the
- * fleet member id its roster leg carries (fleetMemberId; the legacy
+ * fleet seat id its roster leg carries (fleetSeatId; the legacy
  * no-var roster's "shim" is cloud itself). Fire-and-forget by contract —
  * every leg swallows its own failures; never rejects.
  */
@@ -248,7 +260,7 @@ export function warmShimIndexForCast(
 	}
 	return Promise.all(
 		fleet.map((base, index) =>
-			fleetMemberId(index) === winnerProvider ? undefined : warm(base),
+			fleetSeatId(base, index) === winnerProvider ? undefined : warm(base),
 		),
 	);
 }
