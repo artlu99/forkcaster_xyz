@@ -23,11 +23,12 @@ Cloudflare Worker (Hono; dual-domain; registration-order routing)
 ├─ RESOLUTION KERNEL — worker/race.ts
 │    staggerDelays · collectTerminals · collectiveRace
 │    ├─ raceShimProbe — every shim-shaped read (profiles, quotes, signed,
-│    │                  aliases, MCP): cloud + the potato fleet
-│    └─ raceCast — provider roster (shim ∥ potatos ∥ haatz ∥ snap ∥
+│    │                  aliases, MCP): the potato fleet (cloud retired)
+│    └─ raceCast — provider roster (potatos ∥ haatz ∥ snap ∥
 │                  farcaster.tv) + completeness box + race telemetry
-├─ SOURCES: shim (cloud) · potato fleet (replicas) · haatz/snap (raw
-│   nodes) · farcaster.tv (partial, quote-blind)
+├─ SOURCES: potato fleet (replicas) · haatz/snap (raw
+│   nodes) · farcaster.tv (partial, quote-blind) — cloud shim retired
+│   Nov 2026 (its stats ids decay through the transparency window)
 ├─ RENDERERS: resolve once, render twice — SSR HTML + strict JSON twin
 ├─ STATEFUL LAYER: fc_client cookie → last-used badge, auto-open, pill
 │   order (client-side writes; the server only reads)
@@ -194,11 +195,11 @@ mcp-publisher publish                                        # submits server.js
 
 ## Cast source race
 
-Cast lookups race the provider fleet (`worker/cast-source.ts`, rpc-racer pattern: per-provider abort + 5s cap armed at actual leg start, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error). The roster: the **shim-potato fleet** (the `SHIM_POTATO_BASE` var carries the FULL shim fleet, comma-separated, cloud's own base included — var order is the stagger/primary order, first entry leads at 0ms; a fast winner cancels the stragglers before they fire), the **haatz/snap raw nodes**, and quote-blind **farcaster.tv** (partial). No var = the legacy cloud-led roster. The strict JSON twin rides the complete-leg subset via `jsonRoster` (fleet members only, no box, no partial legs).
+Cast lookups race the provider fleet (`worker/cast-source.ts`, rpc-racer pattern: per-provider abort + 5s cap armed at actual leg start, first **validated** win, losers aborted; a win must resolve the requested hash, else it's downgraded to an error). The roster: the **shim-potato fleet** (the `SHIM_POTATO_BASE` var carries the full fleet, comma-separated — var order is the stagger/primary order, first entry leads at 0ms; a fast winner cancels the stragglers before they fire), the **haatz/snap raw nodes**, and quote-blind **farcaster.tv** (partial). Cloud shim retired Nov 2026: its base was pruned from the production var and the Render host decommissioned — its ids ("shim-cloud", "shim-potato-3", "shim") survive only as decaying stats/transparency history. No var = the legacy cloud-led roster (the retired host — dev/test scaffolding only; production requires the var). The strict JSON twin rides the complete-leg subset via `jsonRoster` (fleet members only, no box, no partial legs).
 
 **Miss semantics are collective — no single host is the source of truth** (SPOF softened Oct 2026; cloud retires into the fleet): the first affirmative answer wins outright; a consulted miss (HTTP 200, index asked, no data) is a **vote**, and not-found settles only when *every* miss-authoritative leg has consulted and missed — a pending leg can always rescue a landed miss; errors surface only when *every* leg errored (503 + Retry-After). The price: a true miss 404s as fast as the slowest leg instead of the fastest. `farcaster.tv` (partial) never votes.
 
-**The fleet races every shim read** (`worker/shim.ts`, `raceShimProbe`): the profile family (`/f`, `/user`, `/signed`, timeline), the quote hydrator's `/h`→`/u`→`/wc` chain, both aliases, the signed check on cast pages, and the MCP tool each race cloud against every configured potato. Same collective contract. Without the var every wrapper is a pass-through (exactly one fetch, byte-identical behavior). The `/refresh` index warm covers every host in the fleet.
+**The fleet races every shim read** (`worker/shim.ts`, `raceShimProbe`): the profile family (`/f`, `/user`, `/signed`, timeline), the quote hydrator's `/h`→`/u`→`/wc` chain, both aliases, the signed check on cast pages, and the MCP tool each race across every configured fleet member. Same collective contract. Without the var every wrapper is a pass-through (exactly one fetch, byte-identical behavior) — to the legacy cloud host, retired Nov 2026, so production must set the var. The `/refresh` index warm covers every host in the fleet.
 
 **Sufficiency matrix** (measured Oct 2026) against the internal `ShimCast` contract (text, hash, unix-seconds ts, raw `{url}`/`{castId}` embeds, inline user data):
 

@@ -8,12 +8,14 @@
 
 /** Static roster — keep in sync with worker/cast-source.ts (near-static by design).
  * Cutover (Nov 2026): the raced roster has no static "shim" leg — the var
- * IS the fleet ("shim-potato" leads, "shim-potato-2" is member 2's host,
- * and cloud's base races under its own name, "shim-cloud" — it is not a
- * potato). "shim" was trimmed Nov 6 (pre-cutover id, aged out); keep
- * "shim-potato-3" — the seat's name during its first days, before the
- * shim-cloud rename — until those datapoints decay out of the window
- * (~Nov 12), then trim it too. Add potato rows as regional members join. */
+ * IS the fleet ("shim-potato" leads, "shim-potato-2" is member 2's host).
+ * "shim" was trimmed Nov 6 (pre-cutover id, aged out). Decaying ids stay
+ * while their datapoints run out the 168h window, then get trimmed:
+ * "shim-potato-3" (the seat's name during its first days, before the
+ * shim-cloud rename — decays ~Nov 12) and "shim-cloud" (retired Nov 2026
+ * — its base was pruned from the production var and the Render host
+ * decommissioned, so no NEW shim-cloud datapoints; keep the row until its
+ * history decays out). Add potato rows as regional members join. */
 export const ROSTER = [
 	{ id: "shim-potato", role: "complete" },
 	{ id: "shim-potato-2", role: "complete" },

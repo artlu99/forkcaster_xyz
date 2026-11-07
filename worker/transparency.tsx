@@ -18,16 +18,17 @@ import type { SiteChrome } from "./site-chrome.ts";
 // infra obscurity). Keyed by ProviderId so a roster change in
 // cast-source.ts fails the typecheck here instead of drifting silently.
 // Seats: "shim-potato" leads the var, "shim-potato-2" is fleet member 2's
-// host, and cloud's base is not a potato — it races under its own name,
-// "shim-cloud" (fleet member 3). Legacy ids stay while their datapoints
-// decay through the 168h stats window: "shim" (the pre-cutover race-stats
-// id — still cloud's live FID-race id) and "shim-potato-3" (the seat's
-// first-days name before the shim-cloud rename).
+// host. Retired ids stay while their datapoints decay through the 168h
+// stats window: "shim-cloud" (cloud's seat name — the base was pruned
+// from the production var and the Render host decommissioned, Nov 2026),
+// "shim" (the pre-cutover race-stats id — still cloud's live FID-race id
+// vocabulary) and "shim-potato-3" (the seat's first-days name before the
+// shim-cloud rename).
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
 	shim: "shim.artlu.xyz (cloud's fid-race id; pre-cutover race-stats id)",
 	"shim-potato": "shim-potato.artlu.xyz (fleet lead)",
 	"shim-potato-2": "shim-potato-2.artlu.xyz (fleet member 2)",
-	"shim-cloud": "shim.artlu.xyz (cloud, fleet member 3)",
+	"shim-cloud": "shim.artlu.xyz (retired Nov 2026 — decaying stats id)",
 	"shim-potato-3": "shim.artlu.xyz (cloud's pre-rename seat id — decaying)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",

@@ -20,10 +20,13 @@
 //                Its text IS canonical (Warpcast-processed).
 //
 // The shim-potato FLEET (measurement canary graduated Oct 2026; fleet
-// cutover Nov 2026): shim-shaped complete legs — one per
-// comma-separated base in the SHIM_POTATO_BASE var, which carries the
-// FULL fleet, cloud's own base included (see raceRoster; no var = the
-// legacy cloud-led roster).
+// cutover Nov 2026; shim-cloud retirement Nov 2026): shim-shaped
+// complete legs — one per comma-separated base in the SHIM_POTATO_BASE
+// var, which carries the full fleet (see raceRoster; no var = the legacy
+// cloud-led roster — the decommissioned cloud host, so production must
+// set the var). Cloud's base was pruned at the retirement; its
+// "shim-cloud" seat id survives only as decaying stats/transparency
+// vocabulary.
 // Originally a measurement canary; now the redundancy layer cloud retires
 // into. Two properties carried over from the canary era:
 // - a fleet member's FOUND can win like any complete provider (central
@@ -57,7 +60,9 @@ export type { ShimCast, ShimEmbed };
 
 export type ProviderId =
 	| "shim"
-	/** Cloud's var seat under its own name — it is not a potato. */
+	/** Cloud's var-seat name — retired from the production var (Nov 2026,
+	 * the shim-cloud retirement); kept for the decaying stats/transparency
+	 * vocabulary and any dev/test var that still names the base. */
 	| "shim-cloud"
 	| "haatz"
 	| "snap"
@@ -581,8 +586,11 @@ async function resolveFid(
  * the cloud reader keeps the historical "shim"; every var member reports
  * its fleet position ("shim-potato", "shim-potato-2", …) — the same
  * vocabulary the cast-race roster legs carry, except cloud's cast-race
- * seat, which rides its own name ("shim-cloud") while the fid race keeps
+ * seat, which rode its own name ("shim-cloud") while the fid race keeps
  * "shim" for it. One fid-race name per host, stable across the rename.
+ * (Cloud retired Nov 2026: its base is out of the production var, so no
+ * live winner maps through the cloud arms — they stay for the id
+ * vocabulary and any dev/test var.)
  */
 function fidSourceFor(
 	winnerBase: string | undefined,

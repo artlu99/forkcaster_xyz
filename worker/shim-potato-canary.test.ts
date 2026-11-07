@@ -12,6 +12,8 @@
  * No mock.module dance: cast-source.ts pulls in shim.ts + radash only.
  * Stubs settle via real (short) timers; raceCast's 5s caps never fire.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -24,6 +26,7 @@ import {
 	type ProviderResult,
 	shimProvider,
 } from "./cast-source.ts";
+import { SHIM_CLOUD_BASE, fleetBases } from "./shim.ts";
 
 const SIGNAL = new AbortController().signal;
 
@@ -319,5 +322,33 @@ describe("default roster", () => {
 			"snap",
 			"farcaster-tv",
 		]);
+	});
+});
+
+/**
+ * The production fleet var, asserted BY CONTRACT (the roster-guard rule):
+ * the shim-cloud retirement (Nov 2026) pruned cloud's base — these tests
+ * fail if a var edit ever re-adds it, so the retired host stays retired
+ * and generates no new "shim-cloud" datapoints.
+ */
+describe("production fleet var (shim-cloud retirement)", () => {
+	const varSource = readFileSync(
+		join(import.meta.dir, "../wrangler.jsonc"),
+		"utf8",
+	);
+	const varMatch = varSource.match(/"SHIM_POTATO_BASE"\s*:\s*"([^"]+)"/);
+	const bases = fleetBases(varMatch?.[1] ?? null);
+
+	test("the var is set and parses to a non-empty fleet", () => {
+		expect(varMatch).toBeDefined();
+		expect(bases.length).toBeGreaterThan(0);
+	});
+
+	test("every base is https", () => {
+		for (const base of bases) expect(base.startsWith("https://")).toBe(true);
+	});
+
+	test("no cloud base — the retired host never races again", () => {
+		expect(bases).not.toContain(SHIM_CLOUD_BASE);
 	});
 });
