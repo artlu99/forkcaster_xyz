@@ -952,6 +952,8 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(body).toContain("first good answer");
 	expect(body).toContain("No cast IDs");
 	expect(body).toContain("shim.artlu.xyz"); // provider roster table
+	expect(body).toContain("shim-potato-5.artlu.xyz");
+	expect(body).toContain("do not reuse");
 	expect(body).toContain('href="/transparency"'); // footer link present
 
 	const jsonRes = await app.request("/transparency?format=json");
@@ -960,12 +962,12 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	// Nine: the raw nodes, farcaster.tv, the fleet lead, fleet member 2,
-	// the two live potato seats (ids 3 and 4 — hosts shim-potato-4/-5,
-	// joined Nov 7 2026; id 3 also still decays cloud's pre-rename
-	// datapoints), the retired cloud seat id (shim-cloud), and the
-	// pre-cutover "shim" id.
-	expect(json.data.providers).toHaveLength(9);
+	// Ten: the raw nodes, farcaster.tv, the fleet lead, shim-potato-2,
+	// the retired cloud seat (shim-cloud), cloud's pre-rename id
+	// (shim-potato-3 — no host, decaying), the two hosts that joined
+	// Nov 7 2026 (shim-potato-4 and shim-potato-5, ids = hostnames),
+	// and the pre-cutover "shim" id.
+	expect(json.data.providers).toHaveLength(10);
 	expect(json.data.providers.map((p: { id: string }) => p.id)).toEqual([
 		"shim",
 		"shim-potato",
@@ -973,6 +975,7 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"shim-cloud",
 		"shim-potato-3",
 		"shim-potato-4",
+		"shim-potato-5",
 		"farcaster-tv",
 		"haatz",
 		"snap",

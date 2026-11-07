@@ -6,23 +6,29 @@
 // toUInt32/toUInt8 conversions, position(needle IN haystack) syntax,
 // countIf/sumIf/quantileExactWeighted with _sample_interval weights.
 
-/** Static roster — keep in sync with worker/cast-source.ts (near-static by design).
- * Cutover (Nov 2026): the raced roster has no static "shim" leg — the var
- * IS the fleet ("shim-potato" leads, "shim-potato-2" is member 2's host).
- * "shim" was trimmed Nov 6 (pre-cutover id, aged out). Id notes:
- * "shim-potato-3" is fleet member 3's LIVE seat id (shim-potato-4.artlu
- * .xyz, joined Nov 7) AND still carries cloud's pre-rename datapoints —
- * the blend drains out of the 168h window (~Nov 12); never trim it now.
- * "shim-potato-4" is member 4 (shim-potato-5.artlu.xyz, joined Nov 7).
- * "shim-cloud" is retired (base pruned from the var Nov 2026, Render
- * host decommissioned) — no NEW datapoints; keep the row while its
- * history decays, then trim. Add potato rows as regional members join. */
+/** Static roster — keep in sync with worker/transparency.tsx (near-static
+ * by design). Seat ids are hostname labels (worker/shim.ts fleetSeatId),
+ * not var positions: a host that leaves keeps its series, and nobody else
+ * inherits it. Add a row when a new hostname joins; leave a row in place
+ * when a host is out, so its history and its return stay one series.
+ * "shim" was trimmed Nov 6 (pre-cutover id, aged out).
+ * "shim-potato" is shim-potato.artlu.xyz — out for a re-deploy Nov 7;
+ * the row stays so the lead's history resumes when it returns.
+ * "shim-potato-2" / "-4" / "-5" are those hosts (the latter two joined
+ * Nov 7, live-checked 8/8).
+ * "shim-potato-3" is NOT a host. Cloud's first days wrote that id under
+ * the old positional scheme. Keep the row while those points decay
+ * (~Nov 12); never give a new machine this name, or its points blend
+ * into cloud's series.
+ * "shim-cloud" is retired (base pruned Nov 2026, Render host
+ * decommissioned) — no new datapoints; trim after the window. */
 export const ROSTER = [
 	{ id: "shim-potato", role: "complete" },
 	{ id: "shim-potato-2", role: "complete" },
 	{ id: "shim-cloud", role: "complete" },
 	{ id: "shim-potato-3", role: "complete" },
 	{ id: "shim-potato-4", role: "complete" },
+	{ id: "shim-potato-5", role: "complete" },
 	{ id: "haatz", role: "complete" },
 	{ id: "snap", role: "complete" },
 	{ id: "farcaster-tv", role: "partial" },

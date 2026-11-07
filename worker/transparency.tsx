@@ -17,23 +17,22 @@ import type { SiteChrome } from "./site-chrome.ts";
 // Public provider roster — names included on purpose (transparency over
 // infra obscurity). Keyed by ProviderId so a roster change in
 // cast-source.ts fails the typecheck here instead of drifting silently.
-// Seat ids are POSITIONAL (fleetMemberId by var index); hostnames count
-// cloud, ids don't — so member 3's host is named shim-potato-4 and
-// member 4's shim-potato-5 (both joined Nov 7 2026, live-checked 8/8
-// against the shim contract). "shim-potato-3" also still carries cloud's
-// pre-rename datapoints, decaying through the 168h window (~Nov 12).
-// Retired ids stay while their datapoints decay: "shim-cloud" (base
-// pruned from the production var, Render host decommissioned, Nov 2026)
-// and "shim" (the pre-cutover race-stats id). Labels describe the
-// STEADY-STATE var (the lead restored); while shim-potato re-deploys the
-// ids shift positionally — the table self-corrects as the window rolls.
+// A potato seat id IS the hostname's first label (fleetSeatId): the row
+// for shim-potato-4 is shim-potato-4.artlu.xyz, whether or not its
+// neighbors are in the var. Hosts out of the var keep their row so the
+// history stays attached to them. "shim-potato-3" is the exception that
+// proves it — not a hostname, cloud's pre-rename positional id, decaying
+// through the 168h window (~Nov 12 2026); do not reuse that number.
+// "shim-cloud" (base pruned, Render host decommissioned, Nov 2026) and
+// "shim" (the pre-cutover race-stats id) stay for the same reason.
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
 	shim: "shim.artlu.xyz (cloud's fid-race id; pre-cutover race-stats id)",
-	"shim-potato": "shim-potato.artlu.xyz (fleet lead)",
-	"shim-potato-2": "shim-potato-2.artlu.xyz (fleet member 2)",
+	"shim-potato": "shim-potato.artlu.xyz (fleet lead — out for re-deploy)",
+	"shim-potato-2": "shim-potato-2.artlu.xyz",
 	"shim-cloud": "shim.artlu.xyz (retired Nov 2026 — decaying stats id)",
-	"shim-potato-3": "shim-potato-4.artlu.xyz (fleet member 3)",
-	"shim-potato-4": "shim-potato-5.artlu.xyz (fleet member 4)",
+	"shim-potato-3": "no host (cloud's pre-rename id, decaying ~Nov 12 — do not reuse)",
+	"shim-potato-4": "shim-potato-4.artlu.xyz",
+	"shim-potato-5": "shim-potato-5.artlu.xyz",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",
 	snap: "snap.farcaster.xyz:3381 (text-blind)",
@@ -117,8 +116,8 @@ const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${
 // sources without data sinking to the bottom. Row labels are the raw
 // FID_RACE source ids, an OPEN vocabulary (the row label IS the source
 // id): "shim" = the legacy cloud reader; "shim-potato", "shim-potato-2",
-// … = the shim fleet by var position (mirroring the cast race's member
-// ids); haatz/snap = the raw gateways, tracked independently. With no
+// … = the answering host's own name (the same id the cast race records);
+// haatz/snap = the raw gateways, tracked independently. With no
 // snapshot yet, the historical trio renders as dashes.
 const FID_FALLBACK_SOURCES = ["shim", "haatz", "snap"];
 

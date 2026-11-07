@@ -9,8 +9,8 @@
 // vocabulary is OPEN (v2, cloud-retirement cutover): the leg's own gateway
 // reports its id ("haatz"/"snap"); the shim side reports the fleet member
 // that named the fid — "shim" (the cloud reader, historical id kept) or
-// "shim-potato", "shim-potato-2", … by var position (fleetMemberId,
-// mirroring the cast race's member ids). Rows are grouped by index1 at
+// the host's own name, "shim-potato" / "shim-potato-2" / … (fleetSeatId,
+// the same id the cast race records). Rows are grouped by index1 at
 // aggregation time, so fleet members join the snapshot as they appear —
 // no source list is hardcoded anywhere.
 

@@ -12,7 +12,8 @@
  * base from the production fleet var). The constant survives as the
  * legacy no-var roster's target (dev/test and vendored surfaces) and as
  * the fleetSeatId mapping that keeps the historical "shim-cloud" stats id
- * honest. Production must carry the var: the retired host answers
+ * honest (its hostname label is "shim", which is a different, older
+ * series). Production must carry the var: the retired host answers
  * nothing. */
 export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
 
@@ -77,7 +78,9 @@ export async function raceShimProbe<T>(
  * since the shim-cloud retirement (Nov 2026) the production var carries
  * only the potato members, but the parsing stays base-agnostic: a cloud
  * base in any var (dev/test fixtures) is still a member. Var order is the
- * stagger/primary order.
+ * stagger/primary order — who leads at 0ms — and nothing else. A host's
+ * stats id is its own name (fleetSeatId), so leaving or rejoining does
+ * not renumber anyone else.
  */
 export function fleetBases(potatoBasess?: string | null): string[] {
 	const out: string[] = [];
@@ -90,30 +93,48 @@ export function fleetBases(potatoBasess?: string | null): string[] {
 }
 
 /**
- * Fleet member id: shim-potato, then shim-potato-2, -3, … — one stable id
- * per var position, shared by the cast-race roster legs (cast-source.ts),
- * the fid-race winner vocabulary, and the cross-fleet warm skip below.
- * (The name is historical: "potato" once meant every non-cloud member;
- * since the cutover it labels the fleet by position, cloud included.)
+ * First DNS label of a base URL (`shim-potato-4` from
+ * `https://shim-potato-4.artlu.xyz`). Empty when the base has none.
  */
-export function fleetMemberId(index: number): string {
-	return index === 0 ? "shim-potato" : `shim-potato-${index + 1}`;
+function hostLabel(base: string): string {
+	const noScheme = base.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+	const host = noScheme.split("/")[0] ?? "";
+	return (host.split(".")[0] ?? "").toLowerCase();
 }
 
+/** `shim-potato`, or `shim-potato-2`, `shim-potato-4`, … — the host's own name. */
+const POTATO_SEAT = /^shim-potato(?:-\d+)?$/;
+
 /**
- * Cast-race seat id for one var base: potato hosts keep the positional
- * fleetMemberId; cloud's base is not a potato — it races under its own
- * name, "shim-cloud" (Nov 2026 rename; the seat wrote "shim-potato-3"
- * for its first days, so those datapoints decay through the stats window
- * under the old id). The base was PRUNED from the production var at the
- * shim-cloud retirement (Nov 2026) — no production leg carries this id
- * anymore; the mapping stays so any dev/test var that names the base
- * still labels it correctly and never burns a positional potato id. The
- * fid race keeps its own vocabulary — cloud stays "shim" there (see
- * cast-source.ts fidSourceFor).
+ * Stats id for one fleet base, shared by the cast-race roster legs
+ * (cast-source.ts), the fid-race winner vocabulary (cloud excepted — it
+ * stays "shim" there), and the cross-fleet warm skip below.
+ *
+ * The id is the hostname's first label, never the var index. Two hosts
+ * must not share a label: the race and the stats both key on it. Var
+ * order only decides who leads and how the stagger steps. A host that leaves
+ * the roster — for a re-deploy, or for good — stops writing under its
+ * own id, and every other host keeps the series it already has. Putting
+ * the host back resumes that same id.
+ *
+ * `shim-potato.artlu.xyz` → `shim-potato`. `shim-potato-4.artlu.xyz` →
+ * `shim-potato-4`. The cloud base is the one exception: its label is
+ * `shim`, which is the pre-cutover race-stats id and the fid-race name,
+ * so the cast race keeps the post-rename id `shim-cloud`. That seat
+ * wrote `shim-potato-3` for its first days under the old positional
+ * scheme. `shim-potato-3` is not a hostname and must not be given to a
+ * new machine — those points are still decaying through the stats
+ * window (~Nov 12 2026).
  */
-export function fleetSeatId(base: string, index: number): string {
-	return base === SHIM_CLOUD_BASE ? "shim-cloud" : fleetMemberId(index);
+export function fleetSeatId(base: string): string {
+	if (base === SHIM_CLOUD_BASE) return "shim-cloud";
+	const label = hostLabel(base);
+	if (POTATO_SEAT.test(label)) return label;
+	// A host outside the potato naming scheme still must not inherit a
+	// numbered seat. The label itself is already stable; `shim` is
+	// reserved for the historical cloud series.
+	const safe = label.replace(/[^a-z0-9-]/g, "");
+	return safe !== "" && safe !== "shim" ? safe : "shim-unknown";
 }
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
@@ -277,8 +298,8 @@ export function warmShimIndexForCast(
 			: warm(SHIM_CLOUD_BASE);
 	}
 	return Promise.all(
-		fleet.map((base, index) =>
-			fleetSeatId(base, index) === winnerProvider ? undefined : warm(base),
+		fleet.map((base) =>
+			fleetSeatId(base) === winnerProvider ? undefined : warm(base),
 		),
 	);
 }

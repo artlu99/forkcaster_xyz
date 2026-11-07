@@ -775,6 +775,44 @@ test("fleet position maps to the fid-race winner id (second member → shim-pota
 	expect(race.timings[0]?.fid?.winner).toBe("shim-potato-2");
 });
 
+test("a host's fid-race id is its hostname, not its place in the var", async () => {
+	// Lead absent, number 3 skipped. Positional ids would have called the
+	// winner shim-potato-2 (index 1). The hostname keeps shim-potato-5.
+	const [threadedHaatz] = raceRoster(
+		"https://shim-potato-2.test,https://shim-potato-5.test",
+	);
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "https://shim-potato-5.test/f/zoo") {
+			return respond(url, { success: true, fid: 10215 });
+		}
+		if (
+			url ===
+			`https://haatz.quilibrium.com/v1/castById?fid=10215&hash=${FULL_HASH}`
+		) {
+			return respond(url, {
+				hash: FULL_HASH,
+				data: {
+					type: "MESSAGE_TYPE_CAST_ADD",
+					fid: 10215,
+					timestamp: 182965974,
+					castAddBody: { text: "omg so relevant!", embeds: [] },
+				},
+			});
+		}
+		if (url === "https://haatz.quilibrium.com/v1/userDataByFid?fid=10215") {
+			return respond(url, { messages: [] });
+		}
+		return respond(url, "throw");
+	});
+	const race = await raceCast(
+		{ username: "zoo", hash: FULL_HASH },
+		{ providers: [threadedHaatz] },
+	);
+	expect(race.kind).toBe("found");
+	expect(race.timings[0]?.fid?.winner).toBe("shim-potato-5");
+});
+
 test("shim adapter maps success:false to an authoritative miss", async () => {
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
 		const url = String(input);

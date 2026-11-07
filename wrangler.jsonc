@@ -9,17 +9,18 @@
 	],
 	// SHIM_POTATO_BASE: the FULL shim fleet, one leg per comma-separated
 	// base. Var order = stagger/primary order — first entry leads at 0ms.
-	// Removing a base retires it from every raced read. Cloud's base was
-	// pruned Nov 2026 (the shim-cloud retirement; the Render host is
-	// decommissioned). TEMPORARY (Nov 7 2026): shim-potato.artlu.xyz is
-	// out while it re-deploys — restore it at the FRONT when it's back.
-	// Seats are POSITIONAL: in the steady state (lead restored) the new
-	// hosts shim-potato-4/-5 race as ids shim-potato-3/-4 (hostnames count
-	// cloud, ids don't); while the lead is out every seat shifts down one.
-	// Both new hosts live-checked against the full shim contract Nov 7
-	// 2026 (house cast zoo/0x895ecc74, 8/8 endpoints). The var is REQUIRED
-	// in production: empty = the legacy cloud-only roster — the retired
-	// host.
+	// Removing a base retires it from every raced read. A host's stats id
+	// is its hostname label (shim-potato-4.artlu.xyz writes "shim-potato-4"),
+	// so members can leave and return without renumbering anyone else.
+	// "shim-potato-3" is not a host — cloud's pre-rename positional series;
+	// do not give a new machine that name. Cloud's base was pruned Nov
+	// 2026 (the shim-cloud retirement; the Render host is decommissioned).
+	// TEMPORARY (Nov 7 2026): shim-potato.artlu.xyz is out while it
+	// re-deploys — restore it at the FRONT when it's back (front = lead
+	// at 0ms; its id stays "shim-potato" either way). Both new hosts
+	// live-checked against the full shim contract Nov 7 2026 (house cast
+	// zoo/0x895ecc74, 8/8 endpoints). The var is REQUIRED in production:
+	// empty = the legacy cloud-only roster — the retired host.
 	"vars": { "PRIMARY_ORIGIN": "https://forkcaster.xyz", "SHIM_POTATO_BASE": "https://shim-potato-2.artlu.xyz,https://shim-potato-4.artlu.xyz,https://shim-potato-5.artlu.xyz" },
 	"assets": { "not_found_handling": "none" },
 	"observability": { "enabled": true },
