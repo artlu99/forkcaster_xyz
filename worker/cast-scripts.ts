@@ -160,7 +160,11 @@ export const CLIENT_SCRIPT = `<script>
 // falls back to the pill's web href if the page is still visible after
 // the attempt (app opened ⇒ page hidden ⇒ no fallback). Android prefers
 // data-intent (Chrome handles the fallback natively); everything else
-// uses data-scheme. Desktop and no-JS visitors just follow the web
+// uses data-scheme. On iOS the scheme attempt surfaces a confirm dialog
+// ("Open in App?") that keeps the page visible until it is answered —
+// the visibility guard alone reads that as "app didn't open", so the
+// iOS fallback window waits out a human dialog response instead of
+// racing it. Desktop and no-JS visitors just follow the web
 // href; the SSR HTML is byte-identical for every device — no UA
 // sniffing on the server, only a client-side transport choice. Emitted
 // only when at least one rendered client has a native target.
@@ -168,6 +172,10 @@ export const DEEPLINK_SCRIPT = `<script>
 (function () {
   if (!window.matchMedia("(pointer: coarse)").matches) return;
   var android = /android/i.test(navigator.userAgent);
+  // Macintosh inside a coarse-pointer page is iPadOS 13+ (desktop-class UA,
+  // touch-primary pointer); macOS has no touch screens, so the gate keeps
+  // this phone/tablet-scoped.
+  var ios = /iphone|ipad|ipod|macintosh/i.test(navigator.userAgent);
   document.addEventListener("click", function (e) {
     var el = e.target;
     while (el && el !== document) {
@@ -182,7 +190,7 @@ export const DEEPLINK_SCRIPT = `<script>
         window.location.href = target;
         setTimeout(function () {
           if (!opened && !document.hidden) window.location.href = el.getAttribute("href");
-        }, 1800);
+        }, ios ? 4500 : 1800);
         return;
       }
       el = el.parentNode;
@@ -477,6 +485,10 @@ export const AUTO_SCRIPT = `<script>
   if (box && window.matchMedia("(pointer: coarse)").matches) {
     native = /android/i.test(navigator.userAgent) && intentAttr ? intentAttr : schemeAttr || null;
   }
+  // Macintosh inside a coarse-pointer page is iPadOS 13+ (desktop-class UA,
+  // touch-primary pointer); macOS has no touch screens, so this stays
+  // phone/tablet-scoped. Mirrors DEEPLINK_SCRIPT's check.
+  var ios = /iphone|ipad|ipod|macintosh/i.test(navigator.userAgent);
   // Telemetry: one anonymous event per open, kinded by the caller —
   // "auto" (timer expiry / delay-0) vs "go-now" (explicit). Transport
   // mirrors what open() will actually attempt. Auto events echo an
@@ -539,7 +551,7 @@ export const AUTO_SCRIPT = `<script>
   var tick = null;
   // The native attempt's web-fallback timer rides cancelAll too: a pref
   // revoked mid-flight (fk:auto, from the sheet toggle) or a Pause during
-  // the 2.5s window must also stop the deferred web redirect — the open
+  // the fallback window must also stop the deferred web redirect — the open
   // was committed but the fallback is still ours to cancel.
   var fallback = null;
   var cancelAll = function () {
@@ -549,11 +561,16 @@ export const AUTO_SCRIPT = `<script>
   };
   // Every redirect path (delay-0, timer expiry, Go now) funnels through
   // open(): native attempt when the last-used client has a target and
-  // this is a phone, web redirect otherwise. The 2.5s visibility window
-  // mirrors DEEPLINK_SCRIPT but runs longer — a timer fire has no user
-  // gesture anchoring the navigation, and cold starts (Quorum's RN +
-  // WASM boot, expo-updates check-on-launch) can outrun 1.8s. The kind
-  // argument distinguishes an automatic open from an explicit one.
+  // this is a phone, web redirect otherwise. The visibility window runs
+  // longer than DEEPLINK_SCRIPT's — a timer fire has no user gesture
+  // anchoring the navigation, and cold starts (Quorum's RN + WASM boot,
+  // expo-updates check-on-launch) can outrun 1.8s. On iOS both windows
+  // stretch further still: the scheme attempt surfaces a confirm dialog
+  // ("Open in App?") that keeps the page visible until answered, and the
+  // timer fire's dialog arrives while the visitor may be reading — so it
+  // waits 6s for the answer where the tap path waits 4.5s (a web redirect
+  // would cancel the very prompt the visitor is about to accept). The
+  // kind argument distinguishes an automatic open from an explicit one.
   var open = function (kind) {
     if (fired) return;
     fired = true;
@@ -570,7 +587,7 @@ export const AUTO_SCRIPT = `<script>
     fallback = setTimeout(function () {
       fallback = null;
       if (!opened && !document.hidden) location.replace(url);
-    }, 2500);
+    }, ios ? 6000 : 2500);
   };
   var secsLeft = delay;
   var startTimer = function () {
