@@ -384,8 +384,10 @@ describe("roster native targets", () => {
 		expect(terminus).toBeDefined();
 		// Verified against the app's source (AppLink.route(for:) maps
 		// terminus://cast/<0x+40 hex> onto the thread screen) and live on
-		// iOS. iOS-only: no androidPackage, so no intent form. The web href
-		// is the public TestFlight invite — Terminus has no web build.
+		// iOS; the same scheme is now verified in the Android APK's
+		// manifest too (Nov 2026). No androidPackage — Terminus publishes
+		// no assetlinks.json — so no intent form. The web href is the
+		// public TestFlight invite — Terminus has no web build.
 		const targets = deeplinkTargets(terminus as ClientDefinition, VARS);
 		expect(targets).toEqual({
 			scheme: "terminus://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",

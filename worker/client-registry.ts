@@ -335,6 +335,25 @@ export const CLIENTS: ClientDefinition[] = [
 	// matches /(?:0x)?([0-9a-f]{40})/i and strips the prefix internally —
 	// lookups key on bare lowercase hex, so the template emits {fullHashRaw}.
 	// Re-verified live with and without 0x (both render).
+	// NATIVE APPS — VERIFIED, the ABSENCE kind (Nov 2026): Quilcast ships
+	// iOS/Android apps (Play: com.borodutch.quilcast; same open-source repo,
+	// android/ + ios/), but NO custom scheme exists, so there is no deeplink
+	// to enter. Android: assetlinks.json is LIVE at
+	// quilcast.com/.well-known/ (package com.borodutch.quilcast,
+	// handle_all_urls) and AndroidManifest.xml carries exactly one autoVerify
+	// VIEW filter — scheme https, hosts quilcast.com + www.quilcast.com.
+	// iOS: ios/Info.plist has no CFBundleURLSchemes (universal links only).
+	// Per the repo README both apps are thin WebView windows onto
+	// quilcast.com: they open quilcast.com links via App/universal links and
+	// send every other link to the browser. Our deeplink field is
+	// custom-scheme-shaped (data-scheme attempt + intent:// ;scheme=), so
+	// nothing here is enterable — entries arrive verified or not at all.
+	// Practical consequence: the https pill href IS the app link — standalone
+	// Chrome/Safari already open the native app on it. The known limitation
+	// is OTHER CLIENTS' IABs: an embedded browser never resolves App Links,
+	// so the pill lands on web Quilcast's sign-in wall there (each browser
+	// context holds its own quilcast.com session; the app's session lives in
+	// its WebView storage). That is an IAB property, not a registry gap.
 	{
 		id: "quilcast",
 		title: "Quilcast",
@@ -382,7 +401,9 @@ export const CLIENTS: ClientDefinition[] = [
 		// `if (!c) return app()` — no wrong-channel render). Charset is
 		// lowercase [a-z0-9-] — Farcaster channel ids are lowercase.
 		// fine-only, per the standing Quilcast DESKTOP / Quorum MOBILE
-		// assignment. Web-only (no scheme evidence).
+		// assignment. Web-only — and that is now a VERIFIED state, not an
+		// evidence gap: the native apps carry no custom scheme at all
+		// (see the native-apps note on this entry).
 		channel: {
 			web: "https://quilcast.com/channel/{channelId}",
 			pointer: "fine",
@@ -565,22 +586,38 @@ export const CLIENTS: ClientDefinition[] = [
 			web: "https://homiehouse.app/profile?user={username}",
 		},
 	},
-	// Terminus, an iOS client that reads and writes Hypersnap directly.
-	// Scheme VERIFIED against the app's source: Info.plist registers
-	// CFBundleURLSchemes "terminus" (project.yml), and AppLink.route(for:)
-	// (App/Views/Navigation.swift) maps terminus://cast/<0x+40 hex>,
-	// terminus://user/<username> and terminus://channel/<id> onto the
-	// thread, profile and channel screens — hence {fullHash}. LIVE CHECK
-	// (Oct 2026, iOS simulator, signed in): terminus://cast/0x895ecc74…
-	// opened zoo's "omg so relevant!" thread; terminus://user/zoo opened
-	// zoo's profile on its Posts list (so profile and feed are one
-	// surface); terminus://channel/itookaphoto opened "I Took a Photo!".
-	// Also device-tested on a physical iPhone (Oct 2026).
-	// WEB HAS NO CAST ROUTE: Terminus is iOS-only, with no web build and no
-	// Android app, so the https href is the public TestFlight invite — an
-	// honest stub, the page to get the app on — and every pill is
-	// coarse-only, phones only. No signed rule: it shows whatever the node
-	// holds, unsigned authors included. Not links-only.
+	// Terminus, a native iPhone + Android client that reads and writes
+	// Hypersnap directly (no web build). Scheme VERIFIED on iOS against the
+	// app's source: Info.plist registers CFBundleURLSchemes "terminus"
+	// (project.yml), and AppLink.route(for:) (App/Views/Navigation.swift)
+	// maps terminus://cast/<0x+40 hex>, terminus://user/<username> and
+	// terminus://channel/<id> onto the thread, profile and channel screens
+	// — hence {fullHash}. LIVE CHECK (Oct 2026, iOS simulator, signed in):
+	// terminus://cast/0x895ecc74… opened zoo's "omg so relevant!" thread;
+	// terminus://user/zoo opened zoo's profile on its Posts list (so
+	// profile and feed are one surface); terminus://channel/itookaphoto
+	// opened "I Took a Photo!". Also device-tested on a physical iPhone
+	// (Oct 2026).
+	// ANDROID — VERIFIED (Nov 2026): the site (onterminus.com, now "iPhone
+	// and Android") ships the public beta as a sideload APK at /android —
+	// v0.1.2 (382), Nov 6 2026, package com.hypersnap.client; Google Play
+	// listing "soon". Downloaded the APK (SHA-256 matches the site's
+	// published hash 42266122…034c) and parsed its AndroidManifest.xml:
+	// MainActivity (singleTask, exported) carries a VIEW + DEFAULT +
+	// BROWSABLE filter with <data android:scheme='terminus'/> — the SAME
+	// bare scheme, no host — and NO https/autoVerify filter (no App Links;
+	// assetlinks.json 404s at onterminus.com/.well-known, so there is no
+	// androidPackage to enter — re-check when the Play listing lands).
+	// classes.dex shows the handler: handleDeepLink() + Jetpack Navigation
+	// NavDeepLink patterns with the same cast/user/channel route
+	// vocabulary as iOS. No live Android device check yet — the manifest
+	// filter and the shared route vocabulary are the evidence; bump this
+	// note when one happens.
+	// WEB HAS NO CAST ROUTE: with no web build, the https href is the
+	// public TestFlight invite — an honest stub, the page to get the app
+	// on — and every pill is coarse-only, phones only. No signed rule: it
+	// shows whatever the node holds, unsigned authors included. Not
+	// links-only.
 	{
 		id: "terminus",
 		title: "Terminus",
