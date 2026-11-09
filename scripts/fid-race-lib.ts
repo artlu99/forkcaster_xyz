@@ -8,9 +8,11 @@
 // id, blob1 = leg id, blob2 = host, double1 = the winner's ms. The index1
 // vocabulary is OPEN (v2, cloud-retirement cutover): the leg's own gateway
 // reports its id ("haatz"/"snap"); the shim side reports the fleet member
-// that named the fid — "shim" (the cloud reader, historical id kept) or
-// the host's own name, "shim-potato" / "shim-potato-2" / … (fleetSeatId,
-// the same id the cast race records). Rows are grouped by index1 at
+// that named the fid — its hostname label (fleetSeatId): "shim" (the
+// self-hosted reader at shim.artlu.xyz, fleet lead since the Nov 9 2026
+// cutover — the id also carries cloud's pre-cutover points until they
+// decay ~Nov 12) or the host's own name, "shim-potato" / "shim-potato-2"
+// / … (the same id the cast race records). Rows are grouped by index1 at
 // aggregation time, so fleet members join the snapshot as they appear —
 // no source list is hardcoded anywhere.
 

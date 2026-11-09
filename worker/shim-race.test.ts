@@ -9,7 +9,8 @@
  * answer wins outright; a consulted miss (HTTP 200, index asked) is a
  * vote, with not-found settling only when every leg has missed; errors
  * surface (the PRIMARY — first var entry — leg's) only when every leg
- * errored. Without a value every wrapper is a pass-through to cloud
+ * errored. Without a value every wrapper is a pass-through to the
+ * default host
  * (exactly one fetch — the legacy no-var roster).
  *
  * Mock discipline per profile-route.test.ts: globalThis.fetch routed by
@@ -95,7 +96,7 @@ describe("raceShimProbe routing", () => {
 		expect(calls).toEqual([fUrl(CLOUD)]);
 	});
 
-	test("unexpected URL (e.g. the no-var cloud leg missing from the mock) throws the mock error", async () => {
+	test("unexpected URL (e.g. the no-var default-host leg missing from the mock) throws the mock error", async () => {
 		shimMock({ [fUrl(POTATO)]: json({ success: true, fid: 42 }) });
 		await expect(
 			getFidByUsername("ellis", new AbortController().signal),

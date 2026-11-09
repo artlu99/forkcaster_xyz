@@ -764,9 +764,10 @@ export async function resolveConversationAlias(
 	},
 ): Promise<ResolvedConversationAlias> {
 	// /h answers misses at HTTP 200 ({"success":false}) — non-ok or a thrown
-	// request means the service, not the cast, is the problem. Raced against
-	// the potato: a potato found rescues a slow or erroring cloud index,
-	// while a cloud miss stays the immediate verdict (the rescue path below).
+	// request means the service, not the cast, is the problem. Raced across
+	// the fleet: a member's found rescues a slow or erroring primary index,
+	// while a primary miss stays the immediate verdict (the rescue path
+	// below).
 	const probe = async (base: string): Promise<ShimProbe<ShimCast>> => {
 		try {
 			const res = await fetch(`${base}/h/${hash}`, {

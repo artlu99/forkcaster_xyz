@@ -11,18 +11,23 @@
  * not var positions: a host that leaves keeps its series, and nobody else
  * inherits it. Add a row when a new hostname joins; leave a row in place
  * when a host is out, so its history and its return stay one series.
- * "shim" was trimmed Nov 6 (pre-cutover id, aged out).
- * "shim-potato" is shim-potato.artlu.xyz — out for a re-deploy Nov 7;
- * the row stays so the lead's history resumes when it returns.
- * "shim-potato-2" / "-4" / "-5" are those hosts (the latter two joined
- * Nov 7, live-checked 8/8).
+ * "shim" is the self-hosted potato at shim.artlu.xyz — fleet lead since
+ * the Nov 9 2026 cutover (the row predates that as the pre-cutover id,
+ * trimmed Nov 6 when it aged out; revived at the cutover).
+ * "shim-potato" is shim-potato.artlu.xyz — back from its Nov 7
+ * re-deploy, second in the var.
+ * "shim-potato-2" is that host. "shim-potato-4" / "-5" were dropped from
+ * the var Nov 9 2026 — the rows stay so their history keeps decaying
+ * under its own id (and a return resumes the same series).
  * "shim-potato-3" is NOT a host. Cloud's first days wrote that id under
  * the old positional scheme. Keep the row while those points decay
  * (~Nov 12); never give a new machine this name, or its points blend
  * into cloud's series.
- * "shim-cloud" is retired (base pruned Nov 2026, Render host
- * decommissioned) — no new datapoints; trim after the window. */
+ * "shim-cloud" is retired (Render host decommissioned Nov 2026; the
+ * hostname's seat became "shim" at the Nov 9 cutover) — no new
+ * datapoints ever; trim after the window. */
 export const ROSTER = [
+	{ id: "shim", role: "complete" },
 	{ id: "shim-potato", role: "complete" },
 	{ id: "shim-potato-2", role: "complete" },
 	{ id: "shim-cloud", role: "complete" },

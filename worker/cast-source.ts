@@ -19,14 +19,15 @@
 //                expires; the HTML self-heals quote cards via ?embeds=quotes.
 //                Its text IS canonical (Warpcast-processed).
 //
-// The shim-potato FLEET (measurement canary graduated Oct 2026; fleet
-// cutover Nov 2026; shim-cloud retirement Nov 2026): shim-shaped
-// complete legs — one per comma-separated base in the SHIM_POTATO_BASE
-// var, which carries the full fleet (see raceRoster; no var = the legacy
-// cloud-led roster — the decommissioned cloud host, so production must
-// set the var). Cloud's base was pruned at the retirement; its
-// "shim-cloud" seat id survives only as decaying stats/transparency
-// vocabulary.
+// The shim FLEET (measurement canary graduated Oct 2026; fleet
+// cutover Nov 2026; shim-cloud retired Nov 2026; self-hosted shim cutover
+// Nov 9 2026): shim-shaped complete legs — one per comma-separated base
+// in the SHIM_POTATO_BASE var, which carries the full fleet (see
+// raceRoster; no var = the legacy single-shim roster — the default host,
+// so production must set the var). Since the Nov 9 2026 cutover the
+// fleet is all-potato, led by the self-hosted reader at the shim
+// hostname; the decommissioned Render cloud's "shim-cloud" seat id
+// survives only as decaying stats/transparency vocabulary.
 // Originally a measurement canary; now the redundancy layer cloud retires
 // into. Two properties carried over from the canary era:
 // - a fleet member's FOUND can win like any complete provider (central
@@ -45,7 +46,7 @@
 import { sort } from "radash";
 import { staggerDelays } from "./race.ts";
 import {
-	SHIM_CLOUD_BASE,
+	SHIM_DEFAULT_BASE,
 	fleetBases,
 	fleetSeatId,
 	getCastByUsernameHashFrom,
@@ -59,8 +60,9 @@ export type { ShimCast, ShimEmbed };
 
 export type ProviderId =
 	| "shim"
-	/** Cloud's var-seat name — retired from the production var (Nov 2026,
-	 * the shim-cloud retirement); kept for the decaying stats/transparency
+	/** Retired with the Render cloud (decommissioned Nov 2026); no writer
+	 * since the Nov 9 2026 cutover (the shim hostname's seat is now "shim",
+	 * its hostname label). Kept for the decaying stats/transparency
 	 * vocabulary and any dev/test var that still names the base. */
 	| "shim-cloud"
 	| "haatz"
@@ -73,10 +75,10 @@ export type ProviderId =
  * How resolveFid's two-source identity race settled on a raw-node leg —
  * which source named the fid first and how fast: the leg's own gateway
  * (winner id = the leg id), or the shim-side fleet member that answered
- * ("shim" = the cloud reader; "shim-potato", "shim-potato-2", … = the
- * answering host's own name, the same id the cast race records —
- * fleetSeatId). Public reporting: /transparency's "Author id races"
- * item. No cast identifiers.
+ * ("shim" = the self-hosted reader at the shim hostname; "shim-potato",
+ * "shim-potato-2", … = the answering host's own name, the same id the
+ * cast race records — fleetSeatId). Public reporting: /transparency's
+ * "Author id races" item. No cast identifiers.
  */
 export type FidRace = { winner: Exclude<ProviderId, "farcaster-tv">; ms: number };
 
@@ -128,6 +130,13 @@ export interface CastProvider {
 	 * misses never count.
 	 */
 	missAuthoritative?: boolean;
+	/**
+	 * True for legs built from the var's fleet bases (raceRoster /
+	 * jsonRoster): such a leg takes a leading stagger slot. The legacy
+	 * static roster's "shim" leg (no var) is NOT a fleet seat — it trails
+	 * the whole fleet by a step.
+	 */
+	fleetSeat?: boolean;
 	/** Whether this provider can key off (username, hash) alone. */
 	canServe(vars: CastVars): boolean;
 	fetchCast(vars: CastVars, signal: AbortSignal): Promise<ProviderResult>;
@@ -209,7 +218,11 @@ async function getJsonWithStatus(
 // --- identity calls live in shim.ts; this factory maps them onto race
 // --- semantics. Every fleet member is the same adapter at its own host.
 
-export function shimProviderFor(id: ProviderId, base: string): CastProvider {
+export function shimProviderFor(
+	id: ProviderId,
+	base: string,
+	fleetSeat?: boolean,
+): CastProvider {
 	return {
 		id,
 		complete: true,
@@ -217,6 +230,7 @@ export function shimProviderFor(id: ProviderId, base: string): CastProvider {
 		// leg's consulted miss is a parity vote — consensus, not a single
 		// host, decides not-found.
 		missAuthoritative: true,
+		fleetSeat: fleetSeat === true,
 		canServe: () => true,
 		async fetchCast(vars, signal) {
 			const lookup = await getCastByUsernameHashFrom(
@@ -234,7 +248,7 @@ export function shimProviderFor(id: ProviderId, base: string): CastProvider {
 	};
 }
 
-export const shimProvider = shimProviderFor("shim", SHIM_CLOUD_BASE);
+export const shimProvider = shimProviderFor("shim", SHIM_DEFAULT_BASE);
 
 /**
  * The shim-potato fleet leg — same contract, different host. Wins are real
@@ -244,11 +258,12 @@ export const shimPotatoProvider = (base: string): CastProvider =>
 	shimProviderFor("shim-potato", base);
 
 /**
- * The HTML race roster. Cutover shape (cloud retirement): the raw nodes
+ * The HTML race roster. Cutover shape: the raw nodes
  * and farcaster.tv race immediately, and the WHOLE shim fleet — one
- * canonical-text leg per var base, cloud's own base riding the var like
- * any member — staggers in behind (the raceCast stagger keys off the
- * member ids). No var: the legacy static roster, cloud-led.
+ * canonical-text leg per var base, the shim hostname's own base riding
+ * the var like any member (its seat id is its label, "shim") — staggers
+ * in behind (the raceCast stagger keys off the member ids). No var: the
+ * legacy static roster, led by the default host.
  */
 export function raceRoster(potatoBases?: string | null): CastProvider[] {
 	const bases = fleetBases(potatoBases);
@@ -258,7 +273,7 @@ export function raceRoster(potatoBases?: string | null): CastProvider[] {
 		rawNodeProvider("snap", SNAP_BASE, potatoBases),
 		farcasterTvProvider,
 		...bases.map((base) =>
-			shimProviderFor(fleetSeatId(base) as ProviderId, base),
+			shimProviderFor(fleetSeatId(base) as ProviderId, base, true),
 		),
 	];
 }
@@ -268,13 +283,13 @@ export function raceRoster(potatoBases?: string | null): CastProvider[] {
  * per fleet member (farcaster.tv's quote-blindness has no seat here), so
  * the twin stays complete. Misses are collective parity, the same
  * softened-SPOF semantics as every other surface. No var: the legacy
- * cloud-only leg.
+ * single-shim leg.
  */
 export function jsonRoster(potatoBases?: string | null): CastProvider[] {
 	const bases = fleetBases(potatoBases);
 	if (bases.length === 0) return [shimProvider];
 	return bases.map((base) =>
-		shimProviderFor(fleetSeatId(base) as ProviderId, base),
+		shimProviderFor(fleetSeatId(base) as ProviderId, base, true),
 	);
 }
 
@@ -582,16 +597,16 @@ async function resolveFid(
 
 /**
  * Map the shim-side raceFidByUsername winner base onto its reporting id.
- * The cloud reader keeps the historical "shim". Every other host reports
- * its own name ("shim-potato", "shim-potato-4", …) — the same id the
- * cast-race roster leg carries, except cloud's cast-race seat, which is
- * "shim-cloud". The id does not depend on where the host sits in the var,
- * so a neighbor leaving cannot rename this win. (Cloud retired Nov 2026:
- * its base is out of the production var, so no live winner maps through
- * the cloud arm — it stays for the id vocabulary and any dev/test var.)
+ * Every host reports its hostname label (fleetSeatId): "shim" — the
+ * self-hosted reader at the shim hostname since the Nov 9 2026 cutover,
+ * which also carries cloud's pre-cutover fid-race series until it decays
+ * (~Nov 12) — or the host's own name ("shim-potato", "shim-potato-2", …),
+ * the same id the cast-race roster leg records. The id does not depend on
+ * where the host sits in the var, so a neighbor leaving cannot rename
+ * this win.
  */
 function fidSourceFor(winnerBase: string | undefined): FidRace["winner"] {
-	if (winnerBase === undefined || winnerBase === SHIM_CLOUD_BASE) return "shim";
+	if (winnerBase === undefined) return "shim";
 	return fleetSeatId(winnerBase) as FidRace["winner"];
 }
 
@@ -678,7 +693,8 @@ const HAATZ_BASE = "https://haatz.quilibrium.com";
 // The official Snapchain gateway answers on :3381 only (443 hangs).
 const SNAP_BASE = "https://snap.farcaster.xyz:3381";
 
-/** Legacy no-var roster legs: the identity race's shim side is cloud-only. */
+/** Legacy no-var roster legs: the identity race's shim side is the
+ *  default host only. */
 export const haatzProvider = rawNodeProvider("haatz", HAATZ_BASE);
 export const snapProvider = rawNodeProvider("snap", SNAP_BASE);
 
@@ -744,22 +760,22 @@ export async function raceCast(
 	// race immediately. A fast winner clears the timers of starts that
 	// never fired — the straggler reads are saved.
 	const staggerTimers: ReturnType<typeof setTimeout>[] = [];
-	// Fleet membership by id: a potato host's own name, plus cloud's
-	// "shim-cloud". The legacy no-var "shim" leg is not a seat.
-	const isFleetSeat = (id: ProviderId): boolean =>
-		id === "shim-cloud" || /^shim-potato/.test(id);
-	const fleetCount = eligible.filter((p) => isFleetSeat(p.id)).length;
+	// Fleet membership by construction: raceRoster/jsonRoster mark every
+	// var-built leg `fleetSeat`. The legacy no-var "shim" leg is not a
+	// seat — it trails the whole fleet by a step.
+	const isFleetSeat = (p: CastProvider): boolean => p.fleetSeat === true;
+	const fleetCount = eligible.filter((p) => isFleetSeat(p)).length;
 	const fleetDelays = staggerDelays(fleetCount + 1);
 	// Stagger slots ride ROSTER order (== var order) rather than parsing a
-	// position number out of the id — cloud's seat id carries none: each
-	// fleet leg takes the next slot in encounter order (the lead at 0ms,
-	// later members one tiny random step apart; the legacy "shim" leg
-	// trails the whole fleet by a step). Ids are unique per roster
-	// (fleetBases dedupes), so the per-id map is total.
+	// position number out of the id: each fleet leg takes the next slot in
+	// encounter order (the lead at 0ms, later members one tiny random step
+	// apart; the legacy "shim" leg trails the whole fleet by a step). Ids
+	// are unique per roster (fleetBases dedupes), so the per-id map is
+	// total.
 	const fleetSeatDelays = new Map<ProviderId, number>();
 	let fleetSeatSlot = 0;
 	for (const p of eligible) {
-		if (isFleetSeat(p.id)) {
+		if (isFleetSeat(p)) {
 			fleetSeatDelays.set(p.id, fleetDelays[fleetSeatSlot++] ?? 0);
 		} else if (p.id === "shim") {
 			fleetSeatDelays.set(p.id, fleetDelays[fleetCount] ?? 0);

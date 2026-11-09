@@ -9,7 +9,7 @@
  *    (every miss-authoritative leg consulted and missed) — no single host
  *    decides, so a pending leg can always rescue a landed miss;
  *  - shim's miss is no longer fast-terminal (regression guard, flipped
- *    deliberately: cloud retires into the fleet).
+ *    deliberately: the fleet owns miss parity — no single host decides).
  * No mock.module dance: cast-source.ts pulls in shim.ts + radash only.
  * Stubs settle via real (short) timers; raceCast's 5s caps never fire.
  */
@@ -28,7 +28,7 @@ import {
 	type ProviderResult,
 	shimProvider,
 } from "./cast-source.ts";
-import { SHIM_CLOUD_BASE, fleetBases, fleetSeatId } from "./shim.ts";
+import { SHIM_DEFAULT_BASE, fleetBases, fleetSeatId } from "./shim.ts";
 
 const SIGNAL = new AbortController().signal;
 
@@ -37,12 +37,14 @@ function stub(
 	id: ProviderId,
 	script: Array<{ ms: number; result: ProviderResult }>,
 	missAuthoritative?: boolean,
+	fleetSeat?: boolean,
 ): CastProvider {
 	let call = 0;
 	return {
 		id,
 		complete: true,
 		missAuthoritative,
+		fleetSeat: fleetSeat === true,
 		canServe: () => true,
 		fetchCast() {
 			const step = script[Math.min(call++, script.length - 1)];
@@ -68,7 +70,7 @@ const found = (id: ProviderId): ProviderResult => ({
 });
 
 describe("raceRoster", () => {
-	test("no var → the legacy static roster, cloud-led", () => {
+	test("no var → the legacy static roster, led by the default host", () => {
 		expect(raceRoster(undefined).map((p) => p.id)).toEqual([
 			"shim",
 			"haatz",
@@ -112,20 +114,18 @@ describe("raceRoster", () => {
 		expect(roster.at(-1)?.canServe).toBeDefined();
 	});
 
-	test("cloud's base rides the var under its own name — it is not a potato", () => {
+	test("the shim hostname's base rides the var under its own label — 'shim'", () => {
 		const roster = raceRoster("https://shim-potato.test,https://shim.artlu.xyz");
 		expect(roster.map((p) => p.id)).toEqual([
 			"haatz",
 			"snap",
 			"farcaster-tv",
 			"shim-potato",
-			"shim-cloud",
+			"shim",
 		]);
 		// The threaded raw legs carry the fleet race into the identity
 		// stage; roster assembly stays provider-shape-identical.
-		expect(raceRoster("https://shim.artlu.xyz").at(-1)?.id).toBe(
-			"shim-cloud",
-		);
+		expect(raceRoster("https://shim.artlu.xyz").at(-1)?.id).toBe("shim");
 	});
 
 	test("a gap in the fleet does not renumber the hosts that remain", () => {
@@ -145,7 +145,7 @@ describe("raceRoster", () => {
 		]);
 	});
 
-	test("cloud in front keeps its own id and does not take the lead's", () => {
+	test("the shim base in front leads under its own label, not a potato number", () => {
 		const roster = raceRoster(
 			"https://shim.artlu.xyz,https://shim-potato-4.test",
 		);
@@ -153,7 +153,7 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
-			"shim-cloud",
+			"shim",
 			"shim-potato-4",
 		]);
 	});
@@ -168,9 +168,10 @@ describe("fleetSeatId", () => {
 		expect(fleetSeatId("https://shim-potato-2.test")).toBe("shim-potato-2");
 	});
 
-	test("the cloud base keeps shim-cloud, not its label and not a potato number", () => {
-		expect(fleetSeatId(SHIM_CLOUD_BASE)).toBe("shim-cloud");
-		expect(fleetSeatId("https://shim.example")).toBe("shim-unknown");
+	test("the shim base's seat is its own label — the cloud-era reservation is lifted", () => {
+		expect(fleetSeatId(SHIM_DEFAULT_BASE)).toBe("shim");
+		// A label that sanitizes away entirely has no seat of its own.
+		expect(fleetSeatId("https://ø.example")).toBe("shim-unknown");
 	});
 
 	test("a non-potato host keeps its own label instead of borrowing a number", () => {
@@ -269,16 +270,16 @@ describe("fleet race semantics", () => {
 	});
 
 	test("the fleet LEADS: a potato wins head-to-head against a slower shim", async () => {
-		// Fleet legs start at 0ms (shim trails a step) and answer in 5ms —
-		// they beat shim's 300ms response outright.
+		// Fleet legs start at 0ms and ~50ms (the static shim trails a step)
+		// and answer in 5ms — they beat shim's 300ms response outright.
 		const race = await raceCast(
 			{ username: "zoo", hash: "0xabcdef01" },
 			{
 				boxMs: 700,
 				providers: [
 					stub("shim", [{ ms: 300, result: found("shim") }]),
-					stub("shim-potato", [{ ms: 5, result: found("shim-potato") }]),
-					stub("shim-potato-2", [{ ms: 5, result: found("shim-potato-2") }]),
+					stub("shim-potato", [{ ms: 5, result: found("shim-potato") }], undefined, true),
+					stub("shim-potato-2", [{ ms: 5, result: found("shim-potato-2") }], undefined, true),
 				],
 			},
 		);
@@ -296,8 +297,8 @@ describe("fleet race semantics", () => {
 				boxMs: 700,
 				providers: [
 					stub("shim", [{ ms: 1, result: found("shim") }]),
-					stub("shim-potato", [{ ms: 5, result: found("shim-potato") }]),
-					stub("shim-potato-2", [{ ms: 5, result: found("shim-potato-2") }]),
+					stub("shim-potato", [{ ms: 5, result: found("shim-potato") }], undefined, true),
+					stub("shim-potato-2", [{ ms: 5, result: found("shim-potato-2") }], undefined, true),
 				],
 			},
 		);
@@ -305,6 +306,26 @@ describe("fleet race semantics", () => {
 		// firing, so only the winner ever appears in telemetry.
 		expect(race.kind).toBe("found");
 		expect(race.timings.map((t) => t.provider)).toEqual(["shim-potato"]);
+	});
+
+	test("the shim hostname's seat leads the var roster and cancels the stragglers", async () => {
+		// The Nov 9 2026 cutover roster shape: every shim leg is a fleet
+		// seat, and "shim" — the lead's own label — takes the 0ms slot.
+		const race = await raceCast(
+			{ username: "zoo", hash: "0xabcdef01" },
+			{
+				boxMs: 700,
+				providers: [
+					stub("shim", [{ ms: 5, result: found("shim") }], undefined, true),
+					stub("shim-potato", [{ ms: 300, result: found("shim-potato") }], undefined, true),
+					stub("shim-potato-2", [{ ms: 300, result: found("shim-potato-2") }], undefined, true),
+				],
+			},
+		);
+		expect(race.kind).toBe("found");
+		if (race.kind === "found") expect(race.provider).toBe("shim");
+		// The lead won at ~5ms — the staggered legs never fired.
+		expect(race.timings.map((t) => t.provider)).toEqual(["shim"]);
 	});
 });
 
@@ -378,13 +399,15 @@ describe("default roster", () => {
 
 /**
  * The production fleet var, asserted BY CONTRACT (the roster-guard rule):
- * the shim-cloud retirement (Nov 2026) pruned cloud's base — these tests
- * fail if a var edit ever re-adds it, so the retired host stays retired
- * and generates no new "shim-cloud" datapoints. The exact-fleet guard
- * makes every membership change deliberate: update EXPECTED_FLEET in the
- * same commit as the var.
+ * the Nov 9 2026 cutover made the fleet all-potato and moved the lead to
+ * the self-hosted reader at the shim hostname — the Render+Neon cloud
+ * behind that name was decommissioned Nov 2026, and its "shim-cloud"
+ * seat id has no writer (fleetSeatId's special case is gone). The same
+ * cutover dropped shim-potato-4/-5; their ids stay theirs if they ever
+ * return. The exact-fleet guard makes every membership change
+ * deliberate: update EXPECTED_FLEET in the same commit as the var.
  */
-describe("production fleet var (shim-cloud retirement)", () => {
+describe("production fleet var (self-hosted shim cutover)", () => {
 	const varSource = readFileSync(
 		join(import.meta.dir, "../wrangler.jsonc"),
 		"utf8",
@@ -401,27 +424,23 @@ describe("production fleet var (shim-cloud retirement)", () => {
 		for (const base of bases) expect(base.startsWith("https://")).toBe(true);
 	});
 
-	test("no cloud base — the retired host never races again", () => {
-		expect(bases).not.toContain(SHIM_CLOUD_BASE);
+	test("no shim-cloud seat — the decommissioned cloud id never races again", () => {
+		expect(bases.map((base) => fleetSeatId(base))).not.toContain("shim-cloud");
 	});
 
-	// TEMPORARY (Nov 7 2026): the lead (shim-potato.artlu.xyz) is out
-	// while it re-deploys. Restoring it means putting it back at the
-	// FRONT — order is who leads at 0ms. Seat ids do not move with it:
-	// each host's id is its hostname label (fleetSeatId).
 	test("fleet membership is exactly this list, in this order", () => {
 		expect(bases).toEqual([
+			"https://shim.artlu.xyz",
+			"https://shim-potato.artlu.xyz",
 			"https://shim-potato-2.artlu.xyz",
-			"https://shim-potato-4.artlu.xyz",
-			"https://shim-potato-5.artlu.xyz",
 		]);
 	});
 
 	test("each live host's seat id is its hostname label", () => {
 		expect(bases.map((base) => fleetSeatId(base))).toEqual([
+			"shim",
+			"shim-potato",
 			"shim-potato-2",
-			"shim-potato-4",
-			"shim-potato-5",
 		]);
 	});
 });

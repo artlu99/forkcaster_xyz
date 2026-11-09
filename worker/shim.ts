@@ -7,15 +7,14 @@
 // (same trust position as the ban signal). These wrappers preserve each
 // call site's exact failure semantics — see the per-function notes.
 
-/** Base URL of the shim cloud reader — retired Nov 2026 (the Render
- * instance was decommissioned after the shim-cloud retirement pruned the
- * base from the production fleet var). The constant survives as the
- * legacy no-var roster's target (dev/test and vendored surfaces) and as
- * the fleetSeatId mapping that keeps the historical "shim-cloud" stats id
- * honest (its hostname label is "shim", which is a different, older
- * series). Production must carry the var: the retired host answers
- * nothing. */
-export const SHIM_CLOUD_BASE = "https://shim.artlu.xyz";
+/** Base URL of the default shim host — `shim.artlu.xyz`, the self-hosted
+ * potato that has led the production fleet since the Nov 9 2026 cutover.
+ * (The hostname's earlier tenant — the Render+Neon shim-cloud reader —
+ * was decommissioned Nov 2026; its "shim-cloud" stats id survives only as
+ * decaying stats/transparency vocabulary.) The constant is the legacy
+ * no-var roster's target (dev/test and vendored surfaces); production
+ * must carry the var, which names the deliberate fleet. */
+export const SHIM_DEFAULT_BASE = "https://shim.artlu.xyz";
 
 import { collectiveRace, staggerDelays, type RaceLeg } from "./race.ts";
 
@@ -36,9 +35,9 @@ export type ShimProbe<T> = RaceLeg<T>;
  * Race the shim fleet (`potatoBases` — the raw var value, one or more
  * comma-separated base URLs) under the caller's AbortSignal: the shared
  * collective-race machinery (race.ts) with one leg per var base. The var
- * IS the fleet — cloud holds no special seat (cloud-retirement cutover),
- * and since the shim-cloud retirement (Nov 2026) the production var
- * carries only the potato members; cloud's base rides the var like any
+ * IS the fleet — no host holds a special seat; since the Nov 9 2026
+ * cutover the production var is all-potato, led by the self-hosted
+ * reader at the shim hostname. Every base rides the var like any
  * member's would, first entry leads at 0ms and
  * later members stagger in one tiny random step apart. Fleet semantics —
  * no single host is the source of truth:
@@ -53,18 +52,17 @@ export type ShimProbe<T> = RaceLeg<T>;
  * - latency of a true miss = the slowest leg's miss (bounded by the
  *   caller's signal) — the deliberate price of softening the SPOF.
  *
- * Without `potatoBases` this is a pass-through to cloud — identical
- * fetches, zero overhead (the legacy no-var roster; what keeps every test
- * and caller honest). Since the Nov 2026 retirement the legacy roster
- * targets the DECOMMISSIONED cloud host — dev/test scaffolding only:
- * production and any vendored deployment must set the var.
+ * Without `potatoBases` this is a pass-through to the default host —
+ * identical fetches, zero overhead (the legacy no-var roster; what keeps
+ * every test and caller honest). The no-var roster is dev/test
+ * scaffolding: production and any vendored deployment must set the var.
  */
 export async function raceShimProbe<T>(
 	probe: (base: string) => Promise<ShimProbe<T>>,
 	potatoBases?: string | null,
 ): Promise<ShimProbe<T>> {
 	const bases = fleetBases(potatoBases);
-	if (bases.length === 0) return probe(SHIM_CLOUD_BASE);
+	if (bases.length === 0) return probe(SHIM_DEFAULT_BASE);
 	return collectiveRace({
 		legs: bases.map((base) => () => probe(base)),
 		delays: staggerDelays(bases.length),
@@ -74,10 +72,9 @@ export async function raceShimProbe<T>(
 /**
  * Parse the fleet list: comma-separated base URLs, trimmed, trailing
  * slashes stripped, deduped. The SHIM_POTATO_BASE var carries the FULL
- * shim fleet (cloud-retirement cutover) — every entry is a fleet member;
- * since the shim-cloud retirement (Nov 2026) the production var carries
- * only the potato members, but the parsing stays base-agnostic: a cloud
- * base in any var (dev/test fixtures) is still a member. Var order is the
+ * shim fleet — every entry is a fleet member, potato-named or not (the
+ * self-hosted reader at the shim hostname has ridden the var as the lead
+ * since the Nov 9 2026 cutover). Var order is the
  * stagger/primary order — who leads at 0ms — and nothing else. A host's
  * stats id is its own name (fleetSeatId), so leaving or rejoining does
  * not renumber anyone else.
@@ -107,8 +104,8 @@ const POTATO_SEAT = /^shim-potato(?:-\d+)?$/;
 
 /**
  * Stats id for one fleet base, shared by the cast-race roster legs
- * (cast-source.ts), the fid-race winner vocabulary (cloud excepted — it
- * stays "shim" there), and the cross-fleet warm skip below.
+ * (cast-source.ts), the fid-race winner vocabulary, and the cross-fleet
+ * warm skip below.
  *
  * The id is the hostname's first label, never the var index. Two hosts
  * must not share a label: the race and the stats both key on it. Var
@@ -118,23 +115,24 @@ const POTATO_SEAT = /^shim-potato(?:-\d+)?$/;
  * the host back resumes that same id.
  *
  * `shim-potato.artlu.xyz` → `shim-potato`. `shim-potato-4.artlu.xyz` →
- * `shim-potato-4`. The cloud base is the one exception: its label is
- * `shim`, which is the pre-cutover race-stats id and the fid-race name,
- * so the cast race keeps the post-rename id `shim-cloud`. That seat
- * wrote `shim-potato-3` for its first days under the old positional
- * scheme. `shim-potato-3` is not a hostname and must not be given to a
+ * `shim-potato-4`. `shim.artlu.xyz` → `shim`: the label was reserved
+ * while the decommissioned Render cloud owned the hostname (its cast-race
+ * seat was the renamed `shim-cloud`, its fid-race id `shim`); the Nov 9
+ * 2026 cutover re-hosted the name as a self-hosted potato and lifts the
+ * reservation. The fid-race's pre-cutover `shim` points (cloud's, until
+ * they decay ~Nov 12) blend into the new series — same hostname, same
+ * role. `shim-potato-3` is not a hostname and must not be given to a
  * new machine — those points are still decaying through the stats
- * window (~Nov 12 2026).
+ * window (~Nov 12). `shim-cloud` has no writer since the cutover and
+ * must never be assigned again.
  */
 export function fleetSeatId(base: string): string {
-	if (base === SHIM_CLOUD_BASE) return "shim-cloud";
 	const label = hostLabel(base);
 	if (POTATO_SEAT.test(label)) return label;
-	// A host outside the potato naming scheme still must not inherit a
-	// numbered seat. The label itself is already stable; `shim` is
-	// reserved for the historical cloud series.
+	// A host outside the potato naming scheme still keeps its own label —
+	// including `shim`, a full fleet member since the Nov 9 2026 cutover.
 	const safe = label.replace(/[^a-z0-9-]/g, "");
-	return safe !== "" && safe !== "shim" ? safe : "shim-unknown";
+	return safe !== "" ? safe : "shim-unknown";
 }
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
@@ -235,8 +233,8 @@ export async function getCastByUsernameHashFrom(
 /**
  * GET /h/{hash} — cast by hash alone. Undefined on any failure (not-found,
  * non-2xx, parse, thrown): callers treat undefined as "drop it".
- * Raced against the potato when `potatoBases` is set (the quote hydrator's
- * primary hop — a potato hit rescues a slow cloud index).
+ * Raced across the fleet when `potatoBases` is set (the quote hydrator's
+ * primary hop — a fleet member's hit rescues a slow primary's index).
  */
 export async function getCastByHash(
 	hash: string,
@@ -274,7 +272,7 @@ export async function getCastByHash(
  * OTHER shim-shaped host's index so the next visitor's read is warm there
  * too. The winner is warm by definition and is skipped — matched by the
  * fleet seat id its roster leg carries (fleetSeatId; the legacy
- * no-var roster's "shim" is cloud itself). Fire-and-forget by contract —
+ * no-var roster's "shim" is the default host itself). Fire-and-forget by contract —
  * every leg swallows its own failures; never rejects.
  */
 export function warmShimIndexForCast(
@@ -291,11 +289,11 @@ export function warmShimIndexForCast(
 		}).catch(() => undefined);
 	const fleet = fleetBases(potatoBases);
 	if (fleet.length === 0) {
-		// Legacy no-var roster: cloud is the only shim-shaped host —
-		// the decommissioned one, since the Nov 2026 retirement.
+		// Legacy no-var roster: the default host is the only shim-shaped
+		// host — skip it when it won, warm it when another id won.
 		return winnerProvider === "shim"
 			? Promise.resolve()
-			: warm(SHIM_CLOUD_BASE);
+			: warm(SHIM_DEFAULT_BASE);
 	}
 	return Promise.all(
 		fleet.map((base) =>
@@ -327,7 +325,7 @@ export async function getCastByUsernameHash(
 			: { kind: "error", error: new Error(lookup.message), fallback: lookup };
 	};
 	const result = await raceShimProbe(probe, potatoBases);
-	// The fallback is always the cloud leg's own lookup (never undefined in
+	// The fallback is always the primary leg's own lookup (never undefined in
 	// practice); the default keeps the ShimLookup contract total.
 	return result.kind === "found"
 		? result.value
@@ -338,7 +336,7 @@ export async function getCastByUsernameHash(
  * POST /refresh {fids:[fid]} — pull that fid's recent casts into a shim
  * host's Postgres index, so a hash /h missed (cold — the index only holds
  * kept-warm fids) hits next time. Every fleet member in the var warms
- * (no var: cloud only — the legacy single-host roster). Fire-and-forget
+ * (no var: the default host only — the legacy single-host roster). Fire-and-forget
  * by contract: callers run it under waitUntil and never await it on the
  * response path; the generous cap only bounds the background lifetime.
  * Never throws.
@@ -355,19 +353,19 @@ export function warmShimHashIndex(
 			signal: AbortSignal.timeout(15_000),
 		}).catch(() => undefined);
 	const fleet = fleetBases(potatoBases);
-	// No var: the legacy cloud-only roster — the decommissioned host since
-	// the Nov 2026 retirement (dev/test scaffolding only).
-	const targets = fleet.length > 0 ? fleet : [SHIM_CLOUD_BASE];
+	// No var: the legacy single-host roster — the default host (dev/test
+	// scaffolding only).
+	const targets = fleet.length > 0 ? fleet : [SHIM_DEFAULT_BASE];
 	return Promise.all(targets.map(warm));
 }
 
 /**
  * GET /f/{username} — username → fid, WITH attribution: `winnerBase` is
  * the fleet member whose answer named the fid (undefined on a miss — no
- * numeric fid ever won). Cloud non-2xx/network rejections propagate (an
- * outage, NOT a miss — retriable upstream); raced across the full fleet
- * when `potatoBases` is set (a member's fid rescues a slow or erroring
- * primary; a fleet-wide miss still 404s).
+ * numeric fid ever won). A shim host's non-2xx/network rejections
+ * propagate (an outage, NOT a miss — retriable upstream); raced across
+ * the full fleet when `potatoBases` is set (a member's fid rescues a
+ * slow or erroring primary; a fleet-wide miss still 404s).
  */
 export async function raceFidByUsername(
 	username: string,
@@ -423,8 +421,8 @@ export async function getFidByUsername(
 
 /**
  * GET /u/{fid} — fid → username. null when shim doesn't know the fid or
- * the answer is malformed. Cloud network rejections propagate to the
- * caller (the alias tails turn them into 503s); raced against the potato.
+ * the answer is malformed. Network rejections propagate to the caller
+ * (the alias tails turn them into 503s); raced across the fleet.
  */
 export async function getUsernameByFid(
 	fid: number,
@@ -452,13 +450,13 @@ export async function getUsernameByFid(
 }
 
 /**
- * GET /user/{fid} — the hydrated user entity. undefined on any cloud
+ * GET /user/{fid} — the hydrated user entity. undefined on any fleet
  * failure (non-2xx, parse, thrown): callers treat undefined as
  * "decoration unavailable" and fail soft. A sparse shape (all nulls) is a
  * real answer, not an error — callers check `username == null` for the
- * miss verdict. Only a NON-sparse entity is a raceable found: a potato
- * sparse shape must never 404 a profile the cloud leg would resolve.
- * Raced against the potato when `potatoBases` is set.
+ * miss verdict. Only a NON-sparse entity is a raceable found: a sparse
+ * shape must never 404 a profile a non-sparse leg would resolve.
+ * Raced across the fleet when `potatoBases` is set.
  */
 export async function getUserByFid(
 	fid: number,
@@ -481,14 +479,14 @@ export async function getUserByFid(
 				| undefined;
 			const user = data?.user ?? undefined;
 			if (user?.username != null) return { kind: "found", value: user };
-			// Sparse (or absent) — replayed verbatim only from the cloud leg.
+			// Sparse (or absent) — replayed verbatim only from the primary leg.
 			return { kind: "miss", fallback: user };
 		} catch (error) {
 			return { kind: "error", error, fallback: undefined };
 		}
 	};
 	const result = await raceShimProbe(probe, potatoBases);
-	// Never throws — a cloud outage degrades to undefined, as always.
+	// Never throws — a fleet-wide failure degrades to undefined, as always.
 	return result.kind === "found" ? result.value : result.fallback;
 }
 
@@ -498,8 +496,8 @@ export async function getUserByFid(
  * inline `user` — the author is the requested profile). `success:false`
  * (shim's "User not found") and any transport failure both resolve to
  * `ok:false`: the timeline is content that fails soft, never load-bearing
- * for identity. Raced against the potato — its ok timeline rescues a
- * slow/erroring cloud leg.
+ * for identity. Raced across the fleet — an ok timeline rescues a
+ * slow/erroring primary leg.
  */
 export async function getCastsAndReplies(
 	username: string,

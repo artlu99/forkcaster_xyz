@@ -23,16 +23,18 @@ import type { SiteChrome } from "./site-chrome.ts";
 // history stays attached to them. "shim-potato-3" is the exception that
 // proves it — not a hostname, cloud's pre-rename positional id, decaying
 // through the 168h window (~Nov 12 2026); do not reuse that number.
-// "shim-cloud" (base pruned, Render host decommissioned, Nov 2026) and
-// "shim" (the pre-cutover race-stats id) stay for the same reason.
+// "shim" is the self-hosted reader at shim.artlu.xyz (fleet lead since
+// the Nov 9 2026 cutover; the label also carries cloud's pre-cutover
+// fid-race series until it decays). "shim-cloud" (the decommissioned
+// Render cloud's seat, Nov 2026) has no writer — decaying history only.
 const PROVIDER_HOSTS: Record<ProviderId, string> = {
-	shim: "shim.artlu.xyz (cloud's fid-race id; pre-cutover race-stats id)",
-	"shim-potato": "shim-potato.artlu.xyz (fleet lead — out for re-deploy)",
+	shim: "shim.artlu.xyz (self-hosted potato — fleet lead since Nov 9 2026)",
+	"shim-potato": "shim-potato.artlu.xyz",
 	"shim-potato-2": "shim-potato-2.artlu.xyz",
-	"shim-cloud": "shim.artlu.xyz (retired Nov 2026 — decaying stats id)",
+	"shim-cloud": "no host (Render cloud, decommissioned Nov 2026 — decaying stats id)",
 	"shim-potato-3": "no host (cloud's pre-rename id, decaying ~Nov 12 — do not reuse)",
-	"shim-potato-4": "shim-potato-4.artlu.xyz",
-	"shim-potato-5": "shim-potato-5.artlu.xyz",
+	"shim-potato-4": "shim-potato-4.artlu.xyz (out of the fleet Nov 9 2026)",
+	"shim-potato-5": "shim-potato-5.artlu.xyz (out of the fleet Nov 9 2026)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",
 	snap: "snap.farcaster.xyz:3381 (text-blind)",
@@ -115,7 +117,8 @@ const WEIGHTS_NOTE = `Score: first pick ×${RANK_WEIGHTS.first} · open now ×${
 // The fid-race rows sorted like statsTable — wins desc, p50 tiebreak,
 // sources without data sinking to the bottom. Row labels are the raw
 // FID_RACE source ids, an OPEN vocabulary (the row label IS the source
-// id): "shim" = the legacy cloud reader; "shim-potato", "shim-potato-2",
+// id): "shim" = the self-hosted reader at the shim hostname (fleet lead
+// since the Nov 9 2026 cutover); "shim-potato", "shim-potato-2",
 // … = the answering host's own name (the same id the cast race records);
 // haatz/snap = the raw gateways, tracked independently. With no
 // snapshot yet, the historical trio renders as dashes.
