@@ -62,8 +62,9 @@ export type ProviderId =
 	| "shim"
 	/** Retired with the Render cloud (decommissioned Nov 2026); no writer
 	 * since the Nov 9 2026 cutover (the shim hostname's seat is now "shim",
-	 * its hostname label). Kept for the decaying stats/transparency
-	 * vocabulary and any dev/test var that still names the base. */
+	 * its hostname label). Kept in the union so a dev/test var that still
+	 * names the base records under its own id — trimmed from the
+	 * /transparency reporting Nov 9 2026. */
 	| "shim-cloud"
 	| "haatz"
 	| "snap"

@@ -15,30 +15,25 @@ import { escapeHtml, shell } from "./shell.tsx";
 import type { SiteChrome } from "./site-chrome.ts";
 
 // Public provider roster — names included on purpose (transparency over
-// infra obscurity). Keyed by ProviderId so a roster change in
-// cast-source.ts fails the typecheck here instead of drifting silently.
+// infra obscurity). Keyed by ProviderId (partial — retired ids are
+// trimmed from reporting, see below) so a renamed or typo'd id fails
+// the typecheck here instead of drifting silently.
 // A potato seat id IS the hostname's first label (fleetSeatId): the row
-// for shim-potato-4 is shim-potato-4.artlu.xyz, whether or not its
-// neighbors are in the var. Hosts out of the var keep their row so the
-// history stays attached to them. "shim-potato-3" is the exception that
-// proves it — not a hostname, cloud's pre-rename positional id, decaying
-// through the 168h window (~Nov 12 2026); do not reuse that number.
-// "shim" is the self-hosted reader at shim.artlu.xyz (fleet lead since
-// the Nov 9 2026 cutover; the label also carries cloud's pre-cutover
-// fid-race series until it decays). "shim-cloud" (the decommissioned
-// Render cloud's seat, Nov 2026) has no writer — decaying history only.
-const PROVIDER_HOSTS: Record<ProviderId, string> = {
+// is shim-potato-N.artlu.xyz, whether or not its neighbors are in the
+// var. Retired ids are trimmed, not shown as decaying rows (owner
+// decision Nov 9 2026): "shim-cloud" (the decommissioned Render cloud's
+// seat — no writer), "shim-potato-3" (cloud's pre-rename positional id,
+// not a hostname — do not reuse that number) and "shim-potato-4" / "-5"
+// (out of the fleet Nov 9 2026) no longer appear here or in the
+// snapshot; re-add a host's row if it ever rejoins.
+const PROVIDER_HOSTS = {
 	shim: "shim.artlu.xyz (self-hosted potato — fleet lead since Nov 9 2026)",
 	"shim-potato": "shim-potato.artlu.xyz",
 	"shim-potato-2": "shim-potato-2.artlu.xyz",
-	"shim-cloud": "no host (Render cloud, decommissioned Nov 2026 — decaying stats id)",
-	"shim-potato-3": "no host (cloud's pre-rename id, decaying ~Nov 12 — do not reuse)",
-	"shim-potato-4": "shim-potato-4.artlu.xyz (out of the fleet Nov 9 2026)",
-	"shim-potato-5": "shim-potato-5.artlu.xyz (out of the fleet Nov 9 2026)",
 	"farcaster-tv": "farcaster.tv (partial)",
 	haatz: "haatz.quilibrium.com (text-blind)",
 	snap: "snap.farcaster.xyz:3381 (text-blind)",
-};
+} as const satisfies Partial<Record<ProviderId, string>>;
 const PROVIDERS = Object.entries(PROVIDER_HOSTS).map(([id, host]) => ({
 	id: id as ProviderId,
 	host,

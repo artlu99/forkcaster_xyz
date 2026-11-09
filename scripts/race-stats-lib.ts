@@ -8,32 +8,27 @@
 
 /** Static roster — keep in sync with worker/transparency.tsx (near-static
  * by design). Seat ids are hostname labels (worker/shim.ts fleetSeatId),
- * not var positions: a host that leaves keeps its series, and nobody else
- * inherits it. Add a row when a new hostname joins; leave a row in place
- * when a host is out, so its history and its return stay one series.
+ * not var positions. Add a row when a new hostname joins; when a host is
+ * out, drop its row with it (owner decision Nov 9 2026 — retired ids no
+ * longer report on /transparency): the raw AE data keeps the id's series,
+ * so re-adding the row when the host returns resumes the same series.
  * "shim" is the self-hosted potato at shim.artlu.xyz — fleet lead since
  * the Nov 9 2026 cutover (the row predates that as the pre-cutover id,
  * trimmed Nov 6 when it aged out; revived at the cutover).
  * "shim-potato" is shim-potato.artlu.xyz — back from its Nov 7
  * re-deploy, second in the var.
- * "shim-potato-2" is that host. "shim-potato-4" / "-5" were dropped from
- * the var Nov 9 2026 — the rows stay so their history keeps decaying
- * under its own id (and a return resumes the same series).
- * "shim-potato-3" is NOT a host. Cloud's first days wrote that id under
- * the old positional scheme. Keep the row while those points decay
- * (~Nov 12); never give a new machine this name, or its points blend
- * into cloud's series.
- * "shim-cloud" is retired (Render host decommissioned Nov 2026; the
- * hostname's seat became "shim" at the Nov 9 cutover) — no new
- * datapoints ever; trim after the window. */
+ * "shim-potato-2" is that host. Trimmed Nov 9 2026 with the fleet cut:
+ * "shim-cloud" (retired — Render host decommissioned Nov 2026, the
+ * hostname's seat became "shim" at the cutover, no new datapoints ever),
+ * "shim-potato-3" (NOT a host — cloud's first days wrote that id under
+ * the old positional scheme; never give a new machine that name, or its
+ * points blend into cloud's series), and "shim-potato-4" / "-5" (dropped
+ * from the var Nov 9 2026; the hostnames remain — re-add their rows if
+ * they ever rejoin). */
 export const ROSTER = [
 	{ id: "shim", role: "complete" },
 	{ id: "shim-potato", role: "complete" },
 	{ id: "shim-potato-2", role: "complete" },
-	{ id: "shim-cloud", role: "complete" },
-	{ id: "shim-potato-3", role: "complete" },
-	{ id: "shim-potato-4", role: "complete" },
-	{ id: "shim-potato-5", role: "complete" },
 	{ id: "haatz", role: "complete" },
 	{ id: "snap", role: "complete" },
 	{ id: "farcaster-tv", role: "partial" },

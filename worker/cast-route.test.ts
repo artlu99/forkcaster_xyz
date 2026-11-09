@@ -952,8 +952,8 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 	expect(body).toContain("first good answer");
 	expect(body).toContain("No cast IDs");
 	expect(body).toContain("shim.artlu.xyz"); // provider roster table
-	expect(body).toContain("shim-potato-5.artlu.xyz");
-	expect(body).toContain("do not reuse");
+	expect(body).not.toContain("shim-cloud"); // retired ids trimmed from reporting
+	expect(body).not.toContain("do not reuse");
 	expect(body).toContain('href="/transparency"'); // footer link present
 
 	const jsonRes = await app.request("/transparency?format=json");
@@ -962,22 +962,17 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	// Ten: the raw nodes, farcaster.tv, the self-hosted fleet lead ("shim",
-	// the shim hostname's own label since the Nov 9 2026 cutover),
-	// shim-potato and shim-potato-2, the retired cloud seat (shim-cloud,
-	// no writer since the cutover), cloud's pre-rename id (shim-potato-3 —
-	// no host, decaying), the two hosts dropped Nov 9 2026 (shim-potato-4
-	// and shim-potato-5, ids = hostnames, rows kept for their decaying
-	// history).
-	expect(json.data.providers).toHaveLength(10);
+	// Six: the raw nodes, farcaster.tv, the self-hosted fleet lead ("shim",
+	// the shim hostname's own label since the Nov 9 2026 cutover), and
+	// shim-potato / shim-potato-2. The retired ids (shim-cloud, cloud's
+	// pre-rename shim-potato-3, and the hosts dropped Nov 9 2026 —
+	// shim-potato-4/-5) are trimmed from reporting; their rows rejoin if
+	// a host ever returns.
+	expect(json.data.providers).toHaveLength(6);
 	expect(json.data.providers.map((p: { id: string }) => p.id)).toEqual([
 		"shim",
 		"shim-potato",
 		"shim-potato-2",
-		"shim-cloud",
-		"shim-potato-3",
-		"shim-potato-4",
-		"shim-potato-5",
 		"farcaster-tv",
 		"haatz",
 		"snap",
