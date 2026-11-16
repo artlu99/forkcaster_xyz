@@ -34,10 +34,12 @@ import {
 	renderProfileJson,
 	resolveConversationAlias,
 	resolveProfile,
+	resolveProfileFid,
 	resolveProfileFidAlias,
 } from "./profile-page.tsx";
 import { getRaceStatsSnapshot } from "./race-stats-store.ts";
 import { getFidRaceSnapshot } from "./fid-race-store.ts";
+import { numericFidCandidate } from "./shim.ts";
 import { parseTrackEvent, writeTrackEvent } from "./track.ts";
 import { renderTransparencyHtml, transparencyJson } from "./transparency.tsx";
 import { loadFarcatPreview } from "./farcat.ts";
@@ -571,12 +573,29 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	const chromeP = wantsJson
 		? undefined
 		: chromeFor(new URL(c.req.url).hostname);
-	const resolved = await resolveProfile(username, {
+	let resolved = await resolveProfile(username, {
 		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
 		signed: true,
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
+	// Post-hardfork (HyperSnap) waterfall: after an authoritative /f miss,
+	// a numeric segment above the gate is a post-fork fid — Warpcast mints
+	// /{fid} URLs for accounts that hold no username yet, and no username
+	// exists to redirect to, so the fid URL renders in place
+	// (resolveProfileFid). An fid-leg miss or outage changes nothing: the
+	// /f verdict stands (404 render below, same bytes as before).
+	if (resolved.kind === "not-found") {
+		const fid = numericFidCandidate(username);
+		if (fid !== undefined) {
+			const viaFid = await resolveProfileFid(fid, {
+				timeline: wantsJson,
+				signed: true,
+				potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+			});
+			if (viaFid.kind === "found") resolved = viaFid;
+		}
+	}
 	if (wantsJson) {
 		const { status, body, retryAfter } = renderProfileJson(
 			resolved,
@@ -646,7 +665,7 @@ app.get("/:username/casts-and-replies", async (c) => {
 		if (hit) return hit;
 	}
 	const chromeP = chromeFor(new URL(c.req.url).hostname);
-	const resolved = await resolveProfile(username, {
+	let resolved = await resolveProfile(username, {
 		timeline: true,
 		// Same ban-signal fork as the profile page: the head's way out
 		// follows the signed state.
@@ -654,6 +673,20 @@ app.get("/:username/casts-and-replies", async (c) => {
 		// Every shim read races the shim-potato fleet when it's configured.
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
+	// Post-hardfork waterfall, same contract as the profile route: the
+	// timeline is username-keyed, so the fid leg renders the identity head
+	// over an honest "unavailable" list — never a fake empty feed.
+	if (resolved.kind === "not-found") {
+		const fid = numericFidCandidate(username);
+		if (fid !== undefined) {
+			const viaFid = await resolveProfileFid(fid, {
+				timeline: true,
+				signed: true,
+				potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
+			});
+			if (viaFid.kind === "found") resolved = viaFid;
+		}
+	}
 	const [rank, chrome] = await Promise.all([
 		getRankSnapshotSoon(c.env, 400),
 		chromeP,
@@ -726,7 +759,10 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
 // fetches (the profile charset gate + lowercase do the rest downstream).
 // Fid shape: shim /u/{fid} — the conversations alias's own /u tail — then
 // 302 — never 301, the mapping stays cache-free — with a RELATIVE Location
-// to /{username}. /u semantics mirror the profile family: non-2xx/throw ⇒
+// to /{username}. A usernameless fid (post-hardfork HyperSnap accounts mint
+// before claiming a username — /u answers with no username) 302s to the fid
+// surface itself, which renders in place. /u semantics mirror the profile
+// family: non-2xx/throw ⇒
 // 503 + Retry-After (identity has no fail-open source), HTTP-200 miss ⇒ 404.
 app.get("/~/profiles/:id{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	const id = c.req.param().id;
@@ -743,7 +779,17 @@ app.get("/~/profiles/:id{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		if (resolved.kind === "unreachable") {
 			return c.body(null, 503, { "retry-after": "60" });
 		}
-		if (resolved.kind === "not-found") return c.body(null, 404);
+		if (resolved.kind === "not-found") {
+			// No username behind the fid: post-hardfork (HyperSnap) accounts
+			// mint before claiming one, so there is no username waypoint to
+			// redirect to — the fid surface (/{fid}) renders in place now.
+			// Only post-fork-shaped fids (numericFidCandidate) take that
+			// fallback: a pre-fork fid without a username is an unknown fid,
+			// and the fid surface would 404 anyway. Still 302 (never 301):
+			// a claimed username changes the mapping.
+			if (numericFidCandidate(id) === undefined) return c.body(null, 404);
+			return c.redirect(`/${id}`, 302);
+		}
 		return c.redirect(`/${encodeURIComponent(resolved.username)}`, 302);
 	}
 	return c.redirect(`/${encodeURIComponent(id.toLowerCase())}`, 302);

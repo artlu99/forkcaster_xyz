@@ -268,6 +268,41 @@ export async function getCastByHash(
 }
 
 /**
+ * GET /i/{fid}/{hash} against an arbitrary shim-shaped host — the
+ * fid-keyed race leg (cast-source.ts) calls this at the shim hostname,
+ * the same ShimLookup contract getCastByUsernameHashFrom set for /wc:
+ * HTTP 200 miss body when both fork worlds answer not_found, non-2xx is
+ * an outage — shim's contract here is explicit that outages answer 503,
+ * never a false miss. /i is the post-hardfork primitive: HyperSnap is
+ * primary (where the native ≥2**32 fids and their casts live), Snapchain
+ * consulted on a miss, and the fid in the URL IS the lookup key — a cast
+ * belonging to any other author cannot come back.
+ */
+export async function getCastByFidAndHashFrom(
+	base: string,
+	fid: number,
+	hash: string,
+	signal: AbortSignal,
+): Promise<ShimLookup> {
+	try {
+		const res = await fetch(`${base}/i/${fid}/${hash}`, { signal });
+		if (!res.ok) {
+			return { status: "error", message: `HTTP ${res.status}` };
+		}
+		const data = (await res.json().catch(() => undefined)) as
+			| { success?: boolean; cast?: ShimCast }
+			| undefined;
+		const cast = data?.cast;
+		if (data?.success === false || !cast?.hash) {
+			return { status: "miss" };
+		}
+		return { status: "found", cast: { ...cast, hash: cast.hash } };
+	} catch (error) {
+		return { status: "error", message: String(error) };
+	}
+}
+
+/**
  * Cross-fleet warm: after a cast wins via one host, refresh every
  * OTHER shim-shaped host's index so the next visitor's read is warm there
  * too. The winner is warm by definition and is skipped — matched by the
@@ -357,6 +392,34 @@ export function warmShimHashIndex(
 	// scaffolding only).
 	const targets = fleet.length > 0 ? fleet : [SHIM_DEFAULT_BASE];
 	return Promise.all(targets.map(warm));
+}
+
+// --- Post-hardfork fid waterfall (HyperSnap, Nov 2026) ------------------------
+//
+// The hard fork extended the fid space: native post-fork fids start at
+// 2**32 (fid 4294967296, "2^32", is the first), and Warpcast mints share
+// URLs from the raw fid for accounts that hold no username yet —
+// /4294967296/0x… and /4294967296 shapes now arrive here. Username
+// resolution stays FIRST: all-digit fnames genuinely exist (the fname
+// "4294967296" is claimed — shim /f answers fid 627569 for it), so the
+// fid reading is only a FALLBACK after the username verdict missed.
+// 4,000,000 is the fallback gate: pre-fork fids number below it and their
+// URLs always carry fnames, while every post-fork fid clears it — below
+// the gate a numeric segment is an all-digit fname, full stop, and no
+// fid lookup ever fires (a small-fid fallback could never be trusted
+// over a claimed fname anyway).
+
+/**
+ * Numeric segment above the post-fork gate — a candidate fid for the
+ * username→fid waterfall. Undefined for anything non-numeric, at or
+ * below the gate, or past Number precision (a lie of digits, same rule
+ * the /~/profiles fid branch applies).
+ */
+export function numericFidCandidate(raw: string): number | undefined {
+	if (!/^[0-9]+$/.test(raw)) return undefined;
+	const fid = Number(raw);
+	if (!Number.isSafeInteger(fid) || fid <= 4_000_000) return undefined;
+	return fid;
 }
 
 /**

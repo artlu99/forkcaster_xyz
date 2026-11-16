@@ -244,6 +244,91 @@ export async function resolveProfile(
 	};
 }
 
+/**
+ * The fid leg of the post-hardfork username→fid waterfall (numericFidCandidate
+ * gated at the route). resolveProfile stays the FIRST verdict — all-digit
+ * fnames genuinely exist — so this runs only after the /f verdict missed:
+ * the segment is then a post-fork (HyperSnap) fid whose account may hold no
+ * username at all (shim /u answers the fid with no username — verified live,
+ * fid 4294967296 "2^32"). Unlike the /~/profiles/{fid} alias (a redirect to
+ * a username waypoint that exists), there is no username to canonicalize to
+ * — the fid URL farcaster.xyz itself mints IS the canonical surface, so
+ * this resolves the hydrated entity directly and the route renders in place.
+ *
+ * The entity's `username == null` is deliberately ACCEPTED here (the
+ * username path keeps rejecting it — there it means a stale/absent handle
+ * behind a proven identity; here usernamelessness is the resolved state,
+ * and the renderers' primaryHandle fallback carries the route input).
+ * The timeline is username-keyed and unreachable for these accounts:
+ * `timeline: true` marks timelineOk false (renders "unavailable", never
+ * faked). Identity discipline matches resolveProfileFidAlias: the 8s
+ * window, one retry on transport failure, entity single semantic probe —
+ * both legs raced across the potato fleet.
+ */
+export async function resolveProfileFid(
+	fid: number,
+	opts: {
+		timeline?: boolean;
+		signed?: boolean;
+		potatoBases?: string | null;
+	} = {},
+): Promise<ResolvedProfile> {
+	const probeOnce = (signal: AbortSignal): Promise<ShimProbe<ShimUser>> => {
+		const probe = async (base: string): Promise<ShimProbe<ShimUser>> => {
+			try {
+				const res = await fetch(`${base}/user/${fid}`, { signal });
+				if (!res.ok) {
+					return {
+						kind: "error",
+						error: new Error(`shim /user HTTP ${res.status}`),
+						fallback: undefined,
+					};
+				}
+				const data = (await res.json().catch(() => undefined)) as
+					| { success?: boolean; user?: ShimUser | null }
+					| undefined;
+				const user = data?.user;
+				// The sparse unknown-fid shape (all nulls, no numeric fid) is
+				// the miss: nothing was resolved. username null is NOT a miss
+				// here — see the doc comment.
+				return user && typeof user.fid === "number"
+					? { kind: "found", value: user }
+					: { kind: "miss", fallback: undefined };
+			} catch (error) {
+				return { kind: "error", error, fallback: undefined };
+			}
+		};
+		return raceShimProbe(probe, opts.potatoBases);
+	};
+	const probed = await withOneRetry(probeOnce, (r) => r.kind === "error");
+	if (probed.kind === "error") return { kind: "unreachable" };
+	if (probed.kind === "miss") return { kind: "not-found" };
+	const user = probed.value;
+	// The ban signal rides the same trust seat as identity (shim /signed
+	// is fid-keyed — it answers for usernameless fids). Unknown fails open,
+	// exactly like the username path.
+	let signed: boolean | null = null;
+	if (opts.signed) {
+		signed =
+			(await getSignedStatus(
+				user.fid ?? fid,
+				AbortSignal.timeout(PROFILE_TIMEOUT_MS),
+				opts.potatoBases,
+			)) ?? null;
+	}
+	return {
+		kind: "found",
+		user,
+		fid: user.fid ?? fid,
+		casts: [],
+		// The timeline endpoint is username-keyed — no source exists for a
+		// usernameless account. `timeline: true` (JSON twin / casts page)
+		// renders the honest "unavailable" note instead of a fake empty list.
+		timelineOk: !opts.timeline,
+		signed,
+	};
+}
+
 // --- HTML renderer -----------------------------------------------------------
 
 // Stroke icons inlined (simple-icons is brand-only); fill=none + currentColor

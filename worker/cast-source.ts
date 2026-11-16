@@ -49,7 +49,9 @@ import {
 	SHIM_DEFAULT_BASE,
 	fleetBases,
 	fleetSeatId,
+	getCastByFidAndHashFrom,
 	getCastByUsernameHashFrom,
+	numericFidCandidate,
 	raceFidByUsername,
 	resolvesHash,
 	type ShimCast,
@@ -69,6 +71,12 @@ export type ProviderId =
 	| "haatz"
 	| "snap"
 	| "farcaster-tv"
+	/** The fid-keyed /i leg at the shim hostname — eligible only for
+	 * fid-shaped URLs (numeric username segment above the post-fork gate;
+	 * numericFidCandidate) with a full hash. /wc keys off a username, and
+	 * post-hardfork (HyperSnap) accounts mint /{fid}/{hash} URLs before
+	 * claiming one — /i resolves those across both fork worlds. */
+	| "shim-fid"
 	/** A potato host's own name: shim-potato, shim-potato-2, shim-potato-4, … */
 	| `shim-potato${string}`;
 
@@ -259,6 +267,83 @@ export const shimPotatoProvider = (base: string): CastProvider =>
 	shimProviderFor("shim-potato", base);
 
 /**
+ * The fid-keyed /i leg at the shim hostname — the fid-waterfall's cast
+ * half. Eligible ONLY when the username segment is a numeric fid
+ * candidate (numericFidCandidate — post-hardfork HyperSnap URLs mint
+ * /{fid}/{hash} for accounts that hold no username yet) AND the hash is
+ * full (/i is fid + full hash; short hashes miss it, and Warpcast share
+ * URLs are full-hash anyway), so ordinary username lookups never gain a
+ * leg and byte-for-byte behavior is unchanged.
+ *
+ * The fork question resolves ITSELF in the race, no ordering needed:
+ * Snapchain and HyperSnap are forked worlds, and each leg reads its own.
+ * A HyperSnap-world cast (the "gm from native fid" case) can only be
+ * found by /i — the URL's fid IS its lookup key. A Snapchain-world cast
+ * shared under a colliding all-digit fname (the fname "4294967296"
+ * belongs to fid 627569, Snapchain-canonical per shim /f) can only be
+ * found by the /wc legs. Whichever world actually holds (author, hash)
+ * wins; the other's legs miss. The explicit mismatch guard below stays
+ * as replica defense — through an honest /i it is unreachable, since
+ * the endpoint cannot return a cast for a different fid than the key.
+ *
+ * complete: /i answers the canonical shim shape. missAuthoritative:
+ * TRUE — and now documented truth, not just race mechanics: shim's /i
+ * contract states a miss means BOTH fork worlds answered not_found, so
+ * the vote carries real verdict weight (and a pending /i must hold the
+ * race open — the JSON twin's no-var roster is /wc + /i, where a lone
+ * /wc miss would otherwise settle not-found before /i answers). Outages
+ * answer 503 (never a false miss) and land as leg errors — no vote.
+ * base is the shim hostname — in production the var carries that host
+ * as the fleet lead anyway; the /wc legs keep fleet-wide parity, so a
+ * lead outage never blinds the fid shape (their misses still vote).
+ * Dev/test (no var) get the legacy roster target.
+ */
+export const shimFidProvider: CastProvider = {
+	id: "shim-fid",
+	complete: true,
+	missAuthoritative: true,
+	canServe: (vars) =>
+		numericFidCandidate(vars.username) !== undefined &&
+		isFullHash(vars.hash),
+	async fetchCast(vars, signal) {
+		const candidate = numericFidCandidate(vars.username);
+		if (candidate === undefined) {
+			return {
+				kind: "error",
+				provider: "shim-fid",
+				message: "not a fid-shaped lookup",
+			};
+		}
+		const lookup = await getCastByFidAndHashFrom(
+			SHIM_DEFAULT_BASE,
+			candidate,
+			vars.hash,
+			signal,
+		);
+		if (lookup.status === "error") {
+			return { kind: "error", provider: "shim-fid", message: lookup.message };
+		}
+		if (lookup.status === "miss") return { kind: "miss", provider: "shim-fid" };
+		const castFid = lookup.cast.fid ?? lookup.cast.user?.fid;
+		if (castFid !== candidate) {
+			// Unreachable through an honest /i (the fid is the lookup key);
+			// kept as replica defense — a wrong-fid answer must never win.
+			return {
+				kind: "error",
+				provider: "shim-fid",
+				message: "cast belongs to a different fid",
+			};
+		}
+		return {
+			kind: "found",
+			provider: "shim-fid",
+			complete: true,
+			cast: lookup.cast,
+		};
+	},
+};
+
+/**
  * The HTML race roster. Cutover shape: the raw nodes
  * and farcaster.tv race immediately, and the WHOLE shim fleet — one
  * canonical-text leg per var base, the shim hostname's own base riding
@@ -273,6 +358,7 @@ export function raceRoster(potatoBases?: string | null): CastProvider[] {
 		rawNodeProvider("haatz", HAATZ_BASE, potatoBases),
 		rawNodeProvider("snap", SNAP_BASE, potatoBases),
 		farcasterTvProvider,
+		shimFidProvider,
 		...bases.map((base) =>
 			shimProviderFor(fleetSeatId(base) as ProviderId, base, true),
 		),
@@ -288,10 +374,13 @@ export function raceRoster(potatoBases?: string | null): CastProvider[] {
  */
 export function jsonRoster(potatoBases?: string | null): CastProvider[] {
 	const bases = fleetBases(potatoBases);
-	if (bases.length === 0) return [shimProvider];
-	return bases.map((base) =>
-		shimProviderFor(fleetSeatId(base) as ProviderId, base, true),
-	);
+	if (bases.length === 0) return [shimProvider, shimFidProvider];
+	return [
+		shimFidProvider,
+		...bases.map((base) =>
+			shimProviderFor(fleetSeatId(base) as ProviderId, base, true),
+		),
+	];
 }
 
 // --- farcaster.tv (quote-blind partial, any hash form via prefix match) ---
@@ -704,6 +793,7 @@ export const PROVIDERS: CastProvider[] = [
 	haatzProvider,
 	snapProvider,
 	farcasterTvProvider,
+	shimFidProvider,
 ];
 
 type RaceEvent =

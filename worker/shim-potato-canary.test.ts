@@ -76,12 +76,14 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 		]);
 		expect(raceRoster("").map((p) => p.id)).toEqual([
 			"shim",
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 		]);
 	});
 
@@ -91,6 +93,7 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 			"shim-potato",
 		]);
 		// Full fleet membership: the leg's misses are parity votes.
@@ -107,6 +110,7 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 			"shim-potato",
 			"shim-potato-2",
 		]);
@@ -120,6 +124,7 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 			"shim-potato",
 			"shim",
 		]);
@@ -136,10 +141,12 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 			"shim-potato-2",
 			"shim-potato-5",
 		]);
 		expect(jsonRoster(gapped).map((p) => p.id)).toEqual([
+			"shim-fid",
 			"shim-potato-2",
 			"shim-potato-5",
 		]);
@@ -153,6 +160,7 @@ describe("raceRoster", () => {
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 			"shim",
 			"shim-potato-4",
 		]);
@@ -384,15 +392,19 @@ describe("shimPotatoProvider factory", () => {
 	});
 });
 
-// The default roster is untouched by the fleet: four providers, and the
-// module-level shim provider still carries miss authority (as one vote).
+// The default roster is untouched by the fleet: five providers — the
+// static four plus the fid-keyed /i leg (shim-fid, the post-hardfork
+// fid waterfall's cast half, eligible only for fid-shaped URLs) — and
+// the module-level shim provider still carries miss authority (as one
+// vote).
 describe("default roster", () => {
-	test("PROVIDERS stays the static four until activation", () => {
+	test("PROVIDERS stays the static four plus shim-fid until activation", () => {
 		expect(PROVIDERS.map((p) => p.id)).toEqual([
 			"shim",
 			"haatz",
 			"snap",
 			"farcaster-tv",
+			"shim-fid",
 		]);
 	});
 });

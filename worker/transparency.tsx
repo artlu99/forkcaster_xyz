@@ -28,6 +28,8 @@ import type { SiteChrome } from "./site-chrome.ts";
 // snapshot; re-add a host's row if it ever rejoins.
 const PROVIDER_HOSTS = {
 	shim: "shim.artlu.xyz (self-hosted potato — fleet lead since Nov 9 2026)",
+	"shim-fid":
+		"shim.artlu.xyz /i (fid + full hash — post-fork fid URLs, both fork worlds)",
 	"shim-potato": "shim-potato.artlu.xyz",
 	"shim-potato-2": "shim-potato-2.artlu.xyz",
 	"farcaster-tv": "farcaster.tv (partial)",
@@ -220,7 +222,8 @@ export function transparencyJson(
 		license: "MIT",
 		code: REPO,
 		data: {
-			method: "race 4 providers in parallel; first validated answer wins",
+			method:
+				"race 4 providers in parallel; first validated answer wins (fid-shaped URLs add a fid-keyed /i leg — no username exists on post-fork accounts)",
 			providers: PROVIDERS,
 			banSignal:
 				"author signed Farcaster's contract? shim /signed/{fid}; unknown -> fail open",

@@ -962,15 +962,17 @@ test("GET /transparency serves terse facts; JSON twin; casts for username 'trans
 		"application/json",
 	);
 	const json = await jsonRes.json();
-	// Six: the raw nodes, farcaster.tv, the self-hosted fleet lead ("shim",
-	// the shim hostname's own label since the Nov 9 2026 cutover), and
-	// shim-potato / shim-potato-2. The retired ids (shim-cloud, cloud's
-	// pre-rename shim-potato-3, and the hosts dropped Nov 9 2026 —
-	// shim-potato-4/-5) are trimmed from reporting; their rows rejoin if
-	// a host ever returns.
-	expect(json.data.providers).toHaveLength(6);
+	// Seven: the raw nodes, farcaster.tv, the self-hosted fleet lead ("shim",
+	// the shim hostname's own label since the Nov 9 2026 cutover),
+	// shim-potato / shim-potato-2, and the fid-keyed /i leg ("shim-fid" —
+	// the post-hardfork fid waterfall's cast half, same hostname as "shim").
+	// The retired ids (shim-cloud, cloud's pre-rename shim-potato-3, and
+	// the hosts dropped Nov 9 2026 — shim-potato-4/-5) are trimmed from
+	// reporting; their rows rejoin if a host ever returns.
+	expect(json.data.providers).toHaveLength(7);
 	expect(json.data.providers.map((p: { id: string }) => p.id)).toEqual([
 		"shim",
+		"shim-fid",
 		"shim-potato",
 		"shim-potato-2",
 		"farcaster-tv",
@@ -1559,4 +1561,195 @@ test("link gate: linkcast pill only on casts with an external link", async () =>
 	expect(body).toContain(
 		'href="https://linkcast.xyz/cast/a26d1f3861326cf24977995ec9dd24145e87a2fb"',
 	);
+});
+
+// --- Post-hardfork fid waterfall (HyperSnap): fid-shaped cast URLs -----------
+//
+// The hard fork (HyperSnap) extended the fid space at 2**32 and Warpcast
+// mints /{fid}/{hash} share URLs for accounts that hold no username yet.
+// The waterfall lives INSIDE the race: shim's fid-keyed /i leg ("shim-fid")
+// is eligible only when the username segment is a numeric fid candidate
+// (> 4,000,000 — numericFidCandidate) with a full hash, so ordinary
+// username lookups never grow a leg. The fork question resolves itself,
+// no ordering needed: Snapchain and HyperSnap are forked worlds and each
+// leg reads its own — /i (fid IS the lookup key) can only answer the
+// HyperSnap world, the /wc legs (via the fork-aware /f) can only answer
+// the Snapchain fname world, and whichever world actually holds
+// (author, hash) wins the race.
+
+const FID_URL_FID = 4294967296;
+const FID_URL_HASH = "0xc3826eb878fd647444feb74d57cb3f179ce1acd7";
+// The real HyperSnap-native cast, exactly as shim /i answers it live:
+// "gm from native fid using hypersnap on GC!" by fid 4294967296 ("2^32",
+// the first post-fork fid — usernameless, displayName only).
+const FID_CAST = {
+	fid: FID_URL_FID,
+	hash: FID_URL_HASH,
+	text: "gm from native fid using hypersnap on GC!",
+	timestamp: 1_794_773_961,
+	embeds: [],
+	user: { fid: FID_URL_FID, username: null, displayName: "2^32" },
+};
+
+// The common mocks for a fid-shaped lookup: the username legs have no
+// fname to consult (post-fork accounts are usernameless), so /wc misses,
+// farcaster.tv 404s, and the raw nodes' identity race comes up empty.
+function fidLegMisses(
+	hash: string,
+): Record<string, unknown | Error> {
+	return {
+		[`https://shim.artlu.xyz/wc/4294967296/${hash}`]: { success: false },
+		[`https://farcaster.tv/4294967296/${hash}`]: new Response("", {
+			status: 404,
+		}),
+		"https://shim.artlu.xyz/f/4294967296": { success: false },
+		"https://haatz.quilibrium.com/v1/userNameProofByName?name=4294967296":
+			new Response("", { status: 404 }),
+		"https://snap.farcaster.xyz:3381/v1/userNameProofByName?name=4294967296":
+			new Response("", { status: 404 }),
+	};
+}
+
+test("fid-shaped cast URL renders via the fid-keyed /i leg", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/i/${FID_URL_FID}/${FID_URL_HASH}`) {
+			return Response.json({ success: true, cast: FID_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/signed/4294967296") {
+			return Response.json({ success: true, signed: false });
+		}
+		const missed = fidLegMisses(FID_URL_HASH);
+		if (url in missed) {
+			const route = missed[url];
+			if (route instanceof Error) return Promise.reject(route);
+			return route instanceof Response ? route : Response.json(route);
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	});
+	const res = await app.request(`/4294967296/${FID_URL_HASH}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain("gm from native fid using hypersnap on GC!");
+	// The usernameless author renders through the display waterfall
+	// (displayName "2^32"); the route input carries the identity slots.
+	expect(body).toContain("2^32");
+	expect(body).toContain('data-username="4294967296"');
+});
+
+test("a Snapchain-world cast under a colliding fname wins via the /wc legs", async () => {
+	// The all-digit fname "4294967296" is genuinely claimed on Snapchain
+	// (fid 627569). A Snapchain-world cast shared under that fname arrives
+	// at the same /4294967296/{hash} URL — there the /i leg misses (the
+	// HyperSnap world holds no such cast) and the /wc legs answer through
+	// the fork-aware fname reading. The URL serves whichever world holds
+	// the cast; this pins the Snapchain side of that coexistence.
+	const SNAP_HASH = "0xa26d1f3861326cf24977995ec9dd24145e87a2fb";
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/wc/4294967296/${SNAP_HASH}`) {
+			return Response.json({
+				success: true,
+				cast: {
+					fid: 627569,
+					hash: SNAP_HASH,
+					text: "the snapchain fname-holder's cast",
+					timestamp: 1_700_000_000,
+					embeds: [],
+					user: { fid: 627569, username: "4294967296" },
+				},
+			});
+		}
+		if (url === `https://shim.artlu.xyz/i/${FID_URL_FID}/${SNAP_HASH}`) {
+			return Response.json({ success: false });
+		}
+		if (url === "https://shim.artlu.xyz/signed/627569") {
+			return Response.json({ success: true, signed: false });
+		}
+		const missed = fidLegMisses(SNAP_HASH);
+		if (url in missed) {
+			const route = missed[url];
+			if (route instanceof Error) return Promise.reject(route);
+			return route instanceof Response ? route : Response.json(route);
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	});
+	const res = await app.request(`/4294967296/${SNAP_HASH}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain("the snapchain fname-holder's cast");
+});
+
+test("fid-shaped cast URL 404s when both fork worlds miss", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/i/${FID_URL_FID}/${FID_URL_HASH}`) {
+			return Response.json({ success: false });
+		}
+		const missed = fidLegMisses(FID_URL_HASH);
+		if (url in missed) {
+			const route = missed[url];
+			if (route instanceof Error) return Promise.reject(route);
+			return route instanceof Response ? route : Response.json(route);
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	});
+	const res = await app.request(`/4294967296/${FID_URL_HASH}`);
+	expect(res.status).toBe(404);
+	const body = await res.text();
+	expect(body).toContain("not found");
+});
+
+test("fid-shaped cast URL 404s on a short hash (/i is full-hash only)", async () => {
+	// Warpcast share URLs are full-hash; a short-hash fid URL has no
+	// eligible leg beyond the username ones (/i is fid + FULL hash) — the
+	// consensus misses and the URL 404s without minting a page.
+	const calls: string[] = [];
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		calls.push(url);
+		if (url === `https://shim.artlu.xyz/wc/4294967296/0xc3826eb8`) {
+			return Response.json({ success: false });
+		}
+		if (url === `https://farcaster.tv/4294967296/0xc3826eb8`) {
+			return new Response("", { status: 404 });
+		}
+		if (url === "https://shim.artlu.xyz/f/4294967296") {
+			return Response.json({ success: false });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	});
+	const res = await app.request("/4294967296/0xc3826eb8");
+	expect(res.status).toBe(404);
+	// The gate, proved by absence: /i was never fetched for a short hash.
+	expect(
+		calls.some((u) => u.startsWith("https://shim.artlu.xyz/i/")),
+	).toBe(false);
+});
+
+test("fid-shaped cast URL serves JSON via the /i leg too", async () => {
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === `https://shim.artlu.xyz/i/${FID_URL_FID}/${FID_URL_HASH}`) {
+			return Response.json({ success: true, cast: FID_CAST });
+		}
+		if (url === "https://shim.artlu.xyz/signed/4294967296") {
+			return Response.json({ success: true, signed: false });
+		}
+		const missed = fidLegMisses(FID_URL_HASH);
+		if (url in missed) {
+			const route = missed[url];
+			if (route instanceof Error) return Promise.reject(route);
+			return route instanceof Response ? route : Response.json(route);
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	});
+	const res = await app.request(`/4294967296/${FID_URL_HASH}?format=json`);
+	expect(res.status).toBe(200);
+	const body = (await res.json()) as {
+		text?: string;
+		author?: { fid?: number; username?: string };
+	};
+	expect(body.text).toBe("gm from native fid using hypersnap on GC!");
+	expect(body.author?.fid).toBe(FID_URL_FID);
 });

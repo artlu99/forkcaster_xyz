@@ -1433,3 +1433,147 @@ test("unsigned profile: capable kind slugs still offered (the script resolves th
 	expect(body).toContain(`href="https://quilcast.com/u/${USERNAME}"`);
 	expect(body).toContain('data-client="quilcast" data-kind="profile"');
 });
+
+// --- Post-hardfork fid waterfall (HyperSnap) ----------------------------------
+//
+// The hard fork extended the fid space at 2**32; Warpcast mints /{fid}
+// profile and /{fid}/{hash} cast URLs for accounts that hold no username
+// yet. Username resolution stays the first verdict (all-digit fnames
+// genuinely exist), so the waterfall here runs only after the /f miss —
+// and renders IN PLACE, because there is no username to redirect to.
+
+import { numericFidCandidate } from "./shim.ts";
+
+const FORK_FID = 4294967296;
+const FORK_USER = {
+	fid: FORK_FID,
+	username: null,
+	fname: null,
+	displayName: "2^32",
+	pfpUrl: null,
+	bio: "The first native FID on HyperSnap.",
+	primaryAddress: null,
+};
+
+/** The username legs' verdict for a usernameless post-fork fid: /f misses. */
+function forkMisses(): Record<string, unknown | Error> {
+	return {
+		[`https://shim.artlu.xyz/f/${FORK_FID}`]: { success: false },
+		[`https://shim.artlu.xyz/${FORK_FID}/casts-and-replies?limit=10`]: {
+			success: false,
+		},
+	};
+}
+
+test("numericFidCandidate: the post-fork gate", () => {
+	// Above the gate: candidates.
+	expect(numericFidCandidate("4294967296")).toBe(4294967296);
+	expect(numericFidCandidate("4000001")).toBe(4000001);
+	// At/below the gate: an all-digit fname, full stop — no fid reading.
+	expect(numericFidCandidate("4000000")).toBeUndefined();
+	expect(numericFidCandidate("627569")).toBeUndefined();
+	// Not digits, or digits past Number precision.
+	expect(numericFidCandidate("12abc")).toBeUndefined();
+	expect(numericFidCandidate("99999999999999999999")).toBeUndefined();
+	expect(numericFidCandidate("")).toBeUndefined();
+});
+
+test("fid-shaped profile URL renders the post-fork entity in place", async () => {
+	globalThis.fetch = shimMock({
+		...forkMisses(),
+		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
+			success: true,
+			user: FORK_USER,
+		},
+		[`https://shim.artlu.xyz/signed/${FORK_FID}`]: {
+			success: true,
+			signed: false,
+		},
+	});
+	const res = await app.request(`/${FORK_FID}`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain("2^32");
+	expect(body).toContain("The first native FID on HyperSnap.");
+	expect(body).toContain(`fid ${FORK_FID}`);
+	// signed:false renders the read-only notice, same as the username path.
+	expect(body).toContain("hasn't signed the social smart contract");
+});
+
+test("fid-shaped profile JSON twin serves the entity with the honest timeline note", async () => {
+	globalThis.fetch = shimMock({
+		...forkMisses(),
+		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
+			success: true,
+			user: FORK_USER,
+		},
+		[`https://shim.artlu.xyz/signed/${FORK_FID}`]: {
+			success: true,
+			signed: true,
+		},
+	});
+	const res = await app.request(`/${FORK_FID}?format=json`);
+	expect(res.status).toBe(200);
+	const body = (await res.json()) as Record<string, unknown>;
+	expect(body.fid).toBe(FORK_FID);
+	expect(body.username).toBe(`${FORK_FID}`);
+	expect(body.displayName).toBe("2^32");
+	// The timeline endpoint is username-keyed — unavailable, never faked.
+	expect(body.note).toBe("timeline unavailable");
+	expect(body.casts).toBeUndefined();
+	expect(body.farcaster).toBe(`https://farcaster.xyz/${FORK_FID}`);
+});
+
+test("fid-shaped casts-and-replies renders the identity head over the unavailable list", async () => {
+	globalThis.fetch = shimMock({
+		...forkMisses(),
+		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
+			success: true,
+			user: FORK_USER,
+		},
+		[`https://shim.artlu.xyz/signed/${FORK_FID}`]: {
+			success: true,
+			signed: true,
+		},
+	});
+	const res = await app.request(`/${FORK_FID}/casts-and-replies`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+	expect(body).toContain("2^32");
+	expect(body).toContain("Recent casts are unavailable right now.");
+});
+
+test("small numeric username stays a plain 404 — the waterfall never fires below the gate", async () => {
+	const fetchMock = shimMock({
+		"https://shim.artlu.xyz/f/1234567": { success: false },
+	});
+	globalThis.fetch = fetchMock;
+	const res = await app.request("/1234567");
+	expect(res.status).toBe(404);
+	// Exactly one upstream call (/f): /user/1234567 must never be probed.
+	expect(fetchMock.mock.calls.length).toBe(1);
+});
+
+test("fid leg miss keeps the username verdict (404 render)", async () => {
+	globalThis.fetch = shimMock({
+		...forkMisses(),
+		// The sparse unknown-fid shape: success with no numeric fid — miss.
+		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
+			success: true,
+			user: { fid: null, username: null },
+		},
+	});
+	const res = await app.request(`/${FORK_FID}`);
+	expect(res.status).toBe(404);
+});
+
+test("/~/profiles/{fid} for a usernameless fid 302s to the fid surface", async () => {
+	globalThis.fetch = shimMock({
+		// shim /u answers the fid (success) with no username — the
+		// post-fork shape. No username waypoint exists to redirect to.
+		[`https://shim.artlu.xyz/u/${FORK_FID}`]: { success: true },
+	});
+	const res = await app.request(`/~/profiles/${FORK_FID}`);
+	expect(res.status).toBe(302);
+	expect(res.headers.get("location")).toBe(`/${FORK_FID}`);
+});
