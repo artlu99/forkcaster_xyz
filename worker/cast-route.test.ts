@@ -161,6 +161,41 @@ const QUOTE_URL_CAST = {
 	],
 };
 
+// --- Farcaster Articles -------------------------------------------------------
+//
+// The measured Nov 2026 live shapes (shim passes chain + formatVersion
+// through): the head carries index 0, the article title on its first line,
+// the opening after the blank line, and its single URL embed — the cover.
+// A later part names the head as its chain root.
+const ARTICLE_COVER =
+	"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/be02c67b/original";
+const ARTICLE_HEAD_HASH = `0x${"a1".repeat(20)}`;
+const ARTICLE_HEAD = {
+	fid: 10215,
+	hash: ARTICLE_HEAD_HASH,
+	text: "GM Farcaster last week\n\nGM! We celebrated our **400th episode** — thanks to [everyone](https://example.com/ep) for being there.\n\n[$1]",
+	embeds: [{ url: ARTICLE_COVER }],
+	timestamp: 1_793_000_000,
+	formatVersion: 1,
+	chain: { index: 0, count: 2 },
+	user: SHIM_CAST.user,
+};
+const ARTICLE_PART_HASH = `0x${"b2".repeat(20)}`;
+const ARTICLE_PART = {
+	fid: 10215,
+	hash: ARTICLE_PART_HASH,
+	text: "The second part's body text.",
+	embeds: [],
+	timestamp: 1_793_000_100,
+	formatVersion: 1,
+	chain: {
+		root: { fid: 10215, hash: ARTICLE_HEAD_HASH },
+		index: 1,
+		count: 2,
+	},
+	user: SHIM_CAST.user,
+};
+
 beforeEach(() => {
 	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
 		const url = String(input);
@@ -232,6 +267,12 @@ beforeEach(() => {
 		}
 		if (url === "https://shim.artlu.xyz/wc/zoo/0xdeadbeef") {
 			return Response.json({ success: false, error: "cast not found" });
+		}
+		if (url === "https://shim.artlu.xyz/wc/zoo/0xa1a1a1a1") {
+			return Response.json({ success: true, cast: ARTICLE_HEAD });
+		}
+		if (url === "https://shim.artlu.xyz/wc/zoo/0xb2b2b2b2") {
+			return Response.json({ success: true, cast: ARTICLE_PART });
 		}
 		if (url === "https://shim.artlu.xyz/wc/zoo/0x00000000") {
 			throw new Error("shim unavailable");
@@ -1752,4 +1793,61 @@ test("fid-shaped cast URL serves JSON via the /i leg too", async () => {
 	};
 	expect(body.text).toBe("gm from native fid using hypersnap on GC!");
 	expect(body.author?.fid).toBe(FID_URL_FID);
+});
+
+// --- Farcaster Articles: head vs part surfaces --------------------------------
+
+test("GET article head (0 of N) renders cover, title, intro and quilcast-style OG", async () => {
+	const res = await app.request("/zoo/0xa1a1a1a1");
+	expect(res.status).toBe(200);
+	const body = await res.text();
+
+	// Article front page — not a plain embed card.
+	expect(body).toContain('class="fc-article"');
+	expect(body).toContain('class="fa-kicker">Article</p>');
+	expect(body).toContain('class="fa-title">GM Farcaster last week</h1>');
+	expect(body).toContain(`src="${ARTICLE_COVER}"`);
+	// Intro blurb keeps its Markdown (clients read the body); [$1] stays.
+	expect(body).toContain("**400th episode**");
+	expect(body).toContain("2-part article");
+	// Body of later parts is not inlined here.
+	expect(body).not.toContain("The second part's body text.");
+
+	// OG mirrors quilcast: title · byline, plain opening, cover as large image.
+	expect(body).toContain(
+		'<meta property="og:title" content="GM Farcaster last week · zoo (@zoo)" />',
+	);
+	expect(body).toContain(
+		'<meta property="og:description" content="GM! We celebrated our 400th episode — thanks to everyone for being there." />',
+	);
+	expect(body).toContain(
+		`<meta property="og:image" content="${ARTICLE_COVER}" />`,
+	);
+	expect(body).toContain('name="twitter:card" content="summary_large_image"');
+});
+
+test("GET article part (1 of N+) keeps a normal cast card and deep-link OG", async () => {
+	const res = await app.request("/zoo/0xb2b2b2b2");
+	expect(res.status).toBe(200);
+	const body = await res.text();
+
+	// Direct-link / deep-link into a part: normal cast surface, not the article
+	// front page — and a notice pointing at the head.
+	expect(body).not.toContain('class="fc-article"');
+	expect(body).toContain("farcaster-embed");
+	expect(body).toContain("The second part's body text.");
+	expect(body).toContain(
+		`Part 2 of 2 of an article — <a href="/zoo/${ARTICLE_HEAD_HASH}">start at the beginning</a>.`,
+	);
+
+	// OG stays a normal cast preview so unfurls match the cast you land on.
+	expect(body).toContain(
+		'<meta property="og:title" content="zoo (@zoo)" />',
+	);
+	expect(body).toContain(
+		'<meta property="og:description" content="The second part&#39;s body text." />',
+	);
+	// No cover on the part ⇒ avatar-sized card, not summary_large_image.
+	expect(body).toContain('name="twitter:card" content="summary"');
+	expect(body).not.toContain(ARTICLE_COVER);
 });

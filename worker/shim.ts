@@ -137,6 +137,19 @@ export function fleetSeatId(base: string): string {
 
 export type ShimEmbed = { url?: string; castId?: { fid?: number; hash?: string } };
 
+/**
+ * The chain fields of Farcaster Articles (the "Cast Format and Chained
+ * Casts" FIP), passed through by shim verbatim when the cast carries them:
+ * the first cast of a chain answers `index: 0` with NO root; every later
+ * part names the first cast as its `root`. Protobuf JSON omits zero values,
+ * so `index`/`count` are optional here and read as 0 when absent.
+ */
+export type ShimChain = {
+	root?: { fid?: number; hash?: string };
+	index?: number;
+	count?: number;
+};
+
 /** Canonical cast shape as returned by shim (unix-SECONDS timestamp). */
 export type ShimCast = {
 	fid?: number;
@@ -145,6 +158,10 @@ export type ShimCast = {
 	/** Unix seconds; the embed does new Date(ts), which wants milliseconds. */
 	timestamp?: number;
 	embeds?: ShimEmbed[];
+	/** Article chain position (Farcaster Articles) — absent on plain casts. */
+	chain?: ShimChain;
+	/** Cast body format — 1 = article Markdown (Farcaster Articles). */
+	formatVersion?: number;
 	user?: {
 		fid?: number;
 		username?: string;

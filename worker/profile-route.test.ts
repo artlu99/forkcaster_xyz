@@ -873,6 +873,72 @@ test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
 	expect(body).toContain("first cast");
 });
 
+test("casts-and-replies hides article intermediates; the head renders as an article card", async () => {
+	// An article chain in the timeline: the head (0 of N) is the front page
+	// (cover, title, intro); parts (1 of N+) are filtered before enrichment
+	// so they never fetch and never render. A plain cast stays.
+	const cover =
+		"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/be02c67b/original";
+	const headHash = `0x${"a1".repeat(20)}`;
+	const partHash = `0x${"b2".repeat(20)}`;
+	const plainHash = CAST_HASH;
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
+		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: true,
+		},
+		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
+			success: true,
+			casts: [
+				{
+					fid: FID,
+					hash: headHash,
+					text: "My Article\n\nThe opening blurb with **bold**.",
+					timestamp: CAST_TS,
+					embeds: [{ url: cover }],
+					formatVersion: 1,
+					chain: { index: 0, count: 2 },
+				},
+				{
+					fid: FID,
+					hash: partHash,
+					text: "Hidden intermediate part body.",
+					timestamp: CAST_TS - 1,
+					embeds: [],
+					formatVersion: 1,
+					chain: {
+						root: { fid: FID, hash: headHash },
+						index: 1,
+						count: 2,
+					},
+				},
+				{
+					fid: FID,
+					hash: plainHash,
+					text: "a plain cast stays",
+					timestamp: CAST_TS - 2,
+					embeds: [],
+				},
+			],
+		},
+	});
+	const res = await app.request(`/${USERNAME}/casts-and-replies`);
+	expect(res.status).toBe(200);
+	const body = await res.text();
+
+	expect(body).toContain('class="fc-article"');
+	expect(body).toContain("My Article");
+	expect(body).toContain(`src="${cover}"`);
+	expect(body).toContain(`href="/${USERNAME}/${headHash}"`);
+	expect(body).toContain("2-part article");
+	expect(body).toContain("a plain cast stays");
+	// The intermediate never appears — not as a card, not as raw text.
+	expect(body).not.toContain("Hidden intermediate part body.");
+	expect(body).not.toContain(partHash);
+});
+
 test("casts page: every card's farcaster.xyz cast anchors link the forkcaster waypoint", async () => {
 	// Waypoint law for the list: the cast URL the embed stamps on every
 	// card (Show-on-Farcaster icon) and the client-built stats links point

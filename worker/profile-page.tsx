@@ -33,6 +33,9 @@ import {
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
+	articleChainOf,
+	articleHeadViewOf,
+	isArticlePart,
 	primaryHandle,
 	quoteTargetsOf,
 	toCastData,
@@ -40,7 +43,13 @@ import {
 	type QuoteTarget,
 	type UnfurlResult,
 } from "./cast-data.ts";
-import { fetchQuote, renderEmbedCard, unfurl } from "./cast-page.tsx";
+import {
+	ARTICLE_STYLE,
+	fetchQuote,
+	renderArticleCard,
+	renderEmbedCard,
+	unfurl,
+} from "./cast-page.tsx";
 import {
 	LIVE_STATS_SCRIPT,
 	SHEET_SCRIPT,
@@ -640,13 +649,19 @@ export function renderProfileJson(
 // exactly the individual cast page's pipeline (renderEmbedCard):
 // react-farcaster-embed SSR, unfurl-enriched URL embeds (≤3 per cast),
 // /h-hydrated quotes (≤3 per cast), blank-target hardening, live-stats
-// slot per card (the stats script fills every slot). One deliberate
-// divergence from the individual cast page: every card links HOME — the
-// Show-on-Farcaster anchor and the stats slot's client-built links point
-// at the forkcaster waypoint, which always resolves, signed or not (the
-// individual cast page hides the icon for proven-unsigned authors, where
-// a retarget would self-link; here the waypoint is another page). Shim's
-// timeline rows carry no inline user, so
+// slot per card (the stats script fills every slot). Article chains bend
+// the list two ways: the head (0 of N) renders as the article's front page
+// (renderArticleCard — cover, title, intro blurb, never the body), and the
+// chain's intermediates (1 of N and up) are filtered out before any
+// enrichment runs — an article reads once, as its front page. The
+// intermediates keep their own cast pages and OG previews, so deep links
+// into a part still resolve; the list is the only surface that hides them.
+// One deliberate divergence from the individual cast page: every card
+// links HOME — the Show-on-Farcaster anchor and the stats slot's
+// client-built links point at the forkcaster waypoint, which always
+// resolves, signed or not (the individual cast page hides the icon for
+// proven-unsigned authors, where a retarget would self-link; here the
+// waypoint is another page). Shim's timeline rows carry no inline user, so
 // the profile entity is attached as the author. The OG preview is IDENTICAL
 // to the profile's (same card visual, deeper page); canonical/og:url stay
 // on this page's own URL. No JSON twin — the link is omitted rather than
@@ -688,7 +703,11 @@ export async function renderCastsHtml(
 	// (unfurl ⇒ hostname-only card, quotes ⇒ dropped) and never 404s a
 	// proven identity. Results are keyed by URL/hash so enrichment never
 	// depends on positional ordering between the fetch set and the cast loop.
-	const orderedCasts = sort(casts, (cast) => cast.timestamp ?? 0, true);
+	// Article-chain intermediates (1 of N and up) are filtered BEFORE any
+	// enrichment runs — hidden casts cost no fetches.
+	const orderedCasts = sort(casts, (cast) => cast.timestamp ?? 0, true).filter(
+		(cast) => !isArticlePart(cast),
+	);
 
 	const unfurlByUrl = new Map<string, UnfurlResult | undefined>();
 	{
@@ -731,14 +750,35 @@ export async function renderCastsHtml(
 		// No hash ⇒ unroutable — skip rather than render a dead card.
 		if (!cast.hash) continue;
 		const hash = cast.hash;
-		const unfurlMap = new Map<string, UnfurlResult | undefined>();
-		for (const u of urlEmbedsOf(cast)) {
-			unfurlMap.set(u, unfurlByUrl.get(u));
-		}
-		const quotes = quoteTargetsOf(cast).map(
-			(t) => quotesByHash.get(t.hash),
-		);
+		// An article head renders as the article's front page — cover,
+		// title, intro blurb (never the body; the parts carry it). Every
+		// other cast renders the plain embed card.
+		const head = articleHeadViewOf(cast);
 		try {
+			if (head) {
+				cards.push(
+					renderArticleCard({
+						username: primary,
+						hash,
+						cast: { ...cast, user: author },
+						title: head.title,
+						opening: head.opening,
+						cover: head.cover,
+						count: articleChainOf(cast)?.count,
+						// Every card links home (waypoint law), list flavor.
+						local: true,
+						castPath: `/${encodeURIComponent(username)}/${hash}`,
+					}),
+				);
+				continue;
+			}
+			const unfurlMap = new Map<string, UnfurlResult | undefined>();
+			for (const u of urlEmbedsOf(cast)) {
+				unfurlMap.set(u, unfurlByUrl.get(u));
+			}
+			const quotes = quoteTargetsOf(cast).map(
+				(t) => quotesByHash.get(t.hash),
+			);
 			cards.push(
 				await renderEmbedCard({
 					username: primary,
@@ -786,6 +826,7 @@ export async function renderCastsHtml(
 	// the visible @handle below carries the primary (identity law).
 	const body = `
 ${PROFILE_STYLE}
+${ARTICLE_STYLE}
 <div id="auto-mount" data-kind="feed" data-noun="feeds"></div>
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${user.username ?? primary}`)}</h1>

@@ -20,15 +20,21 @@ import {
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
 import {
+	articleChainOf,
+	articleHeadViewOf,
+	articleOpeningPlain,
 	type CastData,
+	displayNameOf,
 	hasExternalLinks,
 	imageUrlsOf,
+	isArticlePart,
 	primaryHandle,
 	type QuoteTarget,
 	type UnfurlResult,
 	quoteTargetsOf,
 	STATS_ROW,
 	toCastData,
+	toDescription,
 	toOgDescription,
 	urlEmbedsOf,
 } from "./cast-data.ts";
@@ -50,7 +56,7 @@ import {
 	getUsernameByFid,
 	type ShimCast,
 } from "./shim.ts";
-import { escapeHtml, shell } from "./shell.tsx";
+import { escapeHtml, formatDate, shell } from "./shell.tsx";
 import type { SiteChrome } from "./site-chrome.ts";
 
 // react-farcaster-embed emits every card anchor as a bare target="_blank"
@@ -140,6 +146,76 @@ export async function renderEmbedCard(opts: {
 	return opts.castPath ? relinkFarcasterAnchor(html, opts.castPath) : html;
 }
 
+// --- Article heads ------------------------------------------------------------
+//
+// The first cast of an article chain renders as the article's front page:
+// cover image, title, byline and the intro blurb — never the full body
+// (the later chain parts carry it; reading the whole article is what the
+// client pills are for). Shared by the individual cast page and the casts
+// list, which is why the knobs mirror renderEmbedCard's:
+//   local    — the live-stats slot ships data-local="1" (list pages;
+//              proven-unsigned authors on the cast page).
+//   castPath — the cover and title anchor to this waypoint (list pages;
+//              the individual page IS the waypoint, so it never self-links).
+//   heading  — h1 on the individual page (the article headline IS the
+//              page's heading), h2 inside the casts list.
+
+export const ARTICLE_STYLE = `<style>
+.fc-article { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.fc-article .fa-cover { display: block; width: 100%; aspect-ratio: 2 / 1; object-fit: cover; background: var(--accent-soft); border-bottom: 1px solid var(--line); }
+a.fa-cover-link { display: block; }
+.fc-article .fa-body { padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fc-article .fa-kicker { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.fc-article .fa-title { margin: 0; font-size: 24px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.fc-article .fa-title a { color: inherit; text-decoration: none; }
+.fc-article .fa-title a:hover, .fc-article .fa-title a:focus-visible { color: var(--accent); }
+.fc-article .fa-byline { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 14px; }
+.fc-article .fa-byline img { width: 24px; height: 24px; border-radius: 50%; flex: none; background: var(--accent-soft); }
+.fc-article .fa-name { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-article .fa-handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-article .fa-when { margin-left: auto; flex: none; }
+.fc-article .fa-open { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.fc-article .fa-parts { margin: 0; color: var(--muted); font-size: 13px; }
+</style>`;
+
+export function renderArticleCard(opts: {
+	username: string;
+	hash: string;
+	cast: ShimCast;
+	title: string;
+	opening: string;
+	cover?: string;
+	count?: number;
+	local?: boolean;
+	castPath?: string;
+	heading?: "h1" | "h2";
+}): string {
+	const tag = opts.heading ?? "h2";
+	const name = displayNameOf(opts.cast.user) || `@${opts.username}`;
+	const when =
+		opts.cast.timestamp !== undefined ? formatDate(opts.cast.timestamp) : "";
+	const avatar = opts.cast.user?.pfpUrl
+		? `<img src="${escapeHtml(opts.cast.user.pfpUrl)}" alt="" />`
+		: "";
+	// The list's cards link home (waypoint law): cover and title carry the
+	// anchor; the individual page never self-links.
+	const cover = opts.cover
+		? `<${opts.castPath ? `a class="fa-cover-link" href="${escapeHtml(opts.castPath)}"` : "div"}><img class="fa-cover" src="${escapeHtml(opts.cover)}" alt="" /></${opts.castPath ? "a" : "div"}>`
+		: "";
+	const title = opts.castPath
+		? `<a href="${escapeHtml(opts.castPath)}">${escapeHtml(opts.title)}</a>`
+		: escapeHtml(opts.title);
+	// Only a multi-part chain says so; the pills below are the way through.
+	const parts =
+		opts.count !== undefined && opts.count > 1
+			? `<p class="fa-parts">${opts.count}-part article — continue reading in a client below.</p>`
+			: "";
+	// Same slot contract as renderEmbedCard: LIVE_STATS_SCRIPT fills every
+	// .farcaster-embed-stats[data-username] on the page, each degrading alone.
+	const stats = `<div class="farcaster-embed-stats"${opts.local ? ' data-local="1"' : ""} data-username="${escapeHtml(opts.username)}" data-hash="${escapeHtml(opts.hash)}"></div>`;
+	return `<article class="fc-article">${cover}<div class="fa-body"><p class="fa-kicker">Article</p><${tag} class="fa-title">${title}</${tag}><p class="fa-byline">${avatar}<span class="fa-name">${escapeHtml(name)}</span><span class="fa-handle">@${escapeHtml(opts.username)}</span>${when ? `<span class="fa-when">${escapeHtml(when)}</span>` : ""}</p>${opts.opening.trim() ? `<p class="fa-open">${escapeHtml(opts.opening.trim())}</p>` : ""}${parts}${stats}</div></article>`;
+}
+
 // Exported for the casts skeleton page (same enrichment pipeline, same
 // binding + plain-fetch fallback semantics).
 export async function unfurl(
@@ -227,6 +303,9 @@ function castPage(
 	// just duplicate them — withheld there.
 	textCanonical = true,
 	chrome?: SiteChrome,
+	// Article-chain parts render a "Part N of M" notice between the card
+	// and the action row — the head is one waypoint away.
+	extraNotice?: string,
 ): string {
 	// signed === false means the author hasn't accepted Farcaster's social
 	// smart contract (Network Code) — their profile is read-only/banned on
@@ -255,7 +334,7 @@ function castPage(
 		: undefined;
 	return shell(
 		`${vars.username}/${vars.hash} · forkcaster`,
-		`<div id="auto-mount"></div>${cardHtml}${notice}${actions}`,
+		`<div id="auto-mount"></div>${ARTICLE_STYLE}${cardHtml}${extraNotice ?? ""}${notice}${actions}`,
 		og,
 		`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${partial && textCanonical ? QUOTE_FILL_SCRIPT : ""}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 		canonicalUrl,
@@ -465,30 +544,82 @@ export async function renderCastHtml(
 		// title, and the canonical/pill vars. Absent user degrades to the
 		// route input (today's bytes).
 		const primary = primaryHandle(cast.user, username);
-		const cardHtml = await renderEmbedCard({
-			username: primary,
-			hash,
-			castData: toCastData(
-				cast.user ? { ...cast, user: { ...cast.user, username: primary } } : cast,
-				unfurlMap,
-				quotes,
-			),
-			local,
-			hideIcon: local,
-		});
-		// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the
-		// cast: author handle as title, cast text as description, first
-		// image embed (else the avatar) as image.
-		const ogTitle = cast.user?.displayName
-			? `${cast.user.displayName} (@${primary})`
-			: `@${primary}`;
-		const firstImage = imageUrlsOf(cast)[0];
-		const og = {
-			ogTitle,
-			description: toOgDescription(cast.text, quotes),
-			image: firstImage ?? cast.user?.pfpUrl,
-			largeImage: firstImage !== undefined,
+		// An article head renders as the article's front page — cover,
+		// title, intro blurb; the body stays in the chain parts (reading on
+		// is the client pills' job). OG carries the same face, quilcast
+		// style: the title as og:title, the plain opening as description,
+		// the cover as the large image.
+		const head = articleHeadViewOf(cast);
+		let cardHtml: string;
+		let og: {
+			ogTitle: string;
+			description?: string;
+			image?: string;
+			largeImage?: boolean;
 		};
+		if (head) {
+			cardHtml = renderArticleCard({
+				username: primary,
+				hash,
+				cast,
+				title: head.title,
+				opening: head.opening,
+				cover: head.cover,
+				count: articleChainOf(cast)?.count,
+				local,
+				heading: "h1",
+			});
+			const by =
+				cast.user?.displayName != null
+					? `${cast.user.displayName} (@${primary})`
+					: `@${primary}`;
+			const cover = head.cover ?? imageUrlsOf(cast)[0];
+			const plainOpening = articleOpeningPlain(head.opening);
+			og = {
+				ogTitle: `${head.title} · ${by}`,
+				description:
+					plainOpening !== ""
+						? toDescription(plainOpening, 280)
+						: `An article by ${by} on Farcaster`,
+				image: cover ?? cast.user?.pfpUrl,
+				largeImage: cover !== undefined,
+			};
+		} else {
+			cardHtml = await renderEmbedCard({
+				username: primary,
+				hash,
+				castData: toCastData(
+					cast.user
+						? { ...cast, user: { ...cast.user, username: primary } }
+						: cast,
+					unfurlMap,
+					quotes,
+				),
+				local,
+				hideIcon: local,
+			});
+			// OG/Twitter meta so Telegram, Discord, iMessage etc. unfurl the
+			// cast: author handle as title, cast text as description, first
+			// image embed (else the avatar) as image. Article-chain parts
+			// (1 of N and up) keep exactly this normal-cast preview — a
+			// deep link into a part must read as the cast it lands on.
+			const ogTitle = cast.user?.displayName
+				? `${cast.user.displayName} (@${primary})`
+				: `@${primary}`;
+			const firstImage = imageUrlsOf(cast)[0];
+			og = {
+				ogTitle,
+				description: toOgDescription(cast.text, quotes),
+				image: firstImage ?? cast.user?.pfpUrl,
+				largeImage: firstImage !== undefined,
+			};
+		}
+		// A chain part (1 of N or greater) says where it sits: the head is
+		// one waypoint away, same author by the FIP's own rules.
+		const chain = isArticlePart(cast) ? articleChainOf(cast) : undefined;
+		const partNotice = chain?.root?.hash
+			? `<p class="notice">Part ${chain.index + 1}${chain.count > 0 ? ` of ${chain.count}` : ""} of an article — <a href="/${encodeURIComponent(primary)}/${chain.root.hash}">start at the beginning</a>.</p>`
+			: "";
 		const vars: TemplateVars = {
 			username: primary,
 			hash,
@@ -512,6 +643,8 @@ export async function renderCastHtml(
 				hasExternalLinks(cast),
 				resolved.textCanonical,
 				chrome,
+				// The part notice renders between the card and the actions.
+				partNotice,
 			),
 		};
 	} catch {

@@ -645,8 +645,12 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 // The casts page (/{username}/casts-and-replies): the ONE list surface —
 // every cast rendered in full through the individual cast page's pipeline
 // (embed SSR + unfurl + quote hydration + per-card live-stats slot), with
-// the profile's OG preview. Patterns are disjoint from the 0x-hashed cast
-// route above; the /f verdict and fail-soft timeline match the profile.
+// the profile's OG preview. Article chains: the head renders as the
+// article's front page and the intermediates (1 of N and up) are filtered
+// out of the list (they keep their own cast pages and OG previews — deep
+// links into a part still resolve). Patterns are disjoint from the
+// 0x-hashed cast route above; the /f verdict and fail-soft timeline match
+// the profile.
 app.get("/:username/casts-and-replies", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {

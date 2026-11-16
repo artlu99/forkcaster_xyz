@@ -328,6 +328,162 @@ export function externalUrlEmbedsOf(
 	);
 }
 
+// --- Farcaster Articles (cast chains) ---------------------------------------
+//
+// An article is a chain of casts by one author (the "Cast Format and Chained
+// Casts" FIP): every cast carries `chain` (the first cast's id, its index
+// from 0 and the cast count) and `format_version` 1 — its text is article
+// Markdown. The cast at index 0 holds the title on its first line, then an
+// optional empty line and the opening; its single URL embed, if any, is the
+// cover image. Every later cast replies to the one before it, so clients
+// that don't know articles see a thread. Reading rules mirror quilcast's
+// src/article.ts (the reference reader): nodes only check the chain rules
+// once the feature is active, so readers re-check them.
+
+/** MAX_CHAIN_PARTS: a chain has at most 100 casts. */
+export const ARTICLE_MAX_PARTS = 100;
+
+/** A chain that passed the FIP's reading rules — `index`/`count`
+ *  normalized (protobuf's omitted zeros filled), `root` present exactly
+ *  when `index` > 0, with the hash narrowed to string. */
+export type ValidatedChain = {
+	root?: { fid?: number; hash: string };
+	index: number;
+	count: number;
+};
+
+/**
+ * The cast's chain, with the FIP's rules re-checked: at most 100 casts, an
+ * index below 100 and below `count` when count is set, no root at index 0,
+ * and the author's own cast as root otherwise. A chain that breaks one is
+ * rejected outright — the cast reads as an ordinary one.
+ */
+export function articleChainOf(cast: ShimCast): ValidatedChain | undefined {
+	const chain = cast.chain;
+	if (!chain || typeof chain !== "object") return undefined;
+	// Protobuf JSON leaves out zeros.
+	const index = chain.index ?? 0;
+	const count = chain.count ?? 0;
+	const safe = (v: number) =>
+		Number.isSafeInteger(v) && v >= 0 ? v : undefined;
+	const at = safe(index);
+	const total = safe(count);
+	if (at === undefined || total === undefined) return undefined;
+	if (total > ARTICLE_MAX_PARTS || at >= ARTICLE_MAX_PARTS) return undefined;
+	if (total > 0 && at >= total) return undefined;
+	if (at === 0) return chain.root ? undefined : { index: at, count: total };
+	const root = chain.root;
+	if (!root || typeof root.hash !== "string" || root.hash === "") return undefined;
+	if (typeof root.fid === "number" && root.fid !== cast.fid) return undefined;
+	return { root: { fid: root.fid, hash: root.hash }, index: at, count: total };
+}
+
+/**
+ * The first cast of an article (index 0, article Markdown): the head that
+ * renders as an article with cover, title and intro. Unknown formatVersion
+ * (old shim snapshot) is not a head — fail closed to the plain card.
+ */
+export function isArticleHead(cast: ShimCast): boolean {
+	return cast.formatVersion === 1 && articleChainOf(cast)?.index === 0;
+}
+
+/**
+ * A later cast of an article chain (index ≥ 1): an internal intermediate of
+ * an article — the "1 of N or greater" casts. Whether its chain really is an
+ * article is the head's to say (its formatVersion may be missing); call this
+ * only where hiding from a list is the cost of being wrong.
+ */
+export function isArticlePart(cast: ShimCast): boolean {
+	const chain = articleChainOf(cast);
+	return chain !== undefined && chain.index > 0 && chain.root !== undefined;
+}
+
+/**
+ * The head cast's title (first line) and opening (what follows the empty
+ * line after it) — the whole article the head carries; the body lives in
+ * the later parts and stays there.
+ */
+export function articleHeadOf(text: string): { title: string; opening: string } {
+	const nl = text.indexOf("\n");
+	return {
+		title: (nl < 0 ? text : text.slice(0, nl)).trim(),
+		opening: nl < 0 ? "" : text.slice(nl + 1).replace(/^\n/, ""),
+	};
+}
+
+/**
+ * The cover: the head's single URL embed (the FIP gives the head at most
+ * one embed — the cover image). Anything else (no embeds, several) leaves
+ * no cover.
+ */
+export function articleCoverOf(cast: ShimCast): string | undefined {
+	const urls = (cast.embeds ?? [])
+		.map((embed) => embed.url)
+		.filter((u): u is string => typeof u === "string" && u !== "");
+	return urls.length === 1 ? urls[0] : undefined;
+}
+
+// Lines the opening carries only as embed markers, not prose: `[$N]` — the
+// cast's Nth embed, where the text has it — and a link alone on a line (a
+// link preview). Both render as cards, so the plain opening drops them.
+const ARTICLE_PLACEHOLDER = /^\[\$\d{1,2}\]$/;
+const ARTICLE_LONE_LINK = /^https?:\/\/\S+$/;
+
+/** Strip the article Markdown a plain excerpt cannot show: links become
+ * their label (an unlabeled link its URL), pictures their alt text,
+ * emphasis/strike/code their contents, headings/quotes/rules their bare
+ * lines. Escapes resolve (`\*` → `*`); a line's carry-on backslash goes. */
+function articlePlain(text: string): string {
+	return text
+		.replace(/!\[([^\]]*)\]\([^)\s]*(?:\s+"[^"]*")?\)/g, (_m, alt: string) => alt)
+		.replace(
+			/\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+			(_m, label: string, url: string) => label || url,
+		)
+		.replace(/^#{1,6} +/gm, "")
+		.replace(/^>+ ?/gm, "")
+		.replace(/^ {0,3}(?:[-*_] *){3,}\n?/gm, "")
+		.replace(/(\*\*\*|\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+		.replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1")
+		.replace(/`([^`]+)`/g, "$1")
+		.replace(/(^|[^\w\\])\*(?=\S)([\s\S]*?\S)\*(?!\w)/g, "$1$2")
+		.replace(/(^|[^\w\\])_(?=\S)([^_]*?\S)_(?!\w)/g, "$1$2")
+		.replace(/\\([\\*_~+[\]`#>|])/g, "$1")
+		.replace(/\\$/gm, "")
+		.trim();
+}
+
+/**
+ * The opening as a plain text blurb shows it: embed-marker lines dropped
+ * (`[$N]`, a link alone on a line — they render as cards), then the
+ * Markdown stripped. Newlines survive (paragraphs); callers that need one
+ * line collapse whitespace (toDescription does it for og:description).
+ */
+export function articleOpeningPlain(opening: string): string {
+	const lines = (opening ?? "")
+		.split("\n")
+		.filter((line) => {
+			const t = line.trim();
+			return !ARTICLE_PLACEHOLDER.test(t) && !ARTICLE_LONE_LINK.test(t);
+		});
+	return articlePlain(lines.join("\n"));
+}
+
+/**
+ * The head cast as the article it presents: title, opening and cover —
+ * or undefined when it isn't a well-formed head (not article Markdown, not
+ * index 0, no title line). One predicate for every surface: a page and a
+ * list render the article view exactly when this answers.
+ */
+export function articleHeadViewOf(
+	cast: ShimCast,
+): { title: string; opening: string; cover?: string } | undefined {
+	if (!isArticleHead(cast)) return undefined;
+	const { title, opening } = articleHeadOf(cast.text ?? "");
+	if (!title) return undefined;
+	return { title, opening, cover: articleCoverOf(cast) };
+}
+
 /**
  * True iff the cast carries ≥1 external URL embed. The exact negative is
  * what the eligibility gate relies on — no external links ⇒ a links-only
