@@ -716,16 +716,21 @@ app.get("/:username/casts-and-replies", async (c) => {
 	return res;
 });
 
-// Warpcast legacy thread shape (/~/conversations/0x…): the purest waypoint —
-// no surface at all. Resolve via shim /h (misses answer HTTP 200
+// Hash-only cast aliases: resolve via shim /h (misses answer HTTP 200
 // {"success":false}; short hashes miss too — measured); a miss falls to the
 // farcaster.tv hash-only rescue (shim's index is partial — cold hashes miss
 // while the cast exists), which also warms shim fire-and-forget. 302 — NOT
 // 301, so the mapping stays cache-free — to the canonical
 // /{username}/{fullHash} cast waypoint. Relative Location keeps dual-serve
-// hosts self-contained.
-app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
-	const resolved = await resolveConversationAlias(c.req.param().hash, {
+// hosts self-contained. Two URL shapes share this path:
+//   • /~/conversations/0x… — Warpcast legacy thread shape
+//   • /c/{40 bare hex}     — quilcast-style hash-only (no 0x). The 0x form
+//     /c/0x… stays the ordinary /{username}/{hash} cast route (fname `c`).
+async function hashOnlyCastAlias(
+	c: Context<{ Bindings: Env }>,
+	hash: string,
+) {
+	const resolved = await resolveConversationAlias(hash, {
 		// The rescue's shim warm is fire-and-forget; callers without an
 		// executionCtx (tests) just let the promise float — same guard as
 		// the telemetry writes above.
@@ -750,7 +755,18 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) => {
 		`/${encodeURIComponent(resolved.username)}/${resolved.fullHash}`,
 		302,
 	);
-});
+}
+
+app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) =>
+	hashOnlyCastAlias(c, c.req.param().hash),
+);
+
+// Quilcast-style /c/{40 bare hex}: hash-only alias (prepend 0x). Must NOT
+// match /c/0x… — that pattern requires a leading 0x and is served by the
+// username+hash cast route with fname `c`.
+app.get("/c/:hash{[0-9a-fA-F]{40}}", async (c) =>
+	hashOnlyCastAlias(c, `0x${c.req.param().hash}`),
+);
 
 // Farcaster's fid-profile shape (/~/profiles/{fid} — farcaster.xyz renders
 // the profile right there; the /~/profiles/{username} shape answers too).
