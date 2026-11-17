@@ -587,60 +587,90 @@ export const CLIENTS: ClientDefinition[] = [
 		},
 	},
 	// Terminus, a native iPhone + Android client that reads and writes
-	// Hypersnap directly (no web build). Scheme VERIFIED on iOS against the
-	// app's source: Info.plist registers CFBundleURLSchemes "terminus"
-	// (project.yml), and AppLink.route(for:) (App/Views/Navigation.swift)
-	// maps terminus://cast/<0x+40 hex>, terminus://user/<username> and
+	// Hypersnap directly — and, since Nov 17 2026, a WEB BUILD at
+	// app.onterminus.com (open beta; @terminusapp's launch cast: "Terminus
+	// now runs in your browser at app.onterminus.com, with nothing to
+	// install. Read without signing in."; the privacy policy names it: "an
+	// app for iPhone, Android and the web (app.onterminus.com)").
+	// WEB — VERIFIED (Nov 17 2026, launch day): the routes are first-party
+	// in the site's own sitemap.xml — cast /@{username}/0x+40-hex, profile
+	// /@{username}, channel /~/{id} — and robots.txt corroborates the
+	// @username subroutes (/*/followers, /*/likes, …). The site Worker
+	// injects per-page metadata on public post/profile/channel addresses;
+	// live checks: /@zoo/0x895ecc74… SSRs the title "zoo (@zoo): "omg so
+	// relevant!" · Terminus" with a self-canonical and a per-cast OG card
+	// (cards.onterminus.com/{fid}/{hash}.png), while the SHORT form
+	// /@zoo/0x895ecc74 answers with the generic shell — only the full hash
+	// resolves server-side, hence {fullHash}. The AASA at
+	// app.onterminus.com/.well-known/apple-app-site-association claims the
+	// same routes as iOS UNIVERSAL LINKS (appID
+	// BZ3NN29SXA.com.hypersnap.client.app; components "/@*" — "A profile,
+	// and a post under its author" — and "/~/*" — "A channel, and a post
+	// by its hash"): vendor-confirmed route vocabulary, and on an iPhone
+	// with the app installed the https href opens the app itself. Content
+	// renders logged out (JS-rendering reader): the house cast draws its
+	// thread (text, timestamp, like/reply counts); the profile draws the
+	// identity card plus Posts/Reposts/Replies/Media/Likes tabs with Posts
+	// defaulting to the user's cast list — profile and feed are ONE merged
+	// surface (the farcaster.xyz shape), both targets the same URL; the
+	// channel draws name, follower count and its feed. No signed rule: the
+	// known-unsigned author's cast (decent-artlu/0xbb54368f) renders its
+	// full thread. Not links-only: the link-less canonical and the
+	// link-bearing kenny cast both render — a general client, no gate.
+	// SCHEME — VERIFIED on iOS against the app's source: Info.plist
+	// registers CFBundleURLSchemes "terminus" (project.yml), and
+	// AppLink.route(for:) (App/Views/Navigation.swift) maps
+	// terminus://cast/<0x+40 hex>, terminus://user/<username> and
 	// terminus://channel/<id> onto the thread, profile and channel screens
 	// — hence {fullHash}. LIVE CHECK (Oct 2026, iOS simulator, signed in):
 	// terminus://cast/0x895ecc74… opened zoo's "omg so relevant!" thread;
 	// terminus://user/zoo opened zoo's profile on its Posts list (so
-	// profile and feed are one surface); terminus://channel/itookaphoto
-	// opened "I Took a Photo!". Also device-tested on a physical iPhone
-	// (Oct 2026).
-	// ANDROID — VERIFIED (Nov 2026): the site (onterminus.com, now "iPhone
-	// and Android") ships the public beta as a sideload APK at /android —
-	// v0.1.2 (382), Nov 6 2026, package com.hypersnap.client; Google Play
-	// listing "soon". Downloaded the APK (SHA-256 matches the site's
-	// published hash 42266122…034c) and parsed its AndroidManifest.xml:
-	// MainActivity (singleTask, exported) carries a VIEW + DEFAULT +
-	// BROWSABLE filter with <data android:scheme='terminus'/> — the SAME
-	// bare scheme, no host — and NO https/autoVerify filter (no App Links;
-	// assetlinks.json 404s at onterminus.com/.well-known, so there is no
-	// androidPackage to enter — re-check when the Play listing lands).
-	// classes.dex shows the handler: handleDeepLink() + Jetpack Navigation
-	// NavDeepLink patterns with the same cast/user/channel route
-	// vocabulary as iOS. No live Android device check yet — the manifest
-	// filter and the shared route vocabulary are the evidence; bump this
-	// note when one happens.
-	// WEB HAS NO CAST ROUTE: with no web build, the https href is the
-	// public TestFlight invite — an honest stub, the page to get the app
-	// on — and every pill is coarse-only, phones only. No signed rule: it
-	// shows whatever the node holds, unsigned authors included. Not
-	// links-only.
+	// profile and feed are one surface there too);
+	// terminus://channel/itookaphoto opened "I Took a Photo!". Also
+	// device-tested on a physical iPhone (Oct 2026).
+	// ANDROID — VERIFIED (Nov 2026): package com.hypersnap.client, public
+	// beta on Google Play since Nov 16 2026 (before that, a sideload APK at
+	// /android, v0.1.2 (382)). Downloaded v0.1.3 (580) — SHA-256 matches
+	// the site's published hash 225fb27d…c999 — and parsed its
+	// AndroidManifest.xml: MainActivity (singleTask, exported) carries a
+	// VIEW + DEFAULT + BROWSABLE filter with <data android:scheme='terminus'/>
+	// — the SAME bare scheme, no host — and STILL no https/autoVerify
+	// filter (the promised Play-launch re-check: no app.onterminus.com in
+	// any intent filter), and assetlinks.json is still absent — the app
+	// host serves the SPA shell at the path and the marketing site 404s —
+	// so there is no androidPackage to enter. classes.dex shows the
+	// handler: handleDeepLink() + Jetpack Navigation NavDeepLink patterns
+	// with the same cast/user/channel route vocabulary as iOS. No live
+	// Android device check yet — the manifest filter and the shared route
+	// vocabulary are the evidence; bump this note when one happens.
+	// COARSE-ONLY LIFTED (Nov 17 2026): the scope existed only because the
+	// href was the TestFlight invite — a homepage fling on desktop. With
+	// the per-cast web route verified, the pill is universal: desktop
+	// opens the web build, phones attempt terminus:// with the web URL as
+	// fallback. (The retired stub href was
+	// https://testflight.apple.com/join/cSPBnkud.)
 	{
 		id: "terminus",
 		title: "Terminus",
 		logoUrl: "/logos/terminus.png",
-		web: "https://testflight.apple.com/join/cSPBnkud",
+		web: "https://app.onterminus.com/@{username}/{fullHash}",
 		deeplink: {
 			scheme: "terminus://cast/{fullHash}",
 		},
-		pointer: "coarse",
 		profile: {
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/@{username}",
 			deeplink: { scheme: "terminus://user/{username}" },
-			pointer: "coarse",
 		},
+		// Feed — the same URL as the profile: the Posts tab is the cast
+		// list (merged surface, verified logged out — the farcaster.xyz
+		// shape; the app's terminus://user/zoo opens the same Posts list).
 		feed: {
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/@{username}",
 			deeplink: { scheme: "terminus://user/{username}" },
-			pointer: "coarse",
 		},
 		channel: {
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/~/{channelId}",
 			deeplink: { scheme: "terminus://channel/{channelId}" },
-			pointer: "coarse",
 		},
 	},
 	// Fatline is an open-source (MIT, github.com/jpfraneto/fatline) Farcaster

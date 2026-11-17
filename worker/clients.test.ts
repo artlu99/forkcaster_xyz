@@ -379,43 +379,50 @@ describe("roster native targets", () => {
 		});
 	});
 
-	test("terminus's scheme opens the cast thread; the href is the TestFlight invite", () => {
+	test("terminus's scheme opens the cast thread; the href is the web app", () => {
 		const terminus = findClient("terminus");
 		expect(terminus).toBeDefined();
 		// Verified against the app's source (AppLink.route(for:) maps
 		// terminus://cast/<0x+40 hex> onto the thread screen) and live on
-		// iOS; the same scheme is now verified in the Android APK's
-		// manifest too (Nov 2026). No androidPackage — Terminus publishes
-		// no assetlinks.json — so no intent form. The web href is the
-		// public TestFlight invite — Terminus has no web build.
+		// iOS; the same scheme is verified in the Android APK's manifest
+		// (v0.1.3, Nov 2026). No androidPackage — Terminus publishes no
+		// assetlinks.json and the manifest has no https/autoVerify filter —
+		// so no intent form. The web href is the verified per-cast route on
+		// app.onterminus.com (Nov 2026 web launch; the registry comment has
+		// the trail) — it replaced the TestFlight-invite stub, and on an
+		// iPhone with the app installed it is also the app's universal link
+		// (AASA "/@*").
 		const targets = deeplinkTargets(terminus as ClientDefinition, VARS);
 		expect(targets).toEqual({
 			scheme: "terminus://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c",
 		});
 		const html = clientPill(terminus as ClientDefinition, VARS, false);
-		expect(html).toContain('href="https://testflight.apple.com/join/cSPBnkud"');
+		expect(html).toContain(
+			'href="https://app.onterminus.com/@zoo/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+		);
 		expect(html).toContain(
 			'data-scheme="terminus://cast/0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
 		);
 		expect(html).not.toContain("data-intent=");
 		expect(html).toContain('data-client="terminus"');
 		expect(html).toContain('src="/logos/terminus.png"');
-		// Coarse-only: on desktop the pill could only fling to TestFlight.
-		expect(html).toContain('class="pill client-pill coarse-only"');
+		// Universal: the href is a real per-cast page now, not the
+		// TestFlight invite — desktop gets the web build (the coarse-only
+		// scope existed only for the stub).
+		expect(html).toContain('class="pill client-pill"');
 		expect(targetFor(terminus as ClientDefinition, "profile")).toEqual({
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/@{username}",
 			deeplink: { scheme: "terminus://user/{username}" },
-			pointer: "coarse",
 		});
+		// Feed — the same URL: the profile's Posts tab is the cast list
+		// (merged surface, verified logged out).
 		expect(targetFor(terminus as ClientDefinition, "feed")).toEqual({
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/@{username}",
 			deeplink: { scheme: "terminus://user/{username}" },
-			pointer: "coarse",
 		});
 		expect(targetFor(terminus as ClientDefinition, "channel")).toEqual({
-			web: "https://testflight.apple.com/join/cSPBnkud",
+			web: "https://app.onterminus.com/~/{channelId}",
 			deeplink: { scheme: "terminus://channel/{channelId}" },
-			pointer: "coarse",
 		});
 	});
 });
@@ -633,7 +640,7 @@ describe("external-link gate", () => {
 			"linkcast.xyz",
 			"opencaster.org",
 			"homiehouse.app",
-			"testflight.apple.com",
+			"app.onterminus.com",
 			"fatline.ink",
 		]);
 	});
