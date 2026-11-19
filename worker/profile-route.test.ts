@@ -1307,11 +1307,12 @@ test("alias: non-0x shapes never match the route (no upstream calls)", async () 
 	expect(calls).toBe(0);
 });
 
-// --- /c/{40 bare hex}: quilcast-style hash-only alias -----------------------
+// --- /c/{40 bare hex} + /cast/{40 bare hex}: hash-only aliases ---------------
 //
-// Disambiguation with the username+hash cast route: /c/{bare40} is hash-only
-// (prepend 0x → same resolve as /~/conversations); /c/0x… is fname `c` +
-// hash and must never take this alias.
+// Quilcast (`/c/`) and linkcast (`/cast/`) bare-hex shapes are equally valid.
+// Disambiguation with the username+hash cast route: /{prefix}/{bare40} is
+// hash-only (prepend 0x → same resolve as /~/conversations); /{prefix}/0x…
+// is fname `c` / `cast` + hash and must never take these aliases.
 
 test("/c/{40 bare hex} 302s to the canonical cast waypoint", async () => {
 	globalThis.fetch = shimMock({
@@ -1321,6 +1322,18 @@ test("/c/{40 bare hex} 302s to the canonical cast waypoint", async () => {
 		},
 	});
 	const res = await app.request(`/c/${ALIAS_HASH.slice(2)}`);
+	expect(res.status).toBe(302);
+	expect(res.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
+});
+
+test("/cast/{40 bare hex} 302s to the canonical cast waypoint", async () => {
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/h/${ALIAS_HASH}`]: {
+			success: true,
+			cast: ALIAS_CAST,
+		},
+	});
+	const res = await app.request(`/cast/${ALIAS_HASH.slice(2)}`);
 	expect(res.status).toBe(302);
 	expect(res.headers.get("location")).toBe(`/${USERNAME}/${ALIAS_HASH}`);
 });
@@ -1335,6 +1348,19 @@ test("/c/{40 bare hex} rejects non-40 lengths (no upstream calls)", async () => 
 	expect((await app.request("/c/abcd")).status).toBe(404);
 	expect(
 		(await app.request(`/c/${ALIAS_HASH.slice(2)}ff`)).status,
+	).toBe(404);
+	expect(calls).toBe(0);
+});
+
+test("/cast/{40 bare hex} rejects non-40 lengths (no upstream calls)", async () => {
+	let calls = 0;
+	globalThis.fetch = mock(async () => {
+		calls++;
+		throw new Error("Unexpected fetch in test");
+	}) as typeof fetch;
+	expect((await app.request("/cast/abcd")).status).toBe(404);
+	expect(
+		(await app.request(`/cast/${ALIAS_HASH.slice(2)}ff`)).status,
 	).toBe(404);
 	expect(calls).toBe(0);
 });
@@ -1371,6 +1397,40 @@ test("/c/0x… stays the username+hash cast route (fname c), not the alias", asy
 			(u) =>
 				u.startsWith("https://shim.artlu.xyz/wc/c/") ||
 				u.startsWith("https://farcaster.tv/c/"),
+		),
+	).toBe(true);
+});
+
+test("/cast/0x… stays the username+hash cast route (fname cast), not the alias", async () => {
+	const calls: string[] = [];
+	globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.startsWith("https://shim.artlu.xyz/h/")) {
+			throw new Error("hash-only alias must not handle /cast/0x…");
+		}
+		if (
+			url.startsWith("https://shim.artlu.xyz/wc/cast/") ||
+			url.startsWith(`https://farcaster.tv/cast/`)
+		) {
+			return url.startsWith("https://farcaster.tv/")
+				? new Response("", { status: 404 })
+				: Response.json({ success: false });
+		}
+		if (url === "https://shim.artlu.xyz/f/cast") {
+			return Response.json({ success: false });
+		}
+		throw new Error(`Unexpected fetch in test: ${url}`);
+	}) as typeof fetch;
+	const res = await app.request(`/cast/${ALIAS_HASH}`);
+	expect(res.status).toBe(404);
+	expect(res.headers.get("location")).toBeNull();
+	expect(calls.some((u) => u.includes("/h/"))).toBe(false);
+	expect(
+		calls.some(
+			(u) =>
+				u.startsWith("https://shim.artlu.xyz/wc/cast/") ||
+				u.startsWith("https://farcaster.tv/cast/"),
 		),
 	).toBe(true);
 });

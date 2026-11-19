@@ -726,10 +726,12 @@ app.get("/:username/casts-and-replies", async (c) => {
 // while the cast exists), which also warms shim fire-and-forget. 302 — NOT
 // 301, so the mapping stays cache-free — to the canonical
 // /{username}/{fullHash} cast waypoint. Relative Location keeps dual-serve
-// hosts self-contained. Two URL shapes share this path:
+// hosts self-contained. Three URL shapes share this path:
 //   • /~/conversations/0x… — Warpcast legacy thread shape
 //   • /c/{40 bare hex}     — quilcast-style hash-only (no 0x). The 0x form
 //     /c/0x… stays the ordinary /{username}/{hash} cast route (fname `c`).
+//   • /cast/{40 bare hex}  — linkcast-style hash-only (no 0x). Same
+//     disambiguation: /cast/0x… stays username+hash (fname `cast`).
 async function hashOnlyCastAlias(
 	c: Context<{ Bindings: Env }>,
 	hash: string,
@@ -769,6 +771,12 @@ app.get("/~/conversations/:hash{0x[0-9a-fA-F]+}", async (c) =>
 // match /c/0x… — that pattern requires a leading 0x and is served by the
 // username+hash cast route with fname `c`.
 app.get("/c/:hash{[0-9a-fA-F]{40}}", async (c) =>
+	hashOnlyCastAlias(c, `0x${c.req.param().hash}`),
+);
+
+// Linkcast-style /cast/{40 bare hex}: same hash-only alias as /c/. Must NOT
+// match /cast/0x… — that stays the username+hash cast route with fname `cast`.
+app.get("/cast/:hash{[0-9a-fA-F]{40}}", async (c) =>
 	hashOnlyCastAlias(c, `0x${c.req.param().hash}`),
 );
 
