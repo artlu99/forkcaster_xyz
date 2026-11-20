@@ -1,21 +1,21 @@
 // Profile landing pages — resolve once, render twice.
 //
-// Waypoint law: identity is the page, lists are skeletons (never feeds),
-// interaction lives in the clients. Concretely: the identity card surfaces
-// exactly the hydrated entity shim /user/{fid} returns — empty-prone fields
-// render nothing, never faked, and nothing beyond it is fetched — and the
-// cast list is bare routing matter into the cast waypoints. The client
-// layer is stateful: the menu is the way out, the badge
-// marks the flat resolution (own kind slug, else the cast slug), and
+// Waypoint law: identity is the page, interaction lives in the clients.
+// Concretely: the identity card surfaces exactly the hydrated entity shim
+// /user/{fid} returns — empty-prone fields render nothing, never faked,
+// and nothing beyond it is fetched. The casts-and-replies sibling is the
+// feed waypoint (same identity head, kind:"feed" menu) — no cast list.
+// The client layer is stateful: the menu is the way out, the badge marks
+// the flat resolution (own kind slug, else the cast slug), and
 // first/switch/repeat + the route kind flow through /t. The JSON twin
-// stays personalization-free.
+// stays personalization-free and identity-only — no timeline on any
+// profile surface.
 //
 // Identity verdict: shim /f/{username} (fid) — the canonical identity
-// source, same seat as everywhere else. Entity (/user/{fid}) and timeline
-// (/{username}/casts-and-replies) fail soft: decoration and content must
-// not 404 a proven identity. Strict statuses (404 / 503 + Retry-After)
-// apply to both variants — unlike casts, a profile has no fail-open
-// content source when shim is unreachable.
+// source, same seat as everywhere else. Entity (/user/{fid}) fails soft:
+// decoration must not 404 a proven identity. Strict statuses
+// (404 / 503 + Retry-After) apply to both variants — unlike casts, a
+// profile has no fail-open content source when shim is unreachable.
 //
 // Echo-the-valid-input: first-party links across the family carry the
 // gate-validated route input, not the primary handle — shim resolves any
@@ -27,31 +27,12 @@
 // Display, OG/canonical, external client targets, and the JSON twin carry
 // the primary; first-party navigation keeps the visitor's own words.
 
-import { sort } from "radash";
 import {
 	rescueHashViaFarcasterTv,
 	UPSTREAM_TIMEOUT_MS,
 } from "./cast-source.ts";
+import { primaryHandle } from "./cast-data.ts";
 import {
-	articleChainOf,
-	articleHeadViewOf,
-	isArticlePart,
-	primaryHandle,
-	quoteTargetsOf,
-	toCastData,
-	urlEmbedsOf,
-	type QuoteTarget,
-	type UnfurlResult,
-} from "./cast-data.ts";
-import {
-	ARTICLE_STYLE,
-	fetchQuote,
-	renderArticleCard,
-	renderEmbedCard,
-	unfurl,
-} from "./cast-page.tsx";
-import {
-	LIVE_STATS_SCRIPT,
 	SHEET_SCRIPT,
 	SHELL_SCRIPT,
 	TRACK_SCRIPT,
@@ -61,7 +42,6 @@ import { clientActionsHtml } from "./cast-actions.tsx";
 import type { TemplateVars } from "./client-registry.ts";
 import type { RankSnapshot } from "../scripts/client-rank-lib.ts";
 import {
-	getCastsAndReplies,
 	getFidByUsername,
 	getSignedStatus,
 	getUserByFid,
@@ -74,9 +54,6 @@ import {
 } from "./shim.ts";
 import { collapseText, escapeHtml, shell } from "./shell.tsx";
 import type { SiteChrome } from "./site-chrome.ts";
-
-/** Skeleton size — the timeline route's only knob is `limit` (no cursor). */
-const TIMELINE_LIMIT = 10;
 
 /**
  * Profile surfaces tolerate a longer shim window than casts: a slow
@@ -101,19 +78,11 @@ async function withOneRetry<T>(
 	return fn(AbortSignal.timeout(PROFILE_TIMEOUT_MS));
 }
 
-/** casts-and-replies rows add reply parenting on top of the canonical shape. */
-type ProfileCast = ShimCast & {
-	parentCastId?: { fid?: number; hash?: string };
-};
-
 export type ResolvedProfile =
 	| {
 			kind: "found";
 			user: ShimUser;
 			fid: number;
-			casts: ProfileCast[];
-			/** false when the timeline call failed — render "unavailable", not 404. */
-			timelineOk: boolean;
 			/** The ban signal (shim /signed/{fid}); null = unknown ⇒ fail open. */
 			signed: boolean | null;
 	  }
@@ -171,32 +140,21 @@ function handleLine(user: ShimUser, primary: string): string {
 }
 
 /**
- * Resolve once: /f (identity verdict) fires in parallel with the timeline
- * when one is wanted; /user/{fid} and the signed check follow the fid. Only
- * the identity stage can produce 404/503. `timeline: false` (the
- * identity-card profile page) skips the timeline call entirely — the casts
- * page owns the list; the JSON twin and the casts page fetch it.
- * `signed: true` runs the ban signal (shim /signed/{fid}) — null (unknown)
- * fails open, exactly like the cast action row.
+ * Resolve once: /f (identity verdict), then /user/{fid} and the signed
+ * check. Only the identity stage can produce 404/503. No timeline —
+ * profile surfaces (HTML + JSON) are identity-only. `signed: true` runs
+ * the ban signal (shim /signed/{fid}) — null (unknown) fails open,
+ * exactly like the cast action row.
  */
 export async function resolveProfile(
 	username: string,
 	opts: {
-		timeline?: boolean;
 		signed?: boolean;
 		/** The shim-potato fleet — comma-separated bases raced on every shim read. */
 		potatoBases?: string | null;
 	} = {},
 ): Promise<ResolvedProfile> {
 	const potatoBases = opts.potatoBases;
-	const castsPromise = opts.timeline
-		? getCastsAndReplies(
-				username,
-				TIMELINE_LIMIT,
-				AbortSignal.timeout(PROFILE_TIMEOUT_MS),
-				potatoBases,
-			)
-		: null;
 	let fid: number | undefined;
 	try {
 		fid = await withOneRetry((signal) =>
@@ -231,24 +189,11 @@ export async function resolveProfile(
 		// getSignedStatus never throws; unknown (null) fails open.
 		signed = (await signedPromise) ?? null;
 	}
-	let timeline = castsPromise ? await castsPromise : null;
-	// The timeline is content that fails soft — one retry on a failed call
-	// makes the "unavailable" note rare instead of routine.
-	if (timeline && !timeline.ok) {
-		timeline = await getCastsAndReplies(
-			username,
-			TIMELINE_LIMIT,
-			AbortSignal.timeout(PROFILE_TIMEOUT_MS),
-			potatoBases,
-		).catch(() => timeline);
-	}
 	return {
 		kind: "found",
 		// Entity failure fails soft: a username-only card still proves identity.
 		user: user ?? { fid, username },
 		fid,
-		casts: timeline ? (timeline.casts as ProfileCast[]) : [],
-		timelineOk: timeline ? timeline.ok : true,
 		signed,
 	};
 }
@@ -268,16 +213,13 @@ export async function resolveProfile(
  * username path keeps rejecting it — there it means a stale/absent handle
  * behind a proven identity; here usernamelessness is the resolved state,
  * and the renderers' primaryHandle fallback carries the route input).
- * The timeline is username-keyed and unreachable for these accounts:
- * `timeline: true` marks timelineOk false (renders "unavailable", never
- * faked). Identity discipline matches resolveProfileFidAlias: the 8s
- * window, one retry on transport failure, entity single semantic probe —
- * both legs raced across the potato fleet.
+ * Identity discipline matches resolveProfileFidAlias: the 8s window, one
+ * retry on transport failure, entity single semantic probe — both legs
+ * raced across the potato fleet.
  */
 export async function resolveProfileFid(
 	fid: number,
 	opts: {
-		timeline?: boolean;
 		signed?: boolean;
 		potatoBases?: string | null;
 	} = {},
@@ -329,11 +271,6 @@ export async function resolveProfileFid(
 		kind: "found",
 		user,
 		fid: user.fid ?? fid,
-		casts: [],
-		// The timeline endpoint is username-keyed — no source exists for a
-		// usernameless account. `timeline: true` (JSON twin / casts page)
-		// renders the honest "unavailable" note instead of a fake empty list.
-		timelineOk: !opts.timeline,
 		signed,
 	};
 }
@@ -407,12 +344,10 @@ const PROFILE_STYLE = `<style>
 .profile-copy .icon-check { display: none; }
 .profile-copy.profile-copied .icon-copy { display: none; }
 .profile-copy.profile-copied .icon-check { display: block; color: var(--accent); }
-.profile-empty { color: var(--muted); font-size: 14px; }
 /* Pointer-class pill scoping lives in the shared shell stylesheet. */
 .casts-page-head { margin: 8px 0 0; }
 .casts-page-head .profile-handle a { color: var(--muted); text-decoration: none; }
 .casts-page-head .profile-handle a:hover, .casts-page-head .profile-handle a:focus-visible { color: var(--accent); }
-.casts-embeds { display: flex; flex-direction: column; gap: 14px; margin: 24px 0 0; }
 </style>`;
 
 /** An address renders (linked, truncated) only in honest shapes; garbage stays text. */
@@ -540,8 +475,9 @@ export function renderProfileHtml(
 			: "";
 
 	// Waypoint law, strict dial: the identity card IS the page — no cast
-	// list here. The list lives on /{username}/casts-and-replies, and the
-	// pill echoes the validated input (echo-the-valid-input, see header).
+	// list here. The feed waypoint lives on /{username}/casts-and-replies,
+	// and the pill echoes the validated input (echo-the-valid-input, see
+	// header).
 	const body = `
 ${PROFILE_STYLE}
 <div id="auto-mount" data-kind="profile" data-noun="profiles"></div>
@@ -595,7 +531,6 @@ ${notice}
 export function renderProfileJson(
 	profile: ResolvedProfile,
 	username: string,
-	origin: string,
 ): {
 	status: 200 | 404 | 503;
 	body: Record<string, unknown>;
@@ -611,7 +546,7 @@ export function renderProfileJson(
 			retryAfter: "60",
 		};
 	}
-	const { user, fid, casts, timelineOk } = profile;
+	const { user, fid } = profile;
 	const primary = primaryHandle(user, username);
 	const attestations = attestationsOf(user, primary, Infinity);
 	const body: Record<string, unknown> = { username: primary, fid };
@@ -620,20 +555,8 @@ export function renderProfileJson(
 	if (user.bio) body.bio = user.bio;
 	if (user.pfpUrl) body.pfp = user.pfpUrl;
 	if (user.primaryAddress) body.primaryAddress = user.primaryAddress;
-	const rows = casts
-		.filter((cast) => cast.hash)
-		.map((cast) => ({
-			hash: cast.hash,
-			...(cast.text ? { text: cast.text } : {}),
-			...(typeof cast.timestamp === "number"
-				? { timestamp: new Date(cast.timestamp * 1000).toISOString() }
-				: {}),
-			url: `${origin}/${primary}/${cast.hash}`,
-		}));
-	if (rows.length > 0) body.casts = rows;
-	if (!timelineOk) body.note = "timeline unavailable";
 	// Same note contract as the cast JSON: signed === false is the only
-	// trigger; unknown/failed fails open.
+	// trigger; unknown/failed fails open. No timeline — identity only.
 	if (profile.signed === false) {
 		body.note =
 			"account hasn't signed the social smart contract; the profile is read-only on farcaster.xyz";
@@ -644,38 +567,23 @@ export function renderProfileJson(
 
 // --- Casts page (/{username}/casts-and-replies) -------------------------------
 //
-// The farcaster.xyz URL-shape mirror, and the ONE list surface: the profile
-// is the identity card (no casts), this page renders each cast IN FULL —
-// exactly the individual cast page's pipeline (renderEmbedCard):
-// react-farcaster-embed SSR, unfurl-enriched URL embeds (≤3 per cast),
-// /h-hydrated quotes (≤3 per cast), blank-target hardening, live-stats
-// slot per card (the stats script fills every slot). Article chains bend
-// the list two ways: the head (0 of N) renders as the article's front page
-// (renderArticleCard — cover, title, intro blurb, never the body), and the
-// chain's intermediates (1 of N and up) are filtered out before any
-// enrichment runs — an article reads once, as its front page. The
-// intermediates keep their own cast pages and OG previews, so deep links
-// into a part still resolve; the list is the only surface that hides them.
-// One deliberate divergence from the individual cast page: every card
-// links HOME — the Show-on-Farcaster anchor and the stats slot's
-// client-built links point at the forkcaster waypoint, which always
-// resolves, signed or not (the individual cast page hides the icon for
-// proven-unsigned authors, where a retarget would self-link; here the
-// waypoint is another page). Shim's timeline rows carry no inline user, so
-// the profile entity is attached as the author. The OG preview is IDENTICAL
-// to the profile's (same card visual, deeper page); canonical/og:url stay
-// on this page's own URL. No JSON twin — the link is omitted rather than
-// advertise HTML. The /f verdict and the fail-soft timeline semantics are
-// identical to the profile route.
+// The farcaster.xyz URL-shape mirror as a FEED waypoint: identity head +
+// stateful feed menu, no cast list. The timeline fleet race and the full
+// embed pipeline (SSR / unfurl / quotes / live-stats) used to live here;
+// they were the heaviest render in the family and bought nothing the
+// clients don't already serve. Profile is kind:"profile"; this page is
+// kind:"feed" (separate cookie segment). OG preview is IDENTICAL to the
+// profile's; canonical/og:url stay on this page's own URL. No JSON twin —
+// the link is omitted rather than advertise HTML. The /f verdict matches
+// the profile route.
 
-export async function renderCastsHtml(
+export function renderCastsHtml(
 	profile: ResolvedProfile,
 	username: string,
 	primaryOrigin?: string,
-	env?: { UNFURL?: Fetcher; SHIM_POTATO_BASE?: string },
 	rank?: RankSnapshot | null,
 	chrome?: SiteChrome,
-): Promise<{ status: 200 | 404 | 503; html: string }> {
+): { status: 200 | 404 | 503; html: string } {
 	const key = `${username}/casts-and-replies`;
 	if (profile.kind === "not-found") {
 		return { status: 404, html: notFoundPage(username, key, chrome) };
@@ -683,130 +591,9 @@ export async function renderCastsHtml(
 	if (profile.kind === "unreachable") {
 		return { status: 503, html: unavailablePage(username, key, chrome) };
 	}
-	const { user, fid, casts, timelineOk, signed } = profile;
+	const { user, fid, signed } = profile;
 	const primary = primaryHandle(user, username);
 	const displayName = user.displayName ?? null;
-
-	// Shim timeline rows are author-implied — attach the hydrated entity so
-	// each card renders exactly like it does on its own cast page. The
-	// author handle is the primary (identity law), so embed cards link the
-	// fname everywhere they surface it.
-	const author: ShimCast["user"] = {
-		fid,
-		username: primary,
-		displayName: displayName ?? undefined,
-		pfpUrl: user.pfpUrl ?? undefined,
-		bio: user.bio ?? undefined,
-	};
-
-	// Enrichment up front, allSettled: every failure degrades alone
-	// (unfurl ⇒ hostname-only card, quotes ⇒ dropped) and never 404s a
-	// proven identity. Results are keyed by URL/hash so enrichment never
-	// depends on positional ordering between the fetch set and the cast loop.
-	// Article-chain intermediates (1 of N and up) are filtered BEFORE any
-	// enrichment runs — hidden casts cost no fetches.
-	const orderedCasts = sort(casts, (cast) => cast.timestamp ?? 0, true).filter(
-		(cast) => !isArticlePart(cast),
-	);
-
-	const unfurlByUrl = new Map<string, UnfurlResult | undefined>();
-	{
-		const urls = new Set<string>();
-		for (const cast of orderedCasts) {
-			for (const u of urlEmbedsOf(cast)) urls.add(u);
-		}
-		const results = await Promise.allSettled(
-			[...urls].map((u) => unfurl(u, env)),
-		);
-		let i = 0;
-		for (const u of urls) {
-			const r = results[i++];
-			unfurlByUrl.set(u, r?.status === "fulfilled" ? r.value : undefined);
-		}
-	}
-
-	const quotesByHash = new Map<string, ShimCast | undefined>();
-	{
-		const targets = new Map<string, QuoteTarget>();
-		for (const cast of orderedCasts) {
-			for (const t of quoteTargetsOf(cast)) {
-				if (!targets.has(t.hash)) targets.set(t.hash, t);
-			}
-		}
-		const results = await Promise.allSettled(
-			[...targets.values()].map((t) =>
-				fetchQuote(t, env?.SHIM_POTATO_BASE),
-			),
-		);
-		let i = 0;
-		for (const t of targets.values()) {
-			const r = results[i++];
-			quotesByHash.set(t.hash, r?.status === "fulfilled" ? r.value : undefined);
-		}
-	}
-
-	const cards: string[] = [];
-	for (const cast of orderedCasts) {
-		// No hash ⇒ unroutable — skip rather than render a dead card.
-		if (!cast.hash) continue;
-		const hash = cast.hash;
-		// An article head renders as the article's front page — cover,
-		// title, intro blurb (never the body; the parts carry it). Every
-		// other cast renders the plain embed card.
-		const head = articleHeadViewOf(cast);
-		try {
-			if (head) {
-				cards.push(
-					renderArticleCard({
-						username: primary,
-						hash,
-						cast: { ...cast, user: author },
-						title: head.title,
-						opening: head.opening,
-						cover: head.cover,
-						count: articleChainOf(cast)?.count,
-						// Every card links home (waypoint law), list flavor.
-						local: true,
-						castPath: `/${encodeURIComponent(username)}/${hash}`,
-					}),
-				);
-				continue;
-			}
-			const unfurlMap = new Map<string, UnfurlResult | undefined>();
-			for (const u of urlEmbedsOf(cast)) {
-				unfurlMap.set(u, unfurlByUrl.get(u));
-			}
-			const quotes = quoteTargetsOf(cast).map(
-				(t) => quotesByHash.get(t.hash),
-			);
-			cards.push(
-				await renderEmbedCard({
-					username: primary,
-					hash,
-					castData: toCastData({ ...cast, user: author }, unfurlMap, quotes),
-					// Every card links home (waypoint law): the card's cast
-					// anchor and its live-stats links point at the forkcaster
-					// waypoint, which always resolves — the farcaster.xyz cast
-					// page is dead for a proven-unsigned author and merely
-					// off-route for everyone else. First-party link ⇒ echoes
-					// the validated route input.
-					local: true,
-					castPath: `/${encodeURIComponent(username)}/${hash}`,
-				}),
-			);
-		} catch {
-			// A broken card must never take the list down.
-		}
-	}
-
-	const listHtml =
-		cards.length > 0
-			? `<section class="casts-embeds">${cards.join("\n")}</section>`
-			: `<p class="profile-empty">${
-					timelineOk
-						? "No casts yet."
-						: "Recent casts are unavailable right now."
-				}</p>`;
 
 	// The stateful layer is CLIENT-side (SHELL_SCRIPT, kind "feed"): the
 	// menu renders every feed-capable pill (gates applied) and the script —
@@ -823,18 +610,16 @@ export async function renderCastsHtml(
 			: "";
 
 	// Echo-the-valid-input (see header): the back-link echoes the input,
-	// the visible @handle below carries the primary (identity law).
+	// the visible title carries the entity display (identity law).
 	const body = `
 ${PROFILE_STYLE}
-${ARTICLE_STYLE}
 <div id="auto-mount" data-kind="feed" data-noun="feeds"></div>
 <div class="casts-page-head">
 <h1 class="profile-title">${escapeHtml(displayName ?? `@${user.username ?? primary}`)}</h1>
 <p class="profile-handle"><a href="/${encodeURIComponent(username)}">Profile</a></p>
 </div>
 ${menu}
-${notice}
-${listHtml}`;
+${notice}`;
 
 	// OG preview identical to the profile's: same title/description/image.
 	const og = {
@@ -853,11 +638,11 @@ ${listHtml}`;
 			`${key} · forkcaster`,
 			body,
 			og,
-			// Live-stats fills one slot per card; the stateful layer adds the
-			// telemetry helper + cookie writer + sheet wiring + the
-			// cookie-driven personalization into the mount. DEEPLINK_SCRIPT
-			// ships inside the feed row when its pill has a native target.
-			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${LIVE_STATS_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
+			// Stateful layer: telemetry + cookie writer + sheet + cookie-
+			// driven personalization into the mount. DEEPLINK_SCRIPT ships
+			// inside the feed row when its pill has a native target. No
+			// live-stats — there are no cards.
+			`${TRACK_SCRIPT}${CLIENT_SCRIPT}${SHEET_SCRIPT}${SHELL_SCRIPT}`,
 			canonicalUrl,
 			"profile",
 			// No JSON twin — never advertise one.

@@ -5,7 +5,8 @@
  * mocked and routed by exact shim URL — unexpected URLs throw, which is how
  * the zero-fetch gates (denylist, charset) are asserted. The profile surface
  * resolves entirely through shim: /f/{username} (identity verdict),
- * /user/{fid} (hydrated entity), /{username}/casts-and-replies (timeline).
+ * /user/{fid} (hydrated entity), /signed/{fid} (ban signal). Identity-only
+ * — no timeline on HTML or JSON.
  */
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 
@@ -22,7 +23,6 @@ const USERNAME = "decent-artlu";
 const FID = 3319217;
 const ADDRESS = "0xea51dDf4d06fdc5cD6564380FA8d05329edfDaD6";
 const CAST_HASH = "0x3ceab47a5990cce65e0116e32dec0aacfdf4aed1";
-const REPLY_HASH = "0x74bb59de263462839fe10e4683bd20e432649ffc";
 const CAST_TS = 1_792_781_202;
 
 // Hydrated entity, exactly as shim /user/{fid} answers (probed Oct 2026).
@@ -34,29 +34,6 @@ const USER = {
 	bio: "Bass Ackwards. https://decent-artlu.farchiver.xyz/browse/decent-artlu/",
 	primaryAddress: ADDRESS,
 	proNft: null,
-};
-// Timeline rows, exactly as /{username}/casts-and-replies answers: canonical
-// ShimCast rows (unix-SECOND timestamps, no inline user) + parentCastId on
-// replies. One text cast, one image-only reply.
-const CASTS = {
-	success: true,
-	casts: [
-		{
-			fid: FID,
-			hash: CAST_HASH,
-			text: "related: I see people with their batteries of pre-commit hooks",
-			timestamp: CAST_TS,
-			embeds: [],
-		},
-		{
-			fid: FID,
-			hash: REPLY_HASH,
-			text: "",
-			timestamp: 1_792_000_000,
-			embeds: [{ url: "https://imagedelivery.net/BXlu/abc/original" }],
-			parentCastId: { fid: FID, hash: REPLY_HASH },
-		},
-	],
 };
 
 const originalFetch = globalThis.fetch;
@@ -81,7 +58,6 @@ function defaultMock(): typeof fetch {
 			success: true,
 			signed: true,
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
 	});
 }
 
@@ -134,13 +110,14 @@ test("profile page renders the full hydrated entity as the identity card", async
 	// proNft is typed but never rendered (no known shape).
 	expect(body).not.toContain("proNft");
 	// Waypoint law, strict dial: NO cast list on the identity card — the
-	// list lives on /{username}/casts-and-replies, one pill away.
+	// feed waypoint lives on /{username}/casts-and-replies, one pill away.
 	expect(body).toContain(
 		`href="/${USERNAME}/casts-and-replies">Casts and replies</a>`,
 	);
 	expect(body).not.toContain("Recent casts");
 	expect(body).not.toContain('class="profile-cast"');
-	// The identity card skips the timeline call entirely (only /f + /user).
+	expect(body).not.toContain('class="farcaster-embed');
+	// Identity-only: /f + /user (+ /signed), never the timeline.
 	const fetchMock = globalThis.fetch as ReturnType<typeof mock>;
 	expect(
 		fetchMock.mock.calls.every((c) =>
@@ -183,7 +160,6 @@ test("profile bio linkifies explicit URLs; punctuation, graph tokens, and hostil
 				bio: `find me at https://example.com/path. also @friend and #channel, or (https://nested.test/x) — and https://evil.test/" onmouseover="alert(1)`,
 			},
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
 	});
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -235,10 +211,6 @@ test("optional entity fields vanish instead of rendering empty", async () => {
 			success: true,
 			user: { fid: FID, username: USERNAME, displayName: null, bio: null },
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: true,
-			casts: [],
-		},
 	});
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -277,10 +249,6 @@ test("display waterfall: no displayName falls to the username before the fname",
 				bio: null,
 			},
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: true,
-			casts: [],
-		},
 	});
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -300,7 +268,6 @@ test("a malformed primaryAddress renders as bare text — no copy, no explorer",
 			success: true,
 			user: { ...USER, primaryAddress: "not-an-address" },
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
 	});
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -404,24 +371,26 @@ test("/f HTTP 500 is an outage (503 after retry), never a false 404", async () =
 	});
 });
 
-test("timeline failure fails soft: JSON carries the note, the identity page is untouched", async () => {
-	globalThis.fetch = shimMock({
+test("JSON twin never fetches the timeline", async () => {
+	const fetchMock = shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: false,
-			error: "getHubFidByUsername: User not found",
+		[`https://shim.artlu.xyz/signed/${FID}`]: {
+			success: true,
+			signed: true,
 		},
 	});
+	globalThis.fetch = fetchMock;
 	const json = await app.request(`/${USERNAME}?format=json`);
+	expect(json.status).toBe(200);
 	const data = await json.json();
-	expect(data.note).toBe("timeline unavailable");
 	expect("casts" in data).toBe(false);
-
-	// The identity page never fetched the timeline, so it never mentions it.
-	const html = await app.request(`/${USERNAME}`);
-	expect(html.status).toBe(200);
-	expect(await html.text()).not.toContain("unavailable right now");
+	expect("note" in data).toBe(false);
+	expect(
+		fetchMock.mock.calls.every((c) =>
+			!String(c[0]).includes("casts-and-replies"),
+		),
+	).toBe(true);
 });
 
 // --- Agent JSON twin ----------------------------------------------------------
@@ -440,22 +409,9 @@ test("?format=json returns the availability-gated profile body", async () => {
 	);
 	expect(body.pfp).toBe(USER.pfpUrl);
 	expect(body.primaryAddress).toBe(ADDRESS);
-	// unix-SECOND shim timestamps → ISO, same convention as the cast JSON.
-	expect(body.casts).toEqual([
-		{
-			hash: CAST_HASH,
-			text: CASTS.casts[0].text,
-			timestamp: new Date(CAST_TS * 1000).toISOString(),
-			url: `http://localhost/${USERNAME}/${CAST_HASH}`,
-		},
-		{
-			hash: REPLY_HASH,
-			timestamp: new Date(1_792_000_000 * 1000).toISOString(),
-			url: `http://localhost/${USERNAME}/${REPLY_HASH}`,
-		},
-	]);
 	expect(body.farcaster).toBe(`https://farcaster.xyz/${USERNAME}`);
-	// ok timeline: no note. proNft: typed, never emitted.
+	// Identity-only: no casts. proNft: typed, never emitted.
+	expect("casts" in body).toBe(false);
 	expect("note" in body).toBe(false);
 	expect("proNft" in body).toBe(false);
 });
@@ -476,7 +432,7 @@ test("Accept: application/json negotiates JSON; */* stays HTML", async () => {
 // --- Routing gates: reserved paths win; noise 404s without upstream calls -----
 
 test("trailing-slash forms 301 to the canonical non-slash URLs (query preserved, zero fetches)", async () => {
-	globalThis.fetch = repliesMock();
+	globalThis.fetch = feedWaypointMock();
 	const profile = await app.request(`/${USERNAME}/`);
 	expect(profile.status).toBe(301);
 	expect(profile.headers.get("location")).toBe(`/${USERNAME}`);
@@ -546,8 +502,6 @@ test("first-party links echo the validated input; display keeps the entity handl
 				user: { ...USER, username: ENTITY },
 			},
 			[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed },
-			[`https://shim.artlu.xyz/${ALIAS}/casts-and-replies?limit=10`]:
-				CASTS,
 		});
 	globalThis.fetch = aliasMock(true);
 
@@ -567,10 +521,9 @@ test("first-party links echo the validated input; display keeps the entity handl
 	const castsBody = await casts.text();
 	// The head's Profile link echoes the input back…
 	expect(castsBody).toContain(`href="/${ALIAS}">Profile</a>`);
-	// …and the rendered author stays the entity.
-	expect(castsBody).toContain(
-		'<p class="farcaster-embed-author-display-name">Ultra</p>',
-	);
+	// …and the feed waypoint title stays the entity display name.
+	expect(castsBody).toContain('<h1 class="profile-title">Ultra</h1>');
+	expect(castsBody).not.toContain('class="farcaster-embed');
 
 	// Gate normalization rides along: typed capitals echo lowercase.
 	const caps = await app.request("/Arfonzo");
@@ -582,16 +535,14 @@ test("first-party links echo the validated input; display keeps the entity handl
 	const json = await app.request(`/${ALIAS}?format=json`);
 	expect((await json.json()).username).toBe(ENTITY);
 
-	// The unsigned variant: the dead farcaster.xyz cast anchor retargets to
-	// the local waypoint — a first-party link, so it echoes the input too,
-	// while the stats slot's display name stays the entity handle.
+	// The unsigned feed waypoint: Farcaster is dropped; the Profile
+	// back-link still echoes the typed alias (first-party).
 	globalThis.fetch = aliasMock(false);
 	const unsigned = await app.request(`/${ALIAS}/casts-and-replies`);
 	const unsignedBody = await unsigned.text();
-	expect(unsignedBody).toContain(
-		`href="/${ALIAS}/${CAST_HASH}" title="Open on forkcaster"`,
-	);
-	expect(unsignedBody).not.toContain(`href="/${ENTITY}/${CAST_HASH}"`);
+	expect(unsignedBody).toContain(`href="/${ALIAS}">Profile</a>`);
+	expect(unsignedBody).not.toContain('data-client="farcaster"');
+	expect(unsignedBody).toContain("read-only on farcaster.xyz");
 });
 
 test("identity law: the fname is the primary handle; ENS names are attestations", async () => {
@@ -617,7 +568,6 @@ test("identity law: the fname is the primary handle; ENS names are attestations"
 			},
 		},
 		[`https://shim.artlu.xyz/signed/${FID}`]: { success: true, signed: true },
-		"https://shim.artlu.xyz/arfonzo.eth/casts-and-replies?limit=10": CASTS,
 	});
 
 	const res = await app.request("/arfonzo.eth", undefined, {
@@ -680,55 +630,21 @@ test("GET /api/ lists the profile JSON surface", async () => {
 	});
 });
 
-// --- /{username}/casts-and-replies: skeleton-only list surface ----------------
+// --- /{username}/casts-and-replies: feed waypoint (no cast list) ------------
 
-const REPLIES = {
-	success: true,
-	casts: [
-		{
-			fid: FID,
-			hash: CAST_HASH,
-			text: "first cast",
-			timestamp: CAST_TS,
-			embeds: [],
-		},
-		{
-			fid: FID,
-			hash: REPLY_HASH,
-			text: "second cast",
-			timestamp: CAST_TS,
-			// Quote embed with no /h or /u mock ⇒ the hydration chain
-			// (/h, then the /u→/wc fallback) fails, quote dropped.
-			embeds: [{ castId: { fid: 3854, hash: "0x11111111deadbeef" } }],
-			parentCastId: { fid: FID, hash: REPLY_HASH },
-		},
-		// No hash ⇒ unroutable — must be skipped, not rendered as a dead card.
-		{ fid: FID, text: "hashless", timestamp: CAST_TS, embeds: [] },
-		{
-			fid: FID,
-			hash: "0xcccccccccccccccccccccccccccccccccccccccc",
-			text: "linking example.com today",
-			timestamp: CAST_TS,
-			// URL embed with no unfurl mock ⇒ hostname fallback card.
-			embeds: [{ url: "https://example.com/article" }],
-		},
-	],
-};
-
-function repliesMock(): typeof fetch {
+function feedWaypointMock(signed = true): typeof fetch {
 	return shimMock({
 		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
 		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
 		[`https://shim.artlu.xyz/signed/${FID}`]: {
 			success: true,
-			signed: true,
+			signed,
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: REPLIES,
 	});
 }
 
-test("casts-and-replies renders full embed cards with the profile's OG preview", async () => {
-	globalThis.fetch = repliesMock();
+test("casts-and-replies is a feed waypoint: menu + OG, no cast list, no timeline fetch", async () => {
+	globalThis.fetch = feedWaypointMock();
 	const res = await app.request(`/${USERNAME}/casts-and-replies`);
 	expect(res.status).toBe(200);
 	expect(res.headers.get("content-type") ?? "").toContain("text/html");
@@ -739,8 +655,9 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 		"<title>decent-artlu/casts-and-replies · forkcaster</title>",
 	);
 	expect(body).toContain(`href="/${USERNAME}">Profile</a>`);
+	expect(body).toContain('<h1 class="profile-title">Ultra</h1>');
 	// The feed row: stateful pills — farcaster, Quorum, Quilcast,
-	// Firefly, the four verified feed targets (pointer-scoped classes:
+	// Firefly, the verified feed targets (pointer-scoped classes:
 	// Quorum coarse-only, Quilcast fine-only).
 	expect(body).toContain('data-client="farcaster" data-kind="feed"');
 	expect(body).toContain('class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="feed"');
@@ -755,42 +672,30 @@ test("casts-and-replies renders full embed cards with the profile's OG preview",
 	expect(body).toContain(
 		`<meta property="og:image" content="${USER.pfpUrl}" />`,
 	);
-	// Full embed cards — the individual cast page's rendering, author
-	// attached from the hydrated entity. Hashless rows are skipped.
-	expect(body).toContain("farcaster-embed");
-	expect(body).toContain(
-		'<p class="farcaster-embed-author-display-name">Ultra</p>',
-	);
-	expect(body).toContain("first cast");
-	expect(body).toContain("second cast");
-	// Waypoint law: every card links home — the icon retargets to the
-	// cast's forkcaster page (this author is signed; signedness never
-	// gated the cards), and the stats slot ships data-local so the fill
-	// script writes local links too.
-	expect(body).toContain(
-		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
-	);
-	expect(body).toContain('data-local="1"');
-	expect(body).not.toContain("hashless");
-	// Per-card live-stats slot + the multi-slot fill script.
-	expect(body).toContain(`data-hash="${CAST_HASH}"`);
-	expect(body).toContain(`data-hash="${REPLY_HASH}"`);
-	expect(body).toContain("farcaster.tv/");
-	// The unfurl pipeline ran (no unfurl mock ⇒ hostname fallback card).
-	expect(body).toContain("example.com");
-	// The unhydrated quote (no /h mock) is dropped, not rendered broken.
-	expect(body).not.toContain("quote-embeds");
-	// No identity card, no advertised twin. The feed row is stateful now:
+	// No cast list — no embed cards, no empty/unavailable copy.
+	// (The shell still links /farcaster-embed.css; assert the card class.)
+	expect(body).not.toContain('class="farcaster-embed');
+	expect(body).not.toContain("casts-embeds");
+	expect(body).not.toContain("No casts yet.");
+	expect(body).not.toContain("Recent casts are unavailable");
+	// No identity card, no advertised twin. The feed row is stateful:
 	// pills + telemetry ship; no cookie ⇒ the script renders no box.
 	expect(body).not.toContain('class="profile-card"');
 	expect(body).toContain("data-client");
 	expect(body).toContain("window.__fk");
 	expect(withoutScripts(body)).not.toContain("data-auto");
 	expect(body).not.toContain('rel="alternate"');
+	// Skips the timeline fleet race entirely (only /f + /user + /signed).
+	const fetchMock = globalThis.fetch as ReturnType<typeof mock>;
+	expect(
+		fetchMock.mock.calls.every((c) =>
+			!String(c[0]).includes("casts-and-replies"),
+		),
+	).toBe(true);
 });
 
 test("casts-and-replies canonicalizes under PRIMARY_ORIGIN", async () => {
-	globalThis.fetch = repliesMock();
+	globalThis.fetch = feedWaypointMock();
 	const res = await app.request(`/${USERNAME}/casts-and-replies`, undefined, {
 		PRIMARY_ORIGIN: "https://forkcaster.xyz",
 	});
@@ -816,190 +721,21 @@ test("casts-and-replies: /f miss ⇒ 404; /f unreachable ⇒ 503 + Retry-After",
 	expect(await down.text()).toContain("temporarily unavailable");
 });
 
-test("casts-and-replies timeline fails soft; ok-empty is honest", async () => {
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: false,
-			error: "getHubFidByUsername: User not found",
-		},
-	});
-	const failed = await app.request(`/${USERNAME}/casts-and-replies`);
-	expect(failed.status).toBe(200);
-	expect(await failed.text()).toContain(
-		"Recent casts are unavailable right now.",
-	);
-
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: true,
-			casts: [],
-		},
-	});
-	const empty = await app.request(`/${USERNAME}/casts-and-replies`);
-	expect(empty.status).toBe(200);
-	expect(await empty.text()).toContain("No casts yet.");
-});
-
 test("casts-and-replies: the unsigned feed menu drops Farcaster", async () => {
 	// Signed suppression extends to kind targets (fail-open): unsigned ⇒
 	// the farcaster feed pill is suppressed. The other feed targets
-	// (quorum, quilcast, firefly, vibeshift) carry no signed rule and stay — the notice
-	// explains the farcaster gap. The cards' cast-scoped farcaster.xyz
-	// anchors retarget to the local waypoint (dead links for an unsigned
-	// author — pinned in the dedicated test below); the profile anchor
-	// stays.
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
-		[`https://shim.artlu.xyz/signed/${FID}`]: {
-			success: true,
-			signed: false,
-		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: REPLIES,
-	});
+	// (quorum, quilcast, firefly, vibeshift) carry no signed rule and stay
+	// — the notice explains the farcaster gap.
+	globalThis.fetch = feedWaypointMock(false);
 	const res = await app.request(`/${USERNAME}/casts-and-replies`);
 	expect(res.status).toBe(200);
 
 	const body = await res.text();
-	// The exact head link is gone (the card links continue with /0x…, so
-	// the trailing-quote substring only matches the head).
 	expect(body).not.toContain('href="https://farcaster.xyz/decent-artlu">');
 	expect(body).not.toContain(">Open on Farcaster</a>");
 	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).toContain("read-only on farcaster.xyz");
-	// The cards themselves are unaffected.
-	expect(body).toContain("first cast");
-});
-
-test("casts-and-replies hides article intermediates; the head renders as an article card", async () => {
-	// An article chain in the timeline: the head (0 of N) is the front page
-	// (cover, title, intro); parts (1 of N+) are filtered before enrichment
-	// so they never fetch and never render. A plain cast stays.
-	const cover =
-		"https://imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/be02c67b/original";
-	const headHash = `0x${"a1".repeat(20)}`;
-	const partHash = `0x${"b2".repeat(20)}`;
-	const plainHash = CAST_HASH;
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
-		[`https://shim.artlu.xyz/signed/${FID}`]: {
-			success: true,
-			signed: true,
-		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: {
-			success: true,
-			casts: [
-				{
-					fid: FID,
-					hash: headHash,
-					text: "My Article\n\nThe opening blurb with **bold**.",
-					timestamp: CAST_TS,
-					embeds: [{ url: cover }],
-					formatVersion: 1,
-					chain: { index: 0, count: 2 },
-				},
-				{
-					fid: FID,
-					hash: partHash,
-					text: "Hidden intermediate part body.",
-					timestamp: CAST_TS - 1,
-					embeds: [],
-					formatVersion: 1,
-					chain: {
-						root: { fid: FID, hash: headHash },
-						index: 1,
-						count: 2,
-					},
-				},
-				{
-					fid: FID,
-					hash: plainHash,
-					text: "a plain cast stays",
-					timestamp: CAST_TS - 2,
-					embeds: [],
-				},
-			],
-		},
-	});
-	const res = await app.request(`/${USERNAME}/casts-and-replies`);
-	expect(res.status).toBe(200);
-	const body = await res.text();
-
-	expect(body).toContain('class="fc-article"');
-	expect(body).toContain("My Article");
-	expect(body).toContain(`src="${cover}"`);
-	expect(body).toContain(`href="/${USERNAME}/${headHash}"`);
-	expect(body).toContain("2-part article");
-	expect(body).toContain("a plain cast stays");
-	// The intermediate never appears — not as a card, not as raw text.
-	expect(body).not.toContain("Hidden intermediate part body.");
-	expect(body).not.toContain(partHash);
-});
-
-test("casts page: every card's farcaster.xyz cast anchors link the forkcaster waypoint", async () => {
-	// Waypoint law for the list: the cast URL the embed stamps on every
-	// card (Show-on-Farcaster icon) and the client-built stats links point
-	// at the local waypoint — it always resolves, while the farcaster.xyz
-	// cast page is dead for a proven-unsigned author and merely off-route
-	// for everyone else. The cards retarget those — and only those — to
-	// the local waypoint; the profile anchor stays (it works unsigned)
-	// and author-typed farcaster.xyz links in cast text are content,
-	// untouched. The signed page below proves signedness is irrelevant
-	// to the cards (it only ever gated the client menu).
-	const withFarcasterBodyLink = {
-		success: true,
-		casts: [
-			{
-				fid: FID,
-				hash: CAST_HASH,
-				text: `see https://farcaster.xyz/${USERNAME}/${CAST_HASH} too`,
-				timestamp: CAST_TS,
-				embeds: [],
-			},
-		],
-	};
-	globalThis.fetch = shimMock({
-		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true, fid: FID },
-		[`https://shim.artlu.xyz/user/${FID}`]: { success: true, user: USER },
-		[`https://shim.artlu.xyz/signed/${FID}`]: {
-			success: true,
-			signed: false,
-		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]:
-			withFarcasterBodyLink,
-	});
-	const res = await app.request(`/${USERNAME}/casts-and-replies`);
-	expect(res.status).toBe(200);
-
-	const body = await res.text();
-	// The icon anchor is retargeted and relabeled (hardenBlankTargets ran
-	// first, hence the rel).
-	expect(body).toContain(
-		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
-	);
-	// The stats slot is flagged; the fill script writes local links there.
-	expect(body).toContain('data-local="1"');
-	// Author content immunity: the typed URL keeps its farcaster.xyz href
-	// (class-scoped rewrite — body links are never touched).
-	expect(body).toContain(
-		`<a href="https://farcaster.xyz/${USERNAME}/${CAST_HASH}" target="_blank" rel="noopener" class="farcaster-embed-body-link">`,
-	);
-
-	// The signed page retargets identically — the waypoint is the honest
-	// cast link on this surface for every author. The bare "data-local"
-	// string ships inside LIVE_STATS_SCRIPT itself, so the attribute form
-	// is the discriminator.
-	globalThis.fetch = repliesMock();
-	const signedBody = await (
-		await app.request(`/${USERNAME}/casts-and-replies`)
-	).text();
-	expect(signedBody).toContain(
-		`<a href="/${USERNAME}/${CAST_HASH}" title="Open on forkcaster" target="_blank" rel="noopener" class="farcaster-embed-farcaster-link">`,
-	);
-	expect(signedBody).toContain('data-local="1"');
+	expect(body).toContain('data-client="quilcast" data-kind="feed"');
 });
 
 test("profile card escapes hostile upstream text (XSS regression)", async () => {
@@ -1019,7 +755,6 @@ test("profile card escapes hostile upstream text (XSS regression)", async () => 
 				pfpUrl: `https://img.test/x" onerror="alert(1)`,
 			},
 		},
-		[`https://shim.artlu.xyz/${USERNAME}/casts-and-replies?limit=10`]: CASTS,
 	});
 	const res = await app.request(`/${USERNAME}`);
 	expect(res.status).toBe(200);
@@ -1127,10 +862,12 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 });
 
 test("casts-and-replies lowercases the username before lookup", async () => {
-	globalThis.fetch = repliesMock();
+	globalThis.fetch = feedWaypointMock();
 	const res = await app.request("/Decent-Artlu/casts-and-replies");
 	expect(res.status).toBe(200);
-	expect(await res.text()).toContain("first cast");
+	const body = await res.text();
+	expect(body).toContain(`href="/decent-artlu">Profile</a>`);
+	expect(body).toContain('data-kind="feed"');
 });
 
 // --- /~/conversations/0x…: canonicalizing redirect (Warpcast legacy shape) ----
@@ -1653,9 +1390,6 @@ const FORK_USER = {
 function forkMisses(): Record<string, unknown | Error> {
 	return {
 		[`https://shim.artlu.xyz/f/${FORK_FID}`]: { success: false },
-		[`https://shim.artlu.xyz/${FORK_FID}/casts-and-replies?limit=10`]: {
-			success: false,
-		},
 	};
 }
 
@@ -1694,7 +1428,7 @@ test("fid-shaped profile URL renders the post-fork entity in place", async () =>
 	expect(body).toContain("hasn't signed the social smart contract");
 });
 
-test("fid-shaped profile JSON twin serves the entity with the honest timeline note", async () => {
+test("fid-shaped profile JSON twin serves the entity identity-only", async () => {
 	globalThis.fetch = shimMock({
 		...forkMisses(),
 		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
@@ -1712,13 +1446,12 @@ test("fid-shaped profile JSON twin serves the entity with the honest timeline no
 	expect(body.fid).toBe(FORK_FID);
 	expect(body.username).toBe(`${FORK_FID}`);
 	expect(body.displayName).toBe("2^32");
-	// The timeline endpoint is username-keyed — unavailable, never faked.
-	expect(body.note).toBe("timeline unavailable");
 	expect(body.casts).toBeUndefined();
+	expect("note" in body).toBe(false);
 	expect(body.farcaster).toBe(`https://farcaster.xyz/${FORK_FID}`);
 });
 
-test("fid-shaped casts-and-replies renders the identity head over the unavailable list", async () => {
+test("fid-shaped casts-and-replies renders the identity head as a feed waypoint", async () => {
 	globalThis.fetch = shimMock({
 		...forkMisses(),
 		[`https://shim.artlu.xyz/user/${FORK_FID}`]: {
@@ -1734,7 +1467,9 @@ test("fid-shaped casts-and-replies renders the identity head over the unavailabl
 	expect(res.status).toBe(200);
 	const body = await res.text();
 	expect(body).toContain("2^32");
-	expect(body).toContain("Recent casts are unavailable right now.");
+	expect(body).toContain('data-kind="feed"');
+	expect(body).not.toContain("Recent casts are unavailable");
+	expect(body).not.toContain('class="farcaster-embed');
 });
 
 test("small numeric username stays a plain 404 — the waterfall never fires below the gate", async () => {

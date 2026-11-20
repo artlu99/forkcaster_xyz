@@ -557,11 +557,11 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	}
 	// Resolve once, render twice — same negotiation as the cast route:
 	// ?format=json wins over Accept; only strict application/json Accept
-	// also negotiates JSON. The identity-card page skips the timeline call
-	// entirely; the JSON twin keeps serving recent casts. Personalization
-	// is CLIENT-side (SHELL_SCRIPT, kind-aware) — the server is
-	// cookie-blind, which makes the found shell edge-cacheable at 10 min
-	// (profile content is mutable; this TTL is a freshness knob too).
+	// also negotiates JSON. Identity-only on both variants — no timeline.
+	// Personalization is CLIENT-side (SHELL_SCRIPT, kind-aware) — the
+	// server is cookie-blind, which makes the found shell edge-cacheable
+	// at 10 min (profile content is mutable; this TTL is a freshness
+	// knob too).
 	const wantsJson = negotiatesJson(c);
 	const shellKey = shellRequestEligible({ wantsJson })
 		? shellCacheKey(new URL(c.req.url))
@@ -574,7 +574,6 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		? undefined
 		: chromeFor(new URL(c.req.url).hostname);
 	let resolved = await resolveProfile(username, {
-		timeline: wantsJson,
 		// The ban signal gates the way out: unsigned ⇒ Quorum/Quilcast pills.
 		signed: true,
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
@@ -589,7 +588,6 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		const fid = numericFidCandidate(username);
 		if (fid !== undefined) {
 			const viaFid = await resolveProfileFid(fid, {
-				timeline: wantsJson,
 				signed: true,
 				potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 			});
@@ -600,7 +598,6 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		const { status, body, retryAfter } = renderProfileJson(
 			resolved,
 			username,
-			new URL(c.req.url).origin,
 		);
 		return c.json(
 			body,
@@ -642,25 +639,19 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	return res;
 });
 
-// The casts page (/{username}/casts-and-replies): the ONE list surface —
-// every cast rendered in full through the individual cast page's pipeline
-// (embed SSR + unfurl + quote hydration + per-card live-stats slot), with
-// the profile's OG preview. Article chains: the head renders as the
-// article's front page and the intermediates (1 of N and up) are filtered
-// out of the list (they keep their own cast pages and OG previews — deep
-// links into a part still resolve). Patterns are disjoint from the
-// 0x-hashed cast route above; the /f verdict and fail-soft timeline match
-// the profile.
+// The casts page (/{username}/casts-and-replies): feed waypoint — identity
+// head + kind:"feed" menu, no cast list. Skips the timeline fleet race
+// (same dial as the profile HTML path); the JSON twin is the only surface
+// that still fetches recent casts. Patterns are disjoint from the
+// 0x-hashed cast route above; the /f verdict matches the profile.
 app.get("/:username/casts-and-replies", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {
 		return c.body(null, 404);
 	}
-	// The heaviest render in the family (embed SSR + unfurl + quote
-	// hydration per card) — the biggest shell-cache win. Personalization
+	// Identity-only render (no timeline, no embed pipeline). Personalization
 	// is CLIENT-side (SHELL_SCRIPT, kind "feed"); the server is
-	// cookie-blind. 10 min TTL like profiles (this page shows mutable
-	// casts... and mutable authorship context).
+	// cookie-blind. 10 min TTL like profiles (mutable authorship context).
 	const shellKey = shellRequestEligible({ wantsJson: false })
 		? shellCacheKey(new URL(c.req.url))
 		: undefined;
@@ -670,21 +661,19 @@ app.get("/:username/casts-and-replies", async (c) => {
 	}
 	const chromeP = chromeFor(new URL(c.req.url).hostname);
 	let resolved = await resolveProfile(username, {
-		timeline: true,
 		// Same ban-signal fork as the profile page: the head's way out
-		// follows the signed state.
+		// follows the signed state. No timeline — feed pills need only
+		// identity vars.
 		signed: true,
 		// Every shim read races the shim-potato fleet when it's configured.
 		potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 	});
 	// Post-hardfork waterfall, same contract as the profile route: the
-	// timeline is username-keyed, so the fid leg renders the identity head
-	// over an honest "unavailable" list — never a fake empty feed.
+	// fid leg renders the identity head in place when /f misses.
 	if (resolved.kind === "not-found") {
 		const fid = numericFidCandidate(username);
 		if (fid !== undefined) {
 			const viaFid = await resolveProfileFid(fid, {
-				timeline: true,
 				signed: true,
 				potatoBases: (c.env as Env | undefined)?.SHIM_POTATO_BASE,
 			});
@@ -695,11 +684,10 @@ app.get("/:username/casts-and-replies", async (c) => {
 		getRankSnapshotSoon(c.env, 400),
 		chromeP,
 	]);
-	const { status, html } = await renderCastsHtml(
+	const { status, html } = renderCastsHtml(
 		resolved,
 		username,
 		(c.env as Env | undefined)?.PRIMARY_ORIGIN,
-		c.env,
 		rank,
 		chrome,
 	);
