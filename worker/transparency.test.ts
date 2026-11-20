@@ -336,9 +336,10 @@ test("capability matrix: registry-driven clients x kinds on HTML", () => {
 	expect(html).toContain(
 		"<td>vibeshift</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td>",
 	);
-	// linkcast: cast only.
+	// linkcast: cast + profile/feed — the merged /u/ surface (Nov 2026);
+	// no channel vocabulary.
 	expect(html).toContain(
-		"<td>linkcast</td><td>✓</td><td>—</td><td>—</td><td>—</td>",
+		"<td>linkcast</td><td>✓</td><td>✓</td><td>✓</td><td>—</td>",
 	);
 	// opencaster: every kind — profile/feed the merged /profile surface,
 	// channel /channel/{id} (Oct 2026).
@@ -370,6 +371,8 @@ test("JSON twin: the clients block lists per-kind coverage", () => {
 	]);
 	expect(json.clients.find((c) => c.id === "linkcast")?.kinds).toEqual([
 		"cast",
+		"profile",
+		"feed",
 	]);
 	expect(json.clients.find((c) => c.id === "quorum")?.kinds).toEqual([
 		"cast",

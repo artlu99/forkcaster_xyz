@@ -496,13 +496,31 @@ export const CLIENTS: ClientDefinition[] = [
 	// appears only on casts that could plausibly exist in Linkcast's feed,
 	// i.e. casts known to carry an external URL embed; if Linkcast ever
 	// reports per-cast ineligibility, the entry already matches it.
-	// Profile route: none (linkcast.xyz/{username} 404s, Oct 2026) —
-	// the product is the links feed, cast-kind only.
+	// Profile + feed — VERIFIED live (Nov 2026): /u/{username} is the
+	// profile route — canonical and og:url self-point at /u/zoo, og:title
+	// "zoo's links · Linkcast", og:description "Links zoo has shared on
+	// Farcaster" — and the page renders the identity head (display name,
+	// @handle, bio, trusted badge, website links), a Top-domains block
+	// with the link-cast count, and the user's link casts: profile and
+	// feed are ONE merged surface (the farcaster.xyz shape), both targets
+	// the same URL. The bare /{username} form still 404s (live, Nov 2026;
+	// it did in Oct 2026 too), so /u/ is the only profile spelling.
+	// requiresSigned stays unset: the known-unsigned author's profile
+	// (linkcast.xyz/u/decent-artlu) renders fully as well — identity,
+	// top domains ("52 link casts"), and their link casts. The surface is
+	// links-only by product (only link casts are counted and listed), but
+	// requiresExternalLinks deliberately does NOT extend to kind routes —
+	// it gates on cast embed data, which no kind route has (see
+	// clientsForRoute). No channel vocabulary exists (web nav is
+	// Latest/Following/Trending/Top/Articles + per-user /u/ + per-domain
+	// /d/). Web-only, as the cast route.
 	{
 		id: "linkcast",
 		title: "Linkcast",
 		logoUrl: "/logos/linkcast.svg",
 		web: "https://linkcast.xyz/cast/{fullHashRaw}",
+		profile: { web: "https://linkcast.xyz/u/{username}" },
+		feed: { web: "https://linkcast.xyz/u/{username}" },
 		requiresExternalLinks: true,
 	},
 	// OpenCaster is Arca Computer's AGPL web client for Hypersnap — the

@@ -664,6 +664,7 @@ test("casts-and-replies is a feed waypoint: menu + OG, no cast list, no timeline
 	expect(body).toContain(`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="feed"`);
 	expect(body).toContain(`class="pill client-pill" href="https://firefly.social/profile/farcaster/${USERNAME}" data-client="firefly" data-kind="feed"`);
 	expect(body).toContain(`class="pill client-pill" href="https://vibeshift.onchain.cooking/?view=profile&amp;profileFid=${FID}&amp;profileTab=casts" data-client="vibeshift" data-kind="feed"`);
+	expect(body).toContain(`class="pill client-pill" href="https://linkcast.xyz/u/${USERNAME}" data-client="linkcast" data-kind="feed"`);
 	// The OG preview is IDENTICAL to the profile's (entity-backed card);
 	// canonical stays on this page's own URL.
 	expect(body).toContain(
@@ -795,6 +796,7 @@ test("signed-check unavailable fails open: Farcaster stays offered", async () =>
 	expect(body).toContain('data-client="quorum" data-kind="profile"');
 	expect(body).toContain('data-client="firefly" data-kind="profile"');
 	expect(body).toContain('data-client="vibeshift" data-kind="profile"');
+	expect(body).toContain('data-client="linkcast" data-kind="profile"');
 	expect(body).toContain('data-client="opencaster" data-kind="profile"');
 	expect(body).toContain('data-client="homiehouse" data-kind="profile"');
 	expect(body).not.toContain("read-only on farcaster.xyz");
@@ -824,7 +826,8 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	// rank snapshot reaches the test env), logos and pointer scopes from
 	// the targets, native attempts through the row's DEEPLINK_SCRIPT.
 	// Registry order: quorum first, firefly second, quilcast third,
-	// vibeshift fourth, opencaster fifth, homiehouse sixth.
+	// vibeshift fourth, linkcast fifth, opencaster sixth, homiehouse
+	// seventh.
 	expect(body).toContain(
 		'class="pill client-pill coarse-only" href="https://www.quorummessenger.com/" data-client="quorum" data-kind="profile" data-intent="intent://feed?profileFid=3319217&amp;profileUsername=decent-artlu#Intent;scheme=quorummobile;package=com.quilibrium.quorummobile;S.browser_fallback_url=https%3A%2F%2Fwww.quorummessenger.com%2F;end" data-scheme="quorummobile://feed?profileFid=3319217&amp;profileUsername=decent-artlu">',
 	);
@@ -836,6 +839,9 @@ test("unsigned profile swaps the Farcaster way out for Quorum + Quilcast", async
 	expect(body).toContain(">Firefly</a>");
 	expect(body).toContain(
 		`class="pill client-pill" href="https://vibeshift.onchain.cooking/?view=profile&amp;profileFid=${FID}&amp;profileTab=casts" data-client="vibeshift" data-kind="profile"`,
+	);
+	expect(body).toContain(
+		`class="pill client-pill" href="https://linkcast.xyz/u/${USERNAME}" data-client="linkcast" data-kind="profile"`,
 	);
 	expect(body).toContain(
 		`class="pill client-pill fine-only" href="https://quilcast.com/u/${USERNAME}" data-client="quilcast" data-kind="profile"`,
@@ -1318,10 +1324,10 @@ test("profile auto-open: client-side — the shell ships the kind-aware mount + 
 test("profile auto-open: an incapable cast slug goes idle client-side — generic copy", async () => {
 	globalThis.fetch = signedTrueMock();
 	const res = await app.request(`/${USERNAME}`, {
-		headers: { Cookie: "fc_client=linkcast|auto-on" },
+		headers: { Cookie: "fc_client=fatline|auto-on" },
 	});
 	const body = await res.text();
-	// linkcast has no profile target: flat inheritance finds nothing ⇒ the
+	// fatline has no profile target: flat inheritance finds nothing ⇒ the
 	// client script renders the generic idle chip into the mount; the
 	// server markup stays silent (no redirect targets, no box, no badge).
 	const markup = withoutScripts(body);
@@ -1330,8 +1336,27 @@ test("profile auto-open: an incapable cast slug goes idle client-side — generi
 	expect(markup).not.toContain('data-auto="on"');
 	// The generic idle copy ships in the script source (Q3: no title map).
 	expect(body).toContain("offered here");
-	expect(body).not.toContain("Linkcast isn&#39;t offered here");
+	expect(body).not.toContain("Fatline isn&#39;t offered here");
 	expect(body).toContain('data-client="farcaster" data-kind="profile"');
+});
+
+test("profile auto-open: a cast slug with a profile target resolves — linkcast", async () => {
+	globalThis.fetch = signedTrueMock();
+	const res = await app.request(`/${USERNAME}`, {
+		headers: { Cookie: "fc_client=linkcast|auto-on" },
+	});
+	const body = await res.text();
+	// linkcast gained profile/feed targets (Nov 2026): the pill ships in
+	// the offered row and the client script resolves the cookie's head
+	// slug against it (the server stays cookie-blind — the stateful layer
+	// is client-side, so the markup still carries no redirect targets).
+	const markup = withoutScripts(body);
+	expect(markup).not.toContain("data-auto-url");
+	expect(markup).not.toContain('data-resolved="');
+	expect(markup).not.toContain('data-auto="on"');
+	expect(body).toContain(
+		`class="pill client-pill" href="https://linkcast.xyz/u/${USERNAME}" data-client="linkcast" data-kind="profile"`,
+	);
 });
 
 test("profile auto-open: ?noredirect=1 rides the shell; the script reads location.search", async () => {
@@ -1356,10 +1381,11 @@ test("unsigned profile: capable kind slugs still offered (the script resolves th
 		headers: { Cookie: "fc_client=linkcast|p:quilcast|auto-on" },
 	});
 	const body = await res.text();
-	// quilcast's profile target is unsigned-friendly; the incapable cast
-	// slug (linkcast) is irrelevant — the kind-aware client decision
-	// resolves p:quilcast against the offered pills, which are
-	// server-gated (farcaster suppressed, quilcast offered).
+	// quilcast's profile target is unsigned-friendly; the kind-aware
+	// client decision resolves p:quilcast — the head slug (linkcast,
+	// itself capable for profiles since Nov 2026) is outranked by the
+	// kind pref — against the offered pills, which are server-gated
+	// (farcaster suppressed, quilcast offered).
 	expect(body).not.toContain('data-client="farcaster"');
 	expect(body).toContain(`href="https://quilcast.com/u/${USERNAME}"`);
 	expect(body).toContain('data-client="quilcast" data-kind="profile"');

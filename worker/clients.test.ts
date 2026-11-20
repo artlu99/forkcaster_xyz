@@ -442,6 +442,16 @@ test("linkcast's web route emits the site-canonical bare hex", () => {
 	expect(html).toContain('src="/logos/linkcast.svg"');
 	expect(html).not.toContain("data-scheme");
 	expect(html).not.toContain("data-intent");
+	// Profile + feed — VERIFIED live (Nov 2026): /u/{username} renders
+	// the identity head + the user's link casts — the merged surface,
+	// both targets the same URL. No channel vocabulary exists.
+	expect(targetFor(linkcast as ClientDefinition, "profile")).toEqual({
+		web: "https://linkcast.xyz/u/{username}",
+	});
+	expect(targetFor(linkcast as ClientDefinition, "feed")).toEqual({
+		web: "https://linkcast.xyz/u/{username}",
+	});
+	expect(targetFor(linkcast as ClientDefinition, "channel")).toBeUndefined();
 });
 
 test("opencaster's cast route is the canonical /cast/{fullHash} share link", () => {
@@ -917,6 +927,7 @@ describe("kind targets", () => {
 			"firefly",
 			"quilcast",
 			"vibeshift",
+			"linkcast",
 			"opencaster",
 			"homiehouse",
 			"terminus",
@@ -931,6 +942,7 @@ describe("kind targets", () => {
 			"firefly",
 			"quilcast",
 			"vibeshift",
+			"linkcast",
 			"opencaster",
 			"homiehouse",
 			"terminus",
@@ -947,10 +959,12 @@ describe("kind targets", () => {
 	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
 		const vars: TemplateVars = { username: "decent-artlu" };
 		// quorum's and vibeshift's profile targets need {fid}; firefly's,
-		// quilcast's, opencaster's, and homiehouse's need only {username}.
+		// quilcast's, linkcast's, opencaster's, and homiehouse's need only
+		// {username}.
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
 			"firefly",
 			"quilcast",
+			"linkcast",
 			"opencaster",
 			"homiehouse",
 			"terminus",
@@ -1047,17 +1061,24 @@ describe("resolveLastUsed — flat inheritance", () => {
 	});
 
 	test("stale/ incapable slugs fall through, then to none", () => {
-		// Own slug linkcast has no profile target (cast-kind only) →
+		// Own slug fatline has no profile target (cast-kind only) →
 		// cast slug quorum still capable.
 		expect(
-			resolveLastUsed({ slug: "quorum", kinds: { profile: "linkcast" } }, "profile", offered)
+			resolveLastUsed({ slug: "quorum", kinds: { profile: "fatline" } }, "profile", offered)
 				?.id,
 		).toBe("quorum");
-		// Neither resolves → undefined (no banner, badgeless menu):
-		// neynar has no profile target (search-page only), and the cast
-		// slug linkcast is incapable for the profile kind.
+		// A stale kind slug falls to a capable cast slug: neynar has no
+		// profile target (search-page only), but linkcast does now (the
+		// merged /u/ surface, Nov 2026).
 		expect(
-			resolveLastUsed({ slug: "linkcast", kinds: { profile: "neynar" } }, "profile", offered),
+			resolveLastUsed({ slug: "linkcast", kinds: { profile: "neynar" } }, "profile", offered)
+				?.id,
+		).toBe("linkcast");
+		// Neither resolves → undefined (no banner, badgeless menu):
+		// neynar has no profile target, and the cast slug fatline is
+		// incapable for the profile kind.
+		expect(
+			resolveLastUsed({ slug: "fatline", kinds: { profile: "neynar" } }, "profile", offered),
 		).toBeUndefined();
 		expect(resolveLastUsed({}, "profile", offered)).toBeUndefined();
 	});
@@ -1088,7 +1109,7 @@ describe("auto-open idle chip", () => {
 
 	test("route mode: an incapable cast slug is named on profile/feed", () => {
 		const { html, script } = autoOpenUi(
-			{ slug: "linkcast", auto: "on" },
+			{ slug: "fatline", auto: "on" },
 			true,
 			{ username: "decent-artlu", fid: 3319217 },
 			false,
@@ -1096,8 +1117,25 @@ describe("auto-open idle chip", () => {
 			{ kind: "profile", noun: "profiles" },
 		);
 		expect(html).toContain('data-auto="idle"');
-		expect(html).toContain("Auto-open: Linkcast isn&#39;t offered here");
+		expect(html).toContain("Auto-open: Fatline isn&#39;t offered here");
 		expect(script).toBeUndefined();
+	});
+
+	test("route mode: a cast slug with a profile target resolves — linkcast on profiles", () => {
+		// linkcast gained profile/feed targets (Nov 2026): flat
+		// inheritance now resolves it on the profile route.
+		const { html } = autoOpenUi(
+			{ slug: "linkcast", auto: "on" },
+			true,
+			{ username: "decent-artlu", fid: 3319217 },
+			false,
+			undefined,
+			{ kind: "profile", noun: "profiles" },
+		);
+		expect(html).toContain(
+			'data-auto-url="https://linkcast.xyz/u/decent-artlu"',
+		);
+		expect(html).toContain('data-auto-noun="profiles"');
 	});
 
 	test("a stale (unknown/suspended) slug names nothing — no chip", () => {
