@@ -170,6 +170,10 @@ export async function putShell(
 	if (!cache) return;
 	try {
 		const headers = new Headers(response.headers);
+		// The CDN directive governs the zone's Cache Rule, not this layer
+		// — layer 2 is governed solely by ttlSeconds below. Strip it so
+		// the stored copy keeps today's exact semantics.
+		headers.delete("cdn-cache-control");
 		headers.set("cache-control", `public, s-maxage=${ttlSeconds}`);
 		headers.set("x-forkcaster-shell", "fill");
 		await cache.put(

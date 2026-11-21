@@ -10,6 +10,7 @@ import {
 	PROFILE_SHELL_TTL_SECONDS,
 	SHELL_SALT,
 	SHELL_TTL_SECONDS,
+	putShell,
 	shellCacheKey,
 	shellRequestEligible,
 	shellWorthCaching,
@@ -19,6 +20,38 @@ describe("shell TTLs", () => {
 	test("profile-family shells share the cast TTL — scraper repeats must not re-fill through shim every 10 min", () => {
 		expect(PROFILE_SHELL_TTL_SECONDS).toBe(SHELL_TTL_SECONDS);
 		expect(PROFILE_SHELL_TTL_SECONDS).toBe(43_200);
+	});
+});
+
+describe("putShell", () => {
+	test("the stored copy drops the CDN directive — layer 2 is governed by ttlSeconds alone", async () => {
+		const stored = new Map<string, Response>();
+		(globalThis as unknown as { caches?: unknown }).caches = {
+			default: {
+				match: async () => undefined,
+				put: async (key: Request, response: Response) => {
+					stored.set(key.url, response);
+				},
+			},
+		};
+		try {
+			const key = new Request("https://forkcaster.xyz/decent-artlu?shell=v11");
+			const response = new Response("<html></html>", {
+				headers: {
+					"content-type": "text/html; charset=utf-8",
+					// What the route sets on the visitor copy for the zone
+					// Cache Rule — must not ride into the layer-2 store.
+					"cdn-cache-control": `public, s-maxage=${PROFILE_SHELL_TTL_SECONDS}`,
+				},
+			});
+			await putShell(key, response, 60);
+			const hit = stored.get(key.url);
+			expect(hit).toBeDefined();
+			expect(hit!.headers.get("cache-control")).toBe("public, s-maxage=60");
+			expect(hit!.headers.get("cdn-cache-control")).toBeNull();
+		} finally {
+			delete (globalThis as unknown as { caches?: unknown }).caches;
+		}
 	});
 });
 

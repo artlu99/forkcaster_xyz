@@ -1532,3 +1532,66 @@ test("/~/profiles/{fid} for a usernameless fid 302s to the fid surface", async (
 	expect(res.status).toBe(302);
 	expect(res.headers.get("location")).toBe(`/${FORK_FID}`);
 });
+
+// --- CDN edge channels (zone Cache Rule coupling) ----------------------------
+//
+// The zone Cache Rule is respect-origin: these headers ARE the edge's
+// cacheability verdict. Fills publish the edge TTL on CDN-Cache-Control
+// while the browser copy stays no-store (visitors pass every click
+// through); everything the gate rejects — 404/503/JSON — vetoes edge
+// caching from the origin side on both channels.
+
+test("profile fill publishes the edge TTL; the browser copy stays no-store", async () => {
+	const res = await app.request(`/${USERNAME}`);
+	expect(res.status).toBe(200);
+	expect(res.headers.get("x-forkcaster-shell")).toBe("fill");
+	expect(res.headers.get("cdn-cache-control")).toBe(
+		"public, s-maxage=43200",
+	);
+	expect(res.headers.get("cache-control")).toBe("no-store");
+});
+
+test("profile gate rejects — 404 and 503 — veto edge caching on both channels", async () => {
+	globalThis.fetch = shimMock({
+		// The miss shape: success with no fid behind it.
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: { success: true },
+	});
+	const miss = await app.request(`/${USERNAME}`);
+	expect(miss.status).toBe(404);
+	expect(miss.headers.get("cdn-cache-control")).toBe("no-store");
+	expect(miss.headers.get("cache-control")).toBe("no-store");
+
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: new Error("shim unavailable"),
+	});
+	const down = await app.request(`/${USERNAME}`);
+	expect(down.status).toBe(503);
+	expect(down.headers.get("cdn-cache-control")).toBe("no-store");
+	expect(down.headers.get("cache-control")).toBe("no-store");
+});
+
+test("profile JSON variant vetoes edge caching at the origin (the rule also excludes it by query and Accept)", async () => {
+	const res = await app.request(`/${USERNAME}?format=json`);
+	expect(res.status).toBe(200);
+	expect(res.headers.get("cdn-cache-control")).toBe("no-store");
+	expect(res.headers.get("cache-control")).toBe("no-store");
+});
+
+test("feed waypoint fill publishes the edge TTL; its 503 vetoes it", async () => {
+	globalThis.fetch = feedWaypointMock();
+	const fill = await app.request(`/${USERNAME}/casts-and-replies`);
+	expect(fill.status).toBe(200);
+	expect(fill.headers.get("x-forkcaster-shell")).toBe("fill");
+	expect(fill.headers.get("cdn-cache-control")).toBe(
+		"public, s-maxage=43200",
+	);
+	expect(fill.headers.get("cache-control")).toBe("no-store");
+
+	globalThis.fetch = shimMock({
+		[`https://shim.artlu.xyz/f/${USERNAME}`]: new Error("shim unavailable"),
+	});
+	const down = await app.request(`/${USERNAME}/casts-and-replies`);
+	expect(down.status).toBe(503);
+	expect(down.headers.get("cdn-cache-control")).toBe("no-store");
+	expect(down.headers.get("cache-control")).toBe("no-store");
+});

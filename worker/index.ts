@@ -550,10 +550,25 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}/casts-and-replies/", (c) => {
 	return c.redirect(`/${username}/casts-and-replies${search}`, 301);
 });
 
+/**
+ * Origin-side edge-cache veto, paired with the zone Cache Rule (Caching →
+ * Cache Rules): cacheable responses publish their edge TTL via
+ * CDN-Cache-Control while the browser copy stays no-store (visitors pass
+ * every click through); everything the shell gate rejects — 404/503/JSON
+ * — sends no-store on both channels so respect-origin edge caching can
+ * never hold it, and negative caching stays impossible at either layer.
+ * The rule's expression also excludes JSON variants by query and Accept;
+ * these headers are the origin-side backstop if a rule ever mis-scopes.
+ */
+const NO_EDGE_CACHE = {
+	"cache-control": "no-store",
+	"cdn-cache-control": "no-store",
+} as const;
+
 app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {
-		return c.body(null, 404);
+		return c.body(null, 404, NO_EDGE_CACHE);
 	}
 	// Resolve once, render twice — same negotiation as the cast route:
 	// ?format=json wins over Accept; only strict application/json Accept
@@ -603,7 +618,10 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		return c.json(
 			body,
 			status,
-			retryAfter ? { "retry-after": retryAfter } : undefined,
+			{
+				...NO_EDGE_CACHE,
+				...(retryAfter ? { "retry-after": retryAfter } : undefined),
+			},
 		);
 	}
 	// Pill order rides the rank snapshot through a per-isolate TTL store.
@@ -628,14 +646,28 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	// The gate: found profiles only — 404/503 pass through uncached
 	// (negative caching would rebuild the SPOF in disguise). 12h TTL —
 	// same as casts; see PROFILE_SHELL_TTL_SECONDS.
+	//
+	// Edge channels: the fill publishes its CDN TTL (the zone Cache Rule
+	// is respect-origin, so this header IS the edge cacheability verdict)
+	// while the browser copy stays no-store — the same contract the
+	// Workers-Cache hit path enforces in getShell, now explicit at the
+	// origin. putShell strips the CDN directive from the layer-2 copy.
 	if (shellKey && shellWorthCaching({ status, kind: resolved.kind, partial: false })) {
 		res.headers.set("x-forkcaster-shell", "fill");
+		res.headers.set("Cache-Control", NO_EDGE_CACHE["cache-control"]);
+		res.headers.set(
+			"CDN-Cache-Control",
+			`public, s-maxage=${PROFILE_SHELL_TTL_SECONDS}`,
+		);
 		const put = putShell(shellKey, res.clone(), PROFILE_SHELL_TTL_SECONDS);
 		try {
 			c.executionCtx.waitUntil(put);
 		} catch {
 			await put;
 		}
+	} else {
+		res.headers.set("Cache-Control", NO_EDGE_CACHE["cache-control"]);
+		res.headers.set("CDN-Cache-Control", NO_EDGE_CACHE["cdn-cache-control"]);
 	}
 	return res;
 });
@@ -648,7 +680,7 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 app.get("/:username/casts-and-replies", async (c) => {
 	const username = gateProfileUsername(c.req.param().username);
 	if (username === null) {
-		return c.body(null, 404);
+		return c.body(null, 404, NO_EDGE_CACHE);
 	}
 	// Identity-only render (no timeline, no embed pipeline). Personalization
 	// is CLIENT-side (SHELL_SCRIPT, kind "feed"); the server is
@@ -701,12 +733,20 @@ app.get("/:username/casts-and-replies", async (c) => {
 	);
 	if (shellKey && shellWorthCaching({ status, kind: resolved.kind, partial: false })) {
 		res.headers.set("x-forkcaster-shell", "fill");
+		res.headers.set("Cache-Control", NO_EDGE_CACHE["cache-control"]);
+		res.headers.set(
+			"CDN-Cache-Control",
+			`public, s-maxage=${PROFILE_SHELL_TTL_SECONDS}`,
+		);
 		const put = putShell(shellKey, res.clone(), PROFILE_SHELL_TTL_SECONDS);
 		try {
 			c.executionCtx.waitUntil(put);
 		} catch {
 			await put;
 		}
+	} else {
+		res.headers.set("Cache-Control", NO_EDGE_CACHE["cache-control"]);
+		res.headers.set("CDN-Cache-Control", NO_EDGE_CACHE["cdn-cache-control"]);
 	}
 	return res;
 });

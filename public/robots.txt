@@ -1,0 +1,57 @@
+# forkcaster.xyz / warpcats.com
+# Link-preview bots and search engines are the product — always welcome,
+# no directive needed (absence = allowed).
+#
+# AI-training crawlers are not welcome: every URL costs the origin a
+# resolve, and the public identity/cast data they want is already free
+# via /api/ — no re-crawl required. Polite crawlers honor this file;
+# impolite ones are handled at the edge (AI Scraping Protection).
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: Perplexity-User
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+# Everyone else — preview bots, search engines, clients — unrestricted.
+User-agent: *
+Disallow:
