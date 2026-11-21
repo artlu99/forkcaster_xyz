@@ -727,6 +727,46 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/fatline.svg",
 		web: "https://fatline.ink/c/{username}/{fullHash}",
 	},
+	// GenyCaster is Genyleap's native, local-first Farcaster client (GPL-3.0,
+	// github.com/genyleap/genycaster) — one Qt Quick codebase for macOS,
+	// Windows, Linux, Android and the WebAssembly build served at
+	// genycaster.xyz. Per-cast format SOURCE-VERIFIED against the
+	// open-source client (src/presentation/qt/presentation_bridge.cpp):
+	// castShareUrl() emits <origin>?cast=<hash> with shareHash() accepting
+	// ONLY the full 0x+40-hex form (trimmed, lowercased) — hence {fullHash}
+	// — and openSharedLink() parses the same shape back on the deployment
+	// origin (path "/" or "/farcaster_client.html", "cast" query key) onto
+	// openCast(hash); ui/app/main.cpp's WASM link poll (750 ms) feeds
+	// window.location.href through openSharedLink once the runtime is
+	// ready, so the URL is the client's own first-party route both as the
+	// share-sheet target and the incoming-link handler. LIVE RENDER
+	// UNVERIFIED — OWNER DIRECTION (Nov 2026): the deployed app (v1.0.0,
+	// build 5c25ce2f) boots and renders logged out, but gates ALL cast
+	// surfaces behind a signed-in OpenProof account — dispatchIncomingLink
+	// defers while initialSetupRequired() is true and that gate demands an
+	// authenticated account fid ("Persisting consent and onboarding never
+	// grants anonymous feed access"; the "Continue as guest" strings are
+	// dead i18n, removed from the UI) — so a headless check reached only
+	// the welcome screen, and the owner approved the entry on the source
+	// evidence above. Known consequence: a signed-out visitor who clicks
+	// the pill lands on GenyCaster's onboarding — the client's own account
+	// gate, not a URL-format gap; signed-in users get the cast thread.
+	// No native scheme: the Android manifest (com.genyleap.genycaster)
+	// registers only a MAIN/LAUNCHER filter — no custom scheme, no
+	// https/autoVerify, no assetlinks vocabulary — and no iOS target ships.
+	// No signed rule: protocol reads ride HyperSnap/Snapchain nodes with
+	// no social-contract check in the client (the OpenProof account service
+	// is product identity, not a Farcaster signer gate). Not links-only: a
+	// general client. Kind targets withheld: profileShareUrl()
+	// (?profile={fid}) rides the same signed-in surface — enter it only
+	// with owner verification; no username-keyed profile or channel
+	// vocabulary exists anywhere in the share/parse code.
+	{
+		id: "genycaster",
+		title: "GenyCaster",
+		logoUrl: "/logos/genycaster.svg",
+		web: "https://genycaster.xyz/?cast={fullHash}",
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>

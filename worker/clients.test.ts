@@ -194,6 +194,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"genycaster",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -208,6 +209,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"genycaster",
 		]);
 	});
 
@@ -233,6 +235,7 @@ describe("clientsForPage", () => {
 			"homiehouse",
 			"terminus",
 			"fatline",
+			"genycaster",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -511,6 +514,30 @@ test("fatline's cast route is the /c/ page the SPA router matches", () => {
 	expect(html).not.toContain("data-intent");
 });
 
+test("genycaster's cast route is the ?cast= URL its own share sheet emits", () => {
+	const genycaster = findClient("genycaster");
+	expect(genycaster).toBeDefined();
+	// Source-verified against the open-source client (presentation_bridge.cpp:
+	// castShareUrl emits <origin>?cast=<0x+40 hex>; openSharedLink parses the
+	// same shape on the deployment origin; main.cpp's WASM link poll
+	// dispatches it). Live render sits behind the app's own sign-in gate —
+	// entered on owner direction (the registry comment has the trail).
+	// Web-only: no scheme, no androidPackage, so no native attributes ship.
+	const html = clientPill(genycaster as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://genycaster.xyz/?cast=0x895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="genycaster"');
+	expect(html).toContain('src="/logos/genycaster.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+	// No kind targets: the ?profile={fid} surface is the same signed-in
+	// gate — withheld until owner-verified; no channel vocabulary exists.
+	expect(targetFor(genycaster as ClientDefinition, "profile")).toBeUndefined();
+	expect(targetFor(genycaster as ClientDefinition, "feed")).toBeUndefined();
+	expect(targetFor(genycaster as ClientDefinition, "channel")).toBeUndefined();
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -652,6 +679,7 @@ describe("external-link gate", () => {
 			"homiehouse.app",
 			"app.onterminus.com",
 			"fatline.ink",
+			"genycaster.xyz",
 		]);
 	});
 });
