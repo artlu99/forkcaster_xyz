@@ -560,8 +560,9 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 	// also negotiates JSON. Identity-only on both variants — no timeline.
 	// Personalization is CLIENT-side (SHELL_SCRIPT, kind-aware) — the
 	// server is cookie-blind, which makes the found shell edge-cacheable
-	// at 10 min (profile content is mutable; this TTL is a freshness
-	// knob too).
+	// at the cast TTL (PROFILE_SHELL_TTL_SECONDS = 12h). Scrapers dominate
+	// this route; a short TTL re-filled shim on every re-crawl. Identity
+	// mutability is the freshness tradeoff — SHELL_SALT purges on deploy.
 	const wantsJson = negotiatesJson(c);
 	const shellKey = shellRequestEligible({ wantsJson })
 		? shellCacheKey(new URL(c.req.url))
@@ -625,8 +626,8 @@ app.get("/:username{[a-zA-Z0-9._-]{1,20}}", async (c) => {
 		status === 503 ? { "retry-after": "60" } : undefined,
 	);
 	// The gate: found profiles only — 404/503 pass through uncached
-	// (negative caching would rebuild the SPOF in disguise). 10 min TTL:
-	// profile content is mutable, so this is a freshness knob too.
+	// (negative caching would rebuild the SPOF in disguise). 12h TTL —
+	// same as casts; see PROFILE_SHELL_TTL_SECONDS.
 	if (shellKey && shellWorthCaching({ status, kind: resolved.kind, partial: false })) {
 		res.headers.set("x-forkcaster-shell", "fill");
 		const put = putShell(shellKey, res.clone(), PROFILE_SHELL_TTL_SECONDS);
@@ -651,7 +652,9 @@ app.get("/:username/casts-and-replies", async (c) => {
 	}
 	// Identity-only render (no timeline, no embed pipeline). Personalization
 	// is CLIENT-side (SHELL_SCRIPT, kind "feed"); the server is
-	// cookie-blind. 10 min TTL like profiles (mutable authorship context).
+	// cookie-blind. 12h TTL like profiles (PROFILE_SHELL_TTL_SECONDS) —
+	// this was the scraper timeline amplifier; empty list + long shell
+	// keeps repeats off shim.
 	const shellKey = shellRequestEligible({ wantsJson: false })
 		? shellCacheKey(new URL(c.req.url))
 		: undefined;

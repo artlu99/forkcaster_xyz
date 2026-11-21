@@ -7,11 +7,20 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+	PROFILE_SHELL_TTL_SECONDS,
 	SHELL_SALT,
+	SHELL_TTL_SECONDS,
 	shellCacheKey,
 	shellRequestEligible,
 	shellWorthCaching,
 } from "./edge-cache.ts";
+
+describe("shell TTLs", () => {
+	test("profile-family shells share the cast TTL — scraper repeats must not re-fill through shim every 10 min", () => {
+		expect(PROFILE_SHELL_TTL_SECONDS).toBe(SHELL_TTL_SECONDS);
+		expect(PROFILE_SHELL_TTL_SECONDS).toBe(43_200);
+	});
+});
 
 describe("shellRequestEligible", () => {
 	test("an HTML request is eligible — cookie-holders included (personalization is client-side)", () => {

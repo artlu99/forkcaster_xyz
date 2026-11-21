@@ -18,21 +18,34 @@
 // the server-rendered personalized page (badge / auto-open / pill order)
 // exactly as before — today that means a pass-through; when personalization
 // moves client-side, cookie-holders join the cache with their badge
-// applied after paint. TTL: 12h (s-maxage=43200) — cast content is
-// immutable, so TTL is a hit-rate knob (global click tails run on
-// timezone offsets), not a freshness knob. SHELL_SALT is the manual purge:
-// bump it when a deploy fixes a render/script bug that cached shells must
-// pick up (asset URLs in the shell are static paths and self-heal on
-// deploy; inline scripts do not).
+// applied after paint. TTL: 12h (s-maxage=43200) for casts and for the
+// profile family (identity-only shells). Cast content is immutable, so
+// TTL is a hit-rate knob (global click tails run on timezone offsets),
+// not a freshness knob. Profile/feed shells used to sit at 10 min for
+// freshness; scraper-dominated re-crawls made that a shim re-fill tax,
+// so they share the cast TTL — SHELL_SALT remains the manual purge when
+// a deploy fixes a render/script bug that cached shells must pick up
+// (asset URLs in the shell are static paths and self-heal on deploy;
+// inline scripts do not).
 
 /** Edge TTL for a cast shell: 12h — covers the global, timezone-staggered
  * click tail of a share. The only knob, since casts are immutable. */
 export const SHELL_TTL_SECONDS = 43_200;
 
-/** Edge TTL for profile-family shells: 10 min — profiles are MUTABLE
- * (bio/pfp/signed flip) and their owners check their own pages, so this
- * is a freshness knob AND a hit-rate knob. */
-export const PROFILE_SHELL_TTL_SECONDS = 600;
+/** Edge TTL for profile-family shells (profile + casts-and-replies feed
+ * waypoint). Same 12h as casts.
+ *
+ * History: 10 min was a freshness knob (bio/pfp/signed flip; owners check
+ * their own pages). Traffic is now scraper-dominated — AE shows a steady
+ * ~100 cast-resolves/min on forkcaster.xyz walking mostly bot profiles —
+ * and a 10 min TTL meant every re-crawl re-filled through shim. Profile
+ * and feed shells are identity-only and cookie-blind (personalization is
+ * client-side), so the shared Workers Cache key can sit for the cast TTL
+ * without baking per-visitor bytes. Freshness for real owners is the
+ * tradeoff; SHELL_SALT remains the manual purge when a deploy must drop
+ * every shell at once. Unique-URL sprays still cold-miss once per colo
+ * per URL; repeats within the window never reach shim. */
+export const PROFILE_SHELL_TTL_SECONDS = SHELL_TTL_SECONDS;
 
 /** Cache-key salt — the invalidation tool. Bump to drop every shell at
  * once (there is no global purge for the Workers Cache API). v2: purges
@@ -109,7 +122,8 @@ export function shellWorthCaching(outcome: ShellOutcome): boolean {
  * ?format=json, …) never fork keys — a link shared through any parameter-
  * adding surface hits the one shell. The salt rides as a query so distinct
  * salt eras never collide.
- */export function shellCacheKey(url: URL): Request {
+ */
+export function shellCacheKey(url: URL): Request {
 	return new Request(`${url.origin}${url.pathname}?shell=${SHELL_SALT}`);
 }
 
