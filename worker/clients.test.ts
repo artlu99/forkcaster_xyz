@@ -195,6 +195,7 @@ describe("clientsForPage", () => {
 			"terminus",
 			"fatline",
 			"genycaster",
+			"renegade",
 		]);
 		// With the fid satisfied, the full roster is offered.
 		const withFid = clientsForPage(true, VARS).map((c) => c.id);
@@ -210,6 +211,7 @@ describe("clientsForPage", () => {
 			"terminus",
 			"fatline",
 			"genycaster",
+			"renegade",
 		]);
 	});
 
@@ -236,6 +238,7 @@ describe("clientsForPage", () => {
 			"terminus",
 			"fatline",
 			"genycaster",
+			"renegade",
 		]);
 		for (const client of CLIENTS) {
 			expect(client.web).toBeDefined();
@@ -538,6 +541,35 @@ test("genycaster's cast route is the ?cast= URL its own share sheet emits", () =
 	expect(targetFor(genycaster as ClientDefinition, "channel")).toBeUndefined();
 });
 
+test("renegade's cast route is the bare-hex /{username}/{hash} its share links emit", () => {
+	const renegade = findClient("renegade");
+	expect(renegade).toBeDefined();
+	// Verified in the production bundle (22 Nov 2026): the router is
+	// :username/:hash and the link builder emits the hash as Hypersnap
+	// stores it — bare 40-hex, no 0x. The 0x form also renders; the short
+	// form 404s. Web-only (SPA catch-all for assetlinks/AASA, no scheme),
+	// so no native data attributes ship.
+	const html = clientPill(renegade as ClientDefinition, VARS, false);
+	expect(html).toContain(
+		'href="https://www.hyperenegade.xyz/zoo/895ecc7415208bfb6105a8cb675f391f19cb9e2c"',
+	);
+	expect(html).toContain('data-client="renegade"');
+	expect(html).toContain('src="/logos/renegade.svg"');
+	expect(html).not.toContain("data-scheme");
+	expect(html).not.toContain("data-intent");
+	// Profile + feed — /{username}, the Posts tab is the cast list
+	// (merged surface). Channel — /~/channel/{channelId}.
+	expect(targetFor(renegade as ClientDefinition, "profile")).toEqual({
+		web: "https://www.hyperenegade.xyz/{username}",
+	});
+	expect(targetFor(renegade as ClientDefinition, "feed")).toEqual({
+		web: "https://www.hyperenegade.xyz/{username}",
+	});
+	expect(targetFor(renegade as ClientDefinition, "channel")).toEqual({
+		web: "https://www.hyperenegade.xyz/~/channel/{channelId}",
+	});
+});
+
 // Registry guardrails — data-only registry edits (the common change) must
 // fail here rather than fail agents/pills at runtime (registry change vectors).
 describe("registry guardrails", () => {
@@ -680,6 +712,7 @@ describe("external-link gate", () => {
 			"app.onterminus.com",
 			"fatline.ink",
 			"genycaster.xyz",
+			"hyperenegade.xyz",
 		]);
 	});
 });
@@ -935,6 +968,7 @@ describe("kind targets", () => {
 			"vibeshift",
 			"opencaster",
 			"terminus",
+			"renegade",
 		]);
 		// Channels run no /signed check — every state must fail open.
 		expect(clientsForRoute("channel", vars, null).map((c) => c.id)).toEqual([
@@ -945,6 +979,7 @@ describe("kind targets", () => {
 			"vibeshift",
 			"opencaster",
 			"terminus",
+			"renegade",
 		]);
 	});
 
@@ -959,6 +994,7 @@ describe("kind targets", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"renegade",
 		]);
 	});
 
@@ -974,6 +1010,7 @@ describe("kind targets", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"renegade",
 		];
 		expect(clientsForRoute("profile", vars, true).map((c) => c.id)).toEqual(
 			expected,
@@ -987,8 +1024,8 @@ describe("kind targets", () => {
 	test("clientsForRoute: missingVars gate — fid-less vars skip quorum's profile target", () => {
 		const vars: TemplateVars = { username: "decent-artlu" };
 		// quorum's and vibeshift's profile targets need {fid}; firefly's,
-		// quilcast's, linkcast's, opencaster's, and homiehouse's need only
-		// {username}.
+		// quilcast's, linkcast's, opencaster's, homiehouse's, terminus's,
+		// and renegade's need only {username}.
 		expect(clientsForRoute("profile", vars, false).map((c) => c.id)).toEqual([
 			"firefly",
 			"quilcast",
@@ -996,6 +1033,7 @@ describe("kind targets", () => {
 			"opencaster",
 			"homiehouse",
 			"terminus",
+			"renegade",
 		]);
 	});
 

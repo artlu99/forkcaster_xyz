@@ -521,6 +521,13 @@ test("GET /:username/:hash renders the registry-driven client action row", async
 	// (0x optional) — emitted BARE, no 0x, matching the client's internal
 	// lowercase-hex lookups.
 	expect(body).toContain(`href="https://quilcast.com/c/${FULL_HASH.slice(2)}"`);
+	// Renegade: /{username}/{bare 40-hex}, the spelling its own share
+	// links emit. Web-only, so no data-scheme.
+	expect(body).toContain('data-client="renegade"');
+	expect(body).toContain(
+		`href="https://www.hyperenegade.xyz/zoo/${FULL_HASH.slice(2)}"`,
+	);
+	expect(body).toContain("/logos/renegade.svg");
 	// Farcaster ships the only native scheme — verified against the
 	// open-source app (farcasterxyz/client): scheme paths mirror the web
 	// path, /{username}/{fullHash}. Web href stays canonical; scheme +

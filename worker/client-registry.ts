@@ -767,6 +767,55 @@ export const CLIENTS: ClientDefinition[] = [
 		logoUrl: "/logos/genycaster.svg",
 		web: "https://genycaster.xyz/?cast={fullHash}",
 	},
+	// Renegade (www.hyperenegade.xyz) is an independent Hypersnap client, a
+	// logged-out-readable PWA ("An independent client for the open Hypersnap
+	// network"). No public source repo turned up; verified against the
+	// production bundle served 22 Nov 2026 (/assets/index-CNnMC0Lj.js) and
+	// live renders the same day.
+	// Per-cast: the router registers :username/:hash onto the conversation
+	// screen, which passes the hash param straight through to
+	// GET haatz.quilibrium.com/v2/farcaster/cast/conversation?type=hash.
+	// The app's own link builder is
+	// cast:(username, hash) => `/${encodeURIComponent(username)}/${hash}`,
+	// and Hypersnap stores hashes as bare 40-hex (no 0x) — parent fetches
+	// in the live session used that spelling — so the template emits
+	// {fullHashRaw}. The 0x-prefixed full form also renders (the API
+	// accepts both). The SHORT form does not: /zoo/0x895ecc74's conversation
+	// request 404s ("Cast not found") and the page never shows the cast.
+	// Username is path-only; the lookup is hash-keyed. Apex
+	// hyperenegade.xyz 308s to www, so the template uses www.
+	// LIVE (22 Nov 2026, logged out): both
+	// /zoo/895ecc7415208bfb6105a8cb675f391f19cb9e2c and the 0x form render
+	// zoo's cast ("omg so relevant!", thread parents, image embeds).
+	// No signed rule: the known-unsigned author's cast
+	// (decent-artlu/0xbb54368f, "things humans say when faced with
+	// despotism") renders, and /decent-artlu renders the profile
+	// ("Bass Ackwards.", FID 3319217) plus the Posts list. Not links-only:
+	// kenny/0xa26d1f38 renders with its x.com card, and that link-less
+	// unsigned cast renders too. WEB-ONLY: the bundle has no custom scheme
+	// (only http/https), and both /.well-known/assetlinks.json and
+	// apple-app-site-association serve the SPA shell. A PWA manifest is
+	// the only install surface.
+	// Profile + feed — VERIFIED (same bundle + live): /:username loads the
+	// user and a feed whose default Posts tab keeps top-level casts
+	// (!parent_hash); replies are one tab away (the quilcast shape). Live:
+	// /zoo shows the bio, FID 10215, and the Posts list. Same URL for both
+	// kinds. The unsigned profile renders fully, so no signed gate.
+	// Channel — VERIFIED: ~/channel/:channelId loads the channel by id and
+	// feed/channels. Live: /~/channel/farcaster renders /farcaster, the
+	// member count, and a cast feed; an unknown id answers "Channel not
+	// found" with no casts. Availability rides the Hypersnap node
+	// (haatz.quilibrium.com) — a cast the node doesn't hold won't render,
+	// whatever the URL.
+	{
+		id: "renegade",
+		title: "Renegade",
+		logoUrl: "/logos/renegade.svg",
+		web: "https://www.hyperenegade.xyz/{username}/{fullHashRaw}",
+		profile: { web: "https://www.hyperenegade.xyz/{username}" },
+		feed: { web: "https://www.hyperenegade.xyz/{username}" },
+		channel: { web: "https://www.hyperenegade.xyz/~/channel/{channelId}" },
+	},
 ];
 
 const isActive = (client: ClientDefinition): boolean =>
