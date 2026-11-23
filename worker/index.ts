@@ -28,6 +28,7 @@ import {
 } from "./clients.ts";
 import { getRankSnapshot, getRankSnapshotSoon } from "./client-rank-store.ts";
 import { mcpLandingHtml, mcpHandlerFor } from "./mcp.ts";
+import { MCP_BODY_PREFIX, noteMcpUse, readBodyPrefix } from "./mcp-use.ts";
 import {
 	renderCastsHtml,
 	renderProfileHtml,
@@ -131,17 +132,33 @@ app.post("/t", async (c) => {
 // parametric cast route; cast URLs are always two-segment, so a Farcaster
 // user literally named "transparency" is unaffected (/transparency/0x…
 // still routes to the cast handler).
-app.post("/mcp", (c) =>
-	mcpHandlerFor((c.env as Env | undefined)?.SHIM_POTATO_BASE).fetch(
-		c.req.raw,
-	));
+app.post("/mcp", (c) => {
+	// Clone before the handler reads the body. The prefix is only used to
+	// tell a get_cast_link call from a handshake; arguments are not kept.
+	const raw = c.req.raw;
+	let prefix: Promise<string> = Promise.resolve("");
+	try {
+		// Skip the clone when the binding is absent (tests, bare deploys).
+		if (c.env?.MCP_USE) prefix = readBodyPrefix(raw.clone(), MCP_BODY_PREFIX);
+	} catch {
+		prefix = Promise.resolve("");
+	}
+	noteMcpUse(c, "POST", prefix);
+	return mcpHandlerFor((c.env as Env | undefined)?.SHIM_POTATO_BASE).fetch(
+		raw,
+	);
+});
 app.get("/mcp", async (c) => {
 	// MCP clients probe GET for a server-initiated SSE stream (explicit
 	// text/event-stream accept) — answer with protocol semantics. Browsers
 	// and link crawlers get a shareable OG-tagged server card instead.
+	// Both shapes are a `no` on the use counter (a page view is not a
+	// tool call). The write is best-effort and does not change the answer.
 	if ((c.req.header("Accept") ?? "").includes("text/event-stream")) {
+		noteMcpUse(c, "GET", "");
 		return c.body(null, 405, { Allow: "POST" });
 	}
+	noteMcpUse(c, "GET", "");
 	const chrome = await chromeFor(new URL(c.req.url).hostname);
 	return c.html(mcpLandingHtml(chrome));
 });

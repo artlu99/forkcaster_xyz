@@ -474,6 +474,16 @@ test("JSON twin: fidRace live with the open source record; coming-soon with null
 	expect(dry.fidRace.sources).toEqual({});
 });
 
+test("JSON twin: the tracking counters declare the MCP yes/no", () => {
+	const json = transparencyJson() as {
+		tracking: { counters: { mcpUse: string } };
+	};
+	expect(json.tracking.counters.mcpUse).toContain("get_cast_link");
+	expect(json.tracking.counters.mcpUse).toContain("No cast IDs");
+	expect(json.tracking.counters.mcpUse).toContain("site name");
+	expect(renderTransparencyHtml()).toContain("cast-link tool");
+});
+
 test("JSON twin: the tracking counters declare the fid-race datapoint", () => {
 	const json = transparencyJson(SNAPSHOT, RANK, FID) as {
 		tracking: { counters: { fidRace: string } };

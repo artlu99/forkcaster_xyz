@@ -1363,6 +1363,96 @@ test("GET /mcp: server card for browsers, 405 for SSE probes", async () => {
 	expect(sse.headers.get("allow")).toBe("POST");
 });
 
+test("MCP use counter: yes only for a non-bot get_cast_link call", async () => {
+	const calls: DataPoint[] = [];
+	const { ctx, waited } = trackCtx();
+	const env = {
+		MCP_USE: {
+			writeDataPoint: (dp: DataPoint) => {
+				calls.push(dp);
+			},
+		},
+	} as unknown as Env;
+	// The file mock throws on unknown shim URLs. A fast miss keeps the
+	// tool call from hanging; the counter only looks at the request.
+	globalThis.fetch = mock(async () => Response.json({ success: false })) as typeof fetch;
+	const hash = `0x${"ab".repeat(20)}`;
+	const headers = {
+		"content-type": "application/json",
+		accept: "application/json, text/event-stream",
+	};
+	const call = await app.request(
+		"/mcp",
+		{
+			method: "POST",
+			headers: { ...headers, "user-agent": "node" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "get_cast_link", arguments: { hash } },
+			}),
+		},
+		env,
+		ctx,
+	);
+	expect(call.status).toBe(200);
+	const probe = await app.request(
+		"/mcp",
+		{
+			method: "POST",
+			headers: {
+				...headers,
+				"user-agent": "mcpbeat/0.1 (+https://mcpbeat.com/bot/; liveness check)",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "get_cast_link", arguments: { hash } },
+			}),
+		},
+		env,
+		ctx,
+	);
+	expect(probe.status).toBe(200);
+	const handshake = await app.request(
+		"/mcp",
+		{
+			method: "POST",
+			headers: { ...headers, "user-agent": "node" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "t", version: "0" },
+				},
+			}),
+		},
+		env,
+		ctx,
+	);
+	expect(handshake.status).toBe(200);
+	const card = await app.request(
+		"/mcp",
+		{ headers: { accept: "text/html", "user-agent": "Mozilla/5.0" } },
+		env,
+		ctx,
+	);
+	expect(card.status).toBe(200);
+	await Promise.all(waited);
+	expect(calls.map((dp) => [dp.indexes?.[0], dp.blobs?.[0]])).toEqual([
+		["yes", "call"],
+		["no", "bot-call"],
+		["no", "other"],
+		["no", "card"],
+	]);
+	expect(JSON.stringify(calls)).not.toContain(hash);
+});
+
 // --- POST /t: client click-through telemetry ---
 
 type DataPoint = { indexes?: unknown[]; blobs?: unknown[]; doubles?: unknown[] };

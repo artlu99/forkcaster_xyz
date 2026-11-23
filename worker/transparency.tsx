@@ -239,6 +239,8 @@ export function transparencyJson(
 					"1 anonymous datapoint per client selection: client id, choice type (explicit pick vs auto-open), transport, coarse device class, which surface (cast, profile, or feed page), host. No cast IDs, no IPs, no identifiers. Raw rows expire in <=90 days.",
 				fidRace:
 					"1 anonymous datapoint per author-id lookup that settles: which source won (the site's own reader vs the public node), how fast, which node, host. No cast IDs, no IPs, no identifiers.",
+				mcpUse:
+					"1 anonymous datapoint per /mcp request: yes only when get_cast_link is invoked by a caller that did not name itself as a bot, crawler, or probe. No cast IDs, no IPs, no user-agent string. The site name is included.",
 			},
 			cookies:
 				"fc_client only — remembers your last-used app for casts, profiles, and feeds separately, whether auto-open is on, and the delay (0–5s). Host-only, 1 year.",
@@ -388,6 +390,7 @@ export function renderTransparencyHtml(
 <ul>
 <li>Each page view sends one anonymous count: the data source that answered first, the response time, and the site name. No cast IDs. No IP addresses. No accounts. No ads.</li>
 <li>Each click on an app link sends one anonymous count: the app name, click or automatic open, website or app, phone or computer, the page type, and the site name. No cast IDs. No IP addresses. No other identifiers.</li>
+<li>Each request to <code>/mcp</code> sends one anonymous count. It is a yes only when the cast-link tool is called by someone who did not name themselves as a bot or probe. No cast IDs. No IP addresses. The caller name is not saved. The site name is included.</li>
 <li>We delete the raw counts after 90 days. Only the totals stay.</li>
 <li>One cookie, <code>fc_client</code>: the apps that you used last (casts, profiles, and feeds separately), your auto-open setting, and the wait time (0 to 5 seconds). It stays on this site and never goes to other sites. It expires after one year.</li>
 <li>For a JSON version of this page, add <code>?format=json</code>.</li>
